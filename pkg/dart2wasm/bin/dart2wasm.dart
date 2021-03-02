@@ -28,6 +28,7 @@ import 'package:front_end/src/api_unstable/vm.dart'
 import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart';
 import 'package:kernel/core_types.dart';
+import 'package:kernel/library_index.dart';
 import 'package:kernel/reference_from_index.dart';
 import 'package:kernel/target/changed_structure_notifier.dart';
 import 'package:kernel/target/targets.dart';
@@ -37,7 +38,10 @@ import 'package:kernel/type_environment.dart';
 
 import 'package:vm/kernel_front_end.dart';
 import 'package:vm/target/vm.dart';
+import 'package:vm/transformations/type_flow/analysis.dart';
+import 'package:vm/transformations/type_flow/calls.dart' show DirectSelector;
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
+import 'package:vm/transformations/type_flow/transformer.dart' show TreeShaker;
 
 import 'package:dart2wasm/translator.dart';
 
@@ -104,6 +108,9 @@ class WasmTarget extends Target {
 
   @override
   bool get supportsNewMethodInvocationEncoding => true;
+
+  @override
+  bool isSupportedPragma(String pragmaName) => pragmaName.startsWith("wasm:");
 }
 
 main(List<String> args) async {
@@ -172,10 +179,24 @@ main(List<String> args) async {
   printMember.isExternal = true;
   printMember.function!.body = null;
 
-  if (false)
-    await runGlobalTransformations(
-        target, component, true, false, false, ErrorDetector(),
-        minimalKernel: true);
+  final hierarchy = compilerResult.classHierarchy as ClosedWorldClassHierarchy;
+  final typeFlowAnalysis = TypeFlowAnalysis(
+      target,
+      component,
+      compilerResult.coreTypes,
+      hierarchy,
+      GenericInterfacesInfoImpl(hierarchy),
+      TypeEnvironment(compilerResult.coreTypes, hierarchy),
+      LibraryIndex.all(component),
+      null,
+      null);
+  typeFlowAnalysis.addRawCall(DirectSelector(component.mainMethod));
+  typeFlowAnalysis.process();
+
+  final treeShaker =
+      TreeShaker(component, typeFlowAnalysis, treeShakeWriteOnlyFields: false);
+  treeShaker.transformComponent(component);
+
   final tableSelectorAssigner = new TableSelectorAssigner(component);
 
   print(component.libraries
