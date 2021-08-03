@@ -69,7 +69,7 @@ class WasmTarget extends Target {
       CoreTypes coreTypes,
       ClassHierarchy hierarchy,
       List<Library> libraries,
-      Map<String, String> environmentDefines,
+      Map<String, String>? environmentDefines,
       DiagnosticReporter diagnosticReporter,
       ReferenceFromIndex? referenceFromIndex,
       {void logger(String msg)?,
@@ -86,7 +86,7 @@ class WasmTarget extends Target {
       CoreTypes coreTypes,
       ClassHierarchy hierarchy,
       Procedure procedure,
-      Map<String, String> environmentDefines,
+      Map<String, String>? environmentDefines,
       {void logger(String msg)?}) {
     wasmTrans.transformProcedure(procedure, coreTypes, hierarchy);
   }
@@ -121,6 +121,8 @@ class WasmTarget extends Target {
   @override
   int get enabledLateLowerings => LateLowering.all;
 
+  int get enabledConstructorTearOffLowerings => ConstructorTearOffLowering.all;
+
   @override
   bool get supportsExplicitGetterCalls => true;
 
@@ -132,9 +134,6 @@ class WasmTarget extends Target {
 
   @override
   bool enableNative(Uri uri) => true;
-
-  @override
-  bool get supportsNewMethodInvocationEncoding => true;
 
   @override
   bool isSupportedPragma(String pragmaName) => pragmaName.startsWith("wasm:");
@@ -171,7 +170,7 @@ Never usage(String message) {
   throw message;
 }
 
-main(List<String> args) async {
+Future<int> main(List<String> args) async {
   TranslatorOptions options = TranslatorOptions();
   List<String> nonOptions = [];
   void Function(TranslatorOptions, int)? intOptionFun = null;
@@ -213,26 +212,27 @@ main(List<String> args) async {
     ..environmentDefines = {}
     ..verbose = false;
 
-  CompilerResult compilerResult =
+  CompilerResult? compilerResult =
       await kernelForProgram(mainUri, compilerOptions);
-  Component component = compilerResult.component;
+  if (compilerResult == null) return 1;
+  Component component = compilerResult.component!;
+  CoreTypes coreTypes = compilerResult.coreTypes!;
 
   final hierarchy = compilerResult.classHierarchy as ClosedWorldClassHierarchy;
   final libraryIndex = new LibraryIndex.all(component);
   final typeFlowAnalysis = TypeFlowAnalysis(
       target,
       component,
-      compilerResult.coreTypes,
+      coreTypes,
       hierarchy,
-      GenericInterfacesInfoImpl(hierarchy),
-      TypeEnvironment(compilerResult.coreTypes, hierarchy),
+      GenericInterfacesInfoImpl(coreTypes, hierarchy),
+      TypeEnvironment(coreTypes, hierarchy),
       libraryIndex,
       null,
       null);
-  typeFlowAnalysis.addRawCall(DirectSelector(component.mainMethod));
+  typeFlowAnalysis.addRawCall(DirectSelector(component.mainMethod!));
 
-  CleanupAnnotations(compilerResult.coreTypes, libraryIndex, null)
-      .visitComponent(component);
+  CleanupAnnotations(coreTypes, libraryIndex, null).visitComponent(component);
 
   typeFlowAnalysis.process();
 
@@ -258,11 +258,9 @@ main(List<String> args) async {
           tableSelectorAssigner, unboxingInfo)
       .visitComponent(component);
 
-  var translator = Translator(
-      component,
-      compilerResult.coreTypes,
-      TypeEnvironment(compilerResult.coreTypes, compilerResult.classHierarchy),
-      tableSelectorAssigner,
-      options);
+  var translator = Translator(component, coreTypes,
+      TypeEnvironment(coreTypes, hierarchy), tableSelectorAssigner, options);
   File(output).writeAsBytesSync(translator.translate().encode());
+
+  return 0;
 }

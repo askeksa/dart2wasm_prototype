@@ -1196,7 +1196,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitStaticTearOff(StaticTearOff node, w.ValueType expectedType) {
     translator.constants.instantiateConstant(
-        function, TearOffConstant(node.target), expectedType);
+        function, StaticTearOffConstant(node.target), expectedType);
     return expectedType;
   }
 

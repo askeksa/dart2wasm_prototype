@@ -399,9 +399,9 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
   }
 
   @override
-  w.ValueType visitTearOffConstant(TearOffConstant constant) {
+  w.ValueType visitStaticTearOffConstant(StaticTearOffConstant constant) {
     w.DefinedFunction closureFunction =
-        translator.getTearOffFunction(constant.procedureReference.asProcedure);
+        translator.getTearOffFunction(constant.targetReference.asProcedure);
     int parameterCount = closureFunction.type.inputs.length - 1;
     w.StructType struct = translator.functionStructType(parameterCount);
     w.RefType type = w.RefType.def(struct, nullable: false);

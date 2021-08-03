@@ -11,7 +11,7 @@ class ParameterInfo {
   final Member member;
   int typeParamCount = 0;
   late final List<Constant?> positional;
-  late final Map<String, Constant> named;
+  late final Map<String, Constant?> named;
 
   // Do not access these until the info is complete.
   late final names = named.keys.toList()..sort();
@@ -21,12 +21,12 @@ class ParameterInfo {
 
   int get paramCount => positional.length + named.length;
 
-  static Constant defaultValue(VariableDeclaration param) {
+  static Constant? defaultValue(VariableDeclaration param) {
     Expression? initializer = param.initializer;
     if (initializer is ConstantExpression) {
       return initializer.constant;
     } else if (initializer == null) {
-      return NullConstant();
+      return null;
     } else {
       throw "Non-constant default value";
     }
@@ -75,10 +75,10 @@ class ParameterInfo {
     }
     for (String name in other.named.keys) {
       Constant? value = named[name];
-      Constant otherValue = other.named[name]!;
+      Constant? otherValue = other.named[name];
       if (value == null) {
         named[name] = otherValue;
-      } else {
+      } else if (otherValue != null) {
         if (value != otherValue) {
           print("Mismatching default value for parameter '$name': "
               "${member}: ${value} vs "
