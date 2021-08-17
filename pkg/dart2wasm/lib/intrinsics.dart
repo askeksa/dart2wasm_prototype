@@ -352,10 +352,8 @@ class Intrinsifier {
           b.i32_const(initialIdentityHash);
           codeGen.wrap(length, w.NumType.i64);
           b.i32_wrap_i64();
-          b.rtt_canon(arrayType);
-          b.array_new_default_with_rtt(arrayType);
-          b.global_get(info.rtt);
-          b.struct_new_with_rtt(info.struct);
+          translator.array_new_default(b, arrayType);
+          translator.struct_new(b, info);
           return info.nonNullableType;
         case "writeIntoOneByteString":
           ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
@@ -384,10 +382,8 @@ class Intrinsifier {
           b.i32_const(initialIdentityHash);
           codeGen.wrap(length, w.NumType.i64);
           b.i32_wrap_i64();
-          b.rtt_canon(arrayType);
-          b.array_new_default_with_rtt(arrayType);
-          b.global_get(info.rtt);
-          b.struct_new_with_rtt(info.struct);
+          translator.array_new_default(b, arrayType);
+          translator.struct_new(b, info);
           return info.nonNullableType;
         case "writeIntoTwoByteString":
           ClassInfo info = translator.classInfo[translator.twoByteStringClass]!;
@@ -437,8 +433,7 @@ class Intrinsifier {
       codeGen.wrap(length, w.NumType.i64);
       // TODO: Support filling with other than default value
       b.i32_wrap_i64();
-      b.rtt_canon(arrayType);
-      b.array_new_default_with_rtt(arrayType);
+      translator.array_new_default(b, arrayType);
       return w.RefType.def(arrayType, nullable: false);
     }
   }
@@ -473,8 +468,7 @@ class Intrinsifier {
       b.global_get(translator.constants.emptyTypeList);
       translator.convertType(function,
           translator.constants.emptyTypeList.type.type, typeListExpectedType);
-      b.global_get(info.rtt);
-      b.struct_new_with_rtt(info.struct);
+      translator.struct_new(b, info);
 
       return true;
     }
@@ -498,13 +492,11 @@ class Intrinsifier {
       b.i32_eq();
       b.if_();
       b.local_get(first);
-      b.global_get(boolInfo.rtt);
-      b.ref_cast();
+      translator.ref_cast(b, boolInfo);
       b.struct_get(boolInfo.struct, 1);
       w.Label bothBool = b.block([], [boolInfo.nullableType]);
       b.local_get(second);
-      b.global_get(boolInfo.rtt);
-      b.br_on_cast(bothBool);
+      translator.br_on_cast(b, bothBool, boolInfo);
       b.i32_const(0);
       b.return_();
       b.end();
@@ -519,13 +511,11 @@ class Intrinsifier {
       b.i32_eq();
       b.if_();
       b.local_get(first);
-      b.global_get(intInfo.rtt);
-      b.ref_cast();
+      translator.ref_cast(b, intInfo);
       b.struct_get(intInfo.struct, 1);
       w.Label bothInt = b.block([], [intInfo.nullableType]);
       b.local_get(second);
-      b.global_get(intInfo.rtt);
-      b.br_on_cast(bothInt);
+      translator.br_on_cast(b, bothInt, intInfo);
       b.i32_const(0);
       b.return_();
       b.end();
@@ -540,14 +530,12 @@ class Intrinsifier {
       b.i32_eq();
       b.if_();
       b.local_get(first);
-      b.global_get(doubleInfo.rtt);
-      b.ref_cast();
+      translator.ref_cast(b, doubleInfo);
       b.struct_get(doubleInfo.struct, 1);
       b.i64_reinterpret_f64();
       w.Label bothDouble = b.block([], [doubleInfo.nullableType]);
       b.local_get(second);
-      b.global_get(doubleInfo.rtt);
-      b.br_on_cast(bothDouble);
+      translator.br_on_cast(b, bothDouble, doubleInfo);
       b.i32_const(0);
       b.return_();
       b.end();
@@ -603,8 +591,7 @@ class Intrinsifier {
           ClassInfo intInfo = translator.classInfo[translator.boxedIntClass]!;
           w.Label intArg = b.block([], [intInfo.nonNullableType]);
           b.local_get(function.locals[1]);
-          b.global_get(intInfo.rtt);
-          b.br_on_cast(intArg);
+          translator.br_on_cast(b, intArg, intInfo);
           // double argument
           b.drop();
           b.local_get(function.locals[0]);

@@ -17,7 +17,7 @@ class ClassInfo {
   int classId;
   int depth;
   w.StructType struct;
-  w.DefinedGlobal rtt;
+  late w.DefinedGlobal rtt;
   ClassInfo? superInfo;
   Map<TypeParameter, TypeParameter> typeParameterMatch = {};
   late ClassInfo repr;
@@ -29,7 +29,11 @@ class ClassInfo {
   w.RefType typeWithNullability(bool nullable) =>
       nullable ? nullableType : nonNullableType;
 
-  ClassInfo(this.cls, this.classId, this.depth, this.struct, this.rtt) {
+  ClassInfo(this.cls, this.classId, this.depth, this.struct, this.superInfo,
+      ClassInfoCollector coll) {
+    if (coll.options.useRttGlobals) {
+      rtt = coll.makeRtt(struct, superInfo);
+    }
     implementedBy.add(this);
   }
 }
@@ -57,16 +61,17 @@ ClassInfo upperBound(Iterable<ClassInfo> classes) {
 
 class ClassInfoCollector {
   Translator translator;
-  w.Module m;
   int nextClassId = 0;
   late ClassInfo topInfo;
 
-  ClassInfoCollector(this.translator) : m = translator.m;
+  ClassInfoCollector(this.translator);
+
+  w.Module get m => translator.m;
 
   TranslatorOptions get options => translator.options;
 
-  static w.DefinedGlobal makeRtt(
-      w.Module m, w.StructType struct, ClassInfo? superInfo) {
+  w.DefinedGlobal makeRtt(w.StructType struct, ClassInfo? superInfo) {
+    assert(options.useRttGlobals);
     int depth = superInfo != null ? superInfo.depth + 1 : 0;
     final w.DefinedGlobal rtt =
         m.addGlobal(w.GlobalType(w.Rtt(struct, depth), mutable: false));
@@ -83,8 +88,7 @@ class ClassInfoCollector {
 
   void initializeTop() {
     final w.StructType struct = m.addStructType("#Top");
-    final w.DefinedGlobal rtt = makeRtt(m, struct, null);
-    topInfo = ClassInfo(null, nextClassId++, 0, struct, rtt);
+    topInfo = ClassInfo(null, nextClassId++, 0, struct, null, this);
     translator.classes.add(topInfo);
     translator.classForHeapType[w.HeapType.def(struct)] = topInfo;
   }
@@ -98,9 +102,8 @@ class ClassInfoCollector {
         final w.StructType struct = options.nominalTypes
             ? m.addStructType(cls.name, superType: superInfo.struct)
             : m.addStructType(cls.name);
-        final w.DefinedGlobal rtt = makeRtt(m, struct, superInfo);
-        info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt)
-          ..superInfo = superInfo;
+        info = ClassInfo(
+            cls, nextClassId++, superInfo.depth + 1, struct, superInfo, this);
         // Mark Top type as implementing Object to force the representation
         // type of Object to be Top.
         info.implementedBy.add(topInfo);
@@ -140,14 +143,13 @@ class ClassInfoCollector {
         bool canReuseSuperStruct =
             typeParameterMatch.length == cls.typeParameters.length &&
                 cls.fields.where((f) => f.isInstanceMember).isEmpty;
-        w.StructType struct = options.nominalTypes
-            ? m.addStructType(cls.name, superType: superInfo.struct)
-            : canReuseSuperStruct
-                ? superInfo.struct
+        w.StructType struct = canReuseSuperStruct
+            ? superInfo.struct
+            : options.nominalTypes
+                ? m.addStructType(cls.name, superType: superInfo.struct)
                 : m.addStructType(cls.name);
-        final w.DefinedGlobal rtt = makeRtt(m, struct, superInfo);
-        info = ClassInfo(cls, nextClassId++, superInfo.depth + 1, struct, rtt)
-          ..superInfo = superInfo
+        info = ClassInfo(
+            cls, nextClassId++, superInfo.depth + 1, struct, superInfo, this)
           ..typeParameterMatch = typeParameterMatch;
         for (Supertype interface in cls.implementedTypes) {
           ClassInfo? interfaceInfo = translator.classInfo[interface.classNode];

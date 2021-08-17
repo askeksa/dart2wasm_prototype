@@ -58,10 +58,8 @@ class Constants {
     b.i32_const(info.classId);
     b.i32_const(initialIdentityHash);
     b.i32_const(0);
-    b.rtt_canon(arrayType);
-    b.array_new_default_with_rtt(arrayType);
-    b.global_get(info.rtt);
-    b.struct_new_with_rtt(info.struct);
+    translator.array_new_default(b, arrayType);
+    translator.struct_new(b, info);
     b.global_set(emptyString);
   }
 
@@ -84,10 +82,8 @@ class Constants {
     b.ref_null(w.HeapType.def(typeInfo.struct)); // Initialized later
     b.i64_const(0);
     b.i32_const(0);
-    b.rtt_canon(arrayType);
-    b.array_new_default_with_rtt(arrayType);
-    b.global_get(info.rtt);
-    b.struct_new_with_rtt(info.struct);
+    translator.array_new_default(b, arrayType);
+    translator.struct_new(b, info);
     b.global_set(emptyTypeList);
 
     // Initialize the type parameter of the empty type list to the type object
@@ -152,8 +148,7 @@ class Constants {
 
     w.Instructions b = function.body;
     b.local_get(length);
-    b.rtt_canon(arrayType);
-    b.array_new_default_with_rtt(arrayType);
+    translator.array_new_default(b, arrayType);
     b.local_set(array);
 
     b.i32_const(0);
@@ -178,8 +173,7 @@ class Constants {
     b.i32_const(info.classId);
     b.i32_const(initialIdentityHash);
     b.local_get(array);
-    b.global_get(info.rtt);
-    b.struct_new_with_rtt(info.struct);
+    translator.struct_new(b, info);
     b.end();
   }
 
@@ -350,8 +344,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
         constants.instantiateConstant(
             function, subConstant, info.struct.fields[i].type.unpacked);
       }
-      b.global_get(info.rtt);
-      b.struct_new_with_rtt(info.struct);
+      translator.struct_new(b, info);
     });
     return type;
   }
@@ -378,8 +371,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
           constants.typeInfo.nullableType);
       b.i64_const(length);
       b.i32_const(length);
-      b.rtt_canon(arrayType);
-      b.array_new_default_with_rtt(arrayType);
+      translator.array_new_default(b, arrayType);
       b.local_set(arrayLocal);
       for (int i = 0; i < length; i++) {
         b.local_get(arrayLocal);
@@ -392,8 +384,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
       if (arrayLocal.type.nullable) {
         b.ref_as_non_null();
       }
-      b.global_get(info.rtt);
-      b.struct_new_with_rtt(info.struct);
+      translator.struct_new(b, info);
     });
     return type;
   }
@@ -408,17 +399,14 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
     instantiateLazyConstant(constant, type, (function) {
       w.DefinedGlobal global = translator.makeFunctionRef(closureFunction);
       ClassInfo info = translator.classInfo[translator.functionClass]!;
-      w.DefinedGlobal rtt = translator.functionTypeRtt[parameterCount]!;
 
       w.Instructions b = function.body;
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
       // TODO: Put dummy context in global variable
-      b.rtt_canon(translator.dummyContext);
-      b.struct_new_with_rtt(translator.dummyContext);
+      translator.struct_new(b, translator.dummyContext);
       b.global_get(global);
-      b.global_get(rtt);
-      b.struct_new_with_rtt(struct);
+      translator.struct_new(b, parameterCount);
     });
     return type;
   }
@@ -455,8 +443,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
             type.typeArguments.map((t) => TypeLiteralConstant(t)).toList());
         constants.instantiateConstant(function, typeArgs, typeListExpectedType);
       }
-      b.global_get(info.rtt);
-      b.struct_new_with_rtt(info.struct);
+      translator.struct_new(b, info);
     });
     return info.nonNullableType;
   }

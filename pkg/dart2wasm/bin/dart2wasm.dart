@@ -149,6 +149,7 @@ final Map<String, void Function(TranslatorOptions, bool)> boolOptionMap = {
       o.polymorphicSpecialization = value,
   "print-kernel": (o, value) => o.printKernel = value,
   "print-wasm": (o, value) => o.printWasm = value,
+  "runtime-types": (o, value) => o.runtimeTypes = value,
   "stub-bodies": (o, value) => o.stubBodies = value,
 };
 final Map<String, void Function(TranslatorOptions, int)> intOptionMap = {

@@ -346,9 +346,11 @@ class DefHeapType extends HeapType {
 
 abstract class DefType implements Serializable {
   int? _index;
-  DefType? superType;
+  final DefType? superType;
+  final int depth;
 
-  DefType({this.superType});
+  DefType({this.superType})
+      : depth = superType == null ? 0 : superType.depth + 1;
 
   int get index => _index ?? (throw "$runtimeType $this not added to module");
   set index(int i) => _index = i;

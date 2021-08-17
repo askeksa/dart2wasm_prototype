@@ -32,8 +32,11 @@ class TranslatorOptions {
   bool polymorphicSpecialization = false;
   bool printKernel = false;
   bool printWasm = false;
+  bool runtimeTypes = true;
   bool stubBodies = false;
   List<int>? watchPoints = null;
+
+  bool get useRttGlobals => runtimeTypes && !nominalTypes;
 }
 
 typedef CodeGenCallback = void Function(w.Instructions);
@@ -70,6 +73,7 @@ class Translator {
   late final Map<Class, w.StorageType> builtinTypes;
   late final Map<w.ValueType, Class> boxedClasses;
 
+  late final ClassInfoCollector classInfoCollector;
   late final DispatchTable dispatchTable;
   late final Globals globals;
   late final Constants constants;
@@ -103,6 +107,7 @@ class Translator {
         hierarchy =
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
     subtypes = hierarchy.computeSubtypesInformation();
+    classInfoCollector = ClassInfoCollector(this);
     dispatchTable = DispatchTable(this);
     functions = FunctionCollector(this);
 
@@ -173,7 +178,7 @@ class Translator {
     voidMarker = w.RefType.def(w.StructType("void"), nullable: true);
     dummyContext = m.addStructType("<context>");
 
-    ClassInfoCollector(this).collect();
+    classInfoCollector.collect();
     functions.collectImports();
     initFunction = m.addFunction(m.addFunctionType([], []));
     m.startFunction = initFunction;
@@ -378,8 +383,10 @@ class Translator {
       struct.fields.add(w.FieldType(
           w.RefType.def(functionType(parameterCount), nullable: false),
           mutable: false));
-      functionTypeRtt[parameterCount] =
-          ClassInfoCollector.makeRtt(m, struct, info);
+      if (options.useRttGlobals) {
+        functionTypeRtt[parameterCount] =
+            classInfoCollector.makeRtt(struct, info);
+      }
       functionTypeParameterCount[struct] = parameterCount;
       return struct;
     });
@@ -494,15 +501,13 @@ class Translator {
         b.local_set(temp);
         b.i32_const(info.classId);
         b.local_get(temp);
-        b.global_get(info.rtt);
-        b.struct_new_with_rtt(info.struct);
+        struct_new(b, info);
       } else if (from is w.RefType && to is! w.RefType) {
         // Unboxing
         ClassInfo info = classInfo[boxedClasses[to]!]!;
         if (!from.heapType.isSubtypeOf(w.HeapType.def(info.struct))) {
           // Cast to box type
-          b.global_get(info.rtt);
-          b.ref_cast();
+          ref_cast(b, info);
         }
         b.struct_get(info.struct, 1);
       } else if (from.withNullability(false).isSubtypeOf(to)) {
@@ -512,14 +517,10 @@ class Translator {
         // Downcast
         var heapType = (to as w.RefType).heapType;
         ClassInfo? info = classForHeapType[heapType];
-        w.Global global = info != null
-            ? info.rtt
-            : functionTypeRtt[parameterCountForFunctionStruct(heapType)]!;
         if (from.nullable && !to.nullable) {
           b.ref_as_non_null();
         }
-        b.global_get(global);
-        b.ref_cast();
+        ref_cast(b, info ?? parameterCountForFunctionStruct(heapType));
       }
     }
   }
@@ -557,6 +558,115 @@ class Translator {
     Statement? body = member.function!.body;
     return body != null && NodeCounter().countNodes(body) < 4;
   }
+
+  // Wrappers for object allocation and cast instructions to abstract over
+  // RTT-based and static versions of the instructions.
+  // The [type] parameter taken by the methods is either a [ClassInfo] (to use
+  // the RTT for the class), an [int] (to use the RTT for the closure struct
+  // corresponding to functions with that number of parameters) or a
+  // [w.DataType] (to use the canonical RTT for the type).
+
+  void struct_new(w.Instructions b, Object type) {
+    if (options.runtimeTypes) {
+      final struct = _emitRtt(b, type) as w.StructType;
+      b.struct_new_with_rtt(struct);
+    } else {
+      b.struct_new(_targetType(type) as w.StructType);
+    }
+  }
+
+  void struct_new_default(w.Instructions b, Object type) {
+    if (options.runtimeTypes) {
+      final struct = _emitRtt(b, type) as w.StructType;
+      b.struct_new_default_with_rtt(struct);
+    } else {
+      b.struct_new_default(_targetType(type) as w.StructType);
+    }
+  }
+
+  void array_new(w.Instructions b, w.ArrayType type) {
+    if (options.runtimeTypes) {
+      b.rtt_canon(type);
+      b.array_new_with_rtt(type);
+    } else {
+      b.array_new(type);
+    }
+  }
+
+  void array_new_default(w.Instructions b, w.ArrayType type) {
+    if (options.runtimeTypes) {
+      b.rtt_canon(type);
+      b.array_new_default_with_rtt(type);
+    } else {
+      b.array_new_default(type);
+    }
+  }
+
+  void ref_test(w.Instructions b, Object type) {
+    if (options.runtimeTypes) {
+      _emitRtt(b, type);
+      b.ref_test();
+    } else {
+      b.ref_test_static(_targetType(type));
+    }
+  }
+
+  void ref_cast(w.Instructions b, Object type) {
+    if (options.runtimeTypes) {
+      _emitRtt(b, type);
+      b.ref_cast();
+    } else {
+      b.ref_cast_static(_targetType(type));
+    }
+  }
+
+  void br_on_cast(w.Instructions b, w.Label label, Object type) {
+    if (options.runtimeTypes) {
+      _emitRtt(b, type);
+      b.br_on_cast(label);
+    } else {
+      b.br_on_cast_static(label, _targetType(type));
+    }
+  }
+
+  void br_on_cast_fail(w.Instructions b, w.Label label, Object type) {
+    if (options.runtimeTypes) {
+      _emitRtt(b, type);
+      b.br_on_cast_fail(label);
+    } else {
+      b.br_on_cast_static_fail(label, _targetType(type));
+    }
+  }
+
+  w.DefType _emitRtt(w.Instructions b, Object type) {
+    if (type is ClassInfo) {
+      if (options.nominalTypes) {
+        b.rtt_canon(type.struct);
+      } else {
+        b.global_get(type.rtt);
+      }
+      return type.struct;
+    } else if (type is int) {
+      int parameterCount = type;
+      w.StructType struct = functionStructType(parameterCount);
+      if (options.nominalTypes) {
+        b.rtt_canon(struct);
+      } else {
+        w.DefinedGlobal rtt = functionTypeRtt[parameterCount]!;
+        b.global_get(rtt);
+      }
+      return struct;
+    } else {
+      b.rtt_canon(type as w.DataType);
+      return type;
+    }
+  }
+
+  w.DefType _targetType(Object type) => type is ClassInfo
+      ? type.struct
+      : type is int
+          ? functionStructType(type)
+          : type as w.DefType;
 }
 
 class NodeCounter extends Visitor<void> with VisitorVoidMixin {

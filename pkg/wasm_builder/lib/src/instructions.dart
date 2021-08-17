@@ -774,6 +774,21 @@ class Instructions with SerializerMixin {
     writeUnsigned(fieldIndex);
   }
 
+  void struct_new(StructType structType) {
+    assert(_verifyTypes([...structType.fields.map((f) => f.type.unpacked)],
+        [RefType.def(structType, nullable: false)],
+        trace: ['struct.new', structType]));
+    writeBytes(const [0xFB, 0x07]);
+    writeUnsigned(structType.index);
+  }
+
+  void struct_new_default(StructType structType) {
+    assert(_verifyTypes(const [], [RefType.def(structType, nullable: false)],
+        trace: ['struct.new_default', structType]));
+    writeBytes(const [0xFB, 0x08]);
+    writeUnsigned(structType.index);
+  }
+
   void array_new_with_rtt(ArrayType arrayType) {
     assert(_verifyTypes(
         [arrayType.elementType.type.unpacked, NumType.i32, Rtt(arrayType)],
@@ -839,6 +854,22 @@ class Instructions with SerializerMixin {
     writeUnsigned(arrayType.index);
   }
 
+  void array_new(ArrayType arrayType) {
+    assert(_verifyTypes([arrayType.elementType.type.unpacked, NumType.i32],
+        [RefType.def(arrayType, nullable: false)],
+        trace: ['array.new', arrayType]));
+    writeBytes(const [0xFB, 0x1b]);
+    writeUnsigned(arrayType.index);
+  }
+
+  void array_new_default(ArrayType arrayType) {
+    assert(_verifyTypes(
+        [NumType.i32], [RefType.def(arrayType, nullable: false)],
+        trace: ['array.new_default', arrayType]));
+    writeBytes(const [0xFB, 0x1c]);
+    writeUnsigned(arrayType.index);
+  }
+
   void i31_new() {
     assert(_verifyTypes(const [NumType.i32], const [RefType.i31()],
         trace: const ['i31.new']));
@@ -858,7 +889,7 @@ class Instructions with SerializerMixin {
   }
 
   void rtt_canon(DataType dataType) {
-    assert(_verifyTypes(const [], [Rtt(dataType, 0)],
+    assert(_verifyTypes(const [], [Rtt(dataType, dataType.depth)],
         trace: ['rtt.canon', dataType]));
     writeBytes(const [0xFB, 0x30]);
     writeSigned(dataType.index);
@@ -936,6 +967,54 @@ class Instructions with SerializerMixin {
         trace: ['br_on_cast_fail', label]));
     writeBytes(const [0xFB, 0x43]);
     _writeLabel(label);
+  }
+
+  bool _verifyCastStatic(List<ValueType> Function(List<ValueType>) outputsFun,
+      {List<Object>? trace}) {
+    if (!reachable) {
+      return _debugTrace(trace, reachableAfter: false);
+    }
+    final ValueType value = _topOfStack;
+    if (!value.isSubtypeOf(const RefType.data(nullable: true)) &&
+        !value.isSubtypeOf(const RefType.func(nullable: true))) {
+      _reportError("Expected [data or func], but stack contained [$value]");
+    }
+    return _verifyTypesFun([value], outputsFun, trace: trace);
+  }
+
+  void ref_test_static(DefType targetType) {
+    assert(_verifyCastStatic((_) => const [NumType.i32],
+        trace: ['ref.test_static', targetType]));
+    writeBytes(const [0xFB, 0x44]);
+    writeSigned(targetType.index);
+  }
+
+  void ref_cast_static(DefType targetType) {
+    assert(_verifyCastStatic(
+        (inputs) => [RefType.def(targetType, nullable: inputs[0].nullable)],
+        trace: ['ref.cast_static', targetType]));
+    writeBytes(const [0xFB, 0x45]);
+    writeSigned(targetType.index);
+  }
+
+  void br_on_cast_static(Label label, DefType targetType) {
+    assert(_verifyCastStatic((inputs) {
+      return [inputs[0]];
+    }, trace: ['br_on_cast_static', label, targetType]));
+    assert(_verifyBranchTypes(
+        label, 1, [RefType.def(targetType, nullable: false)]));
+    writeBytes(const [0xFB, 0x46]);
+    _writeLabel(label);
+    writeSigned(targetType.index);
+  }
+
+  void br_on_cast_static_fail(Label label, DefType targetType) {
+    assert(_verifyBranchTypes(label, 1, [_topOfStack]));
+    assert(_verifyCast((inputs) => [RefType.def(targetType, nullable: false)],
+        trace: ['br_on_cast_static_fail', label, targetType]));
+    writeBytes(const [0xFB, 0x47]);
+    _writeLabel(label);
+    writeSigned(targetType.index);
   }
 
   void ref_is_func() {
