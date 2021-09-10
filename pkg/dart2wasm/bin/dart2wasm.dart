@@ -5,25 +5,7 @@
 import 'dart:io';
 
 import 'package:front_end/src/api_unstable/vm.dart'
-    show
-        CompilerContext,
-        CompilerOptions,
-        CompilerResult,
-        DiagnosticMessage,
-        DiagnosticMessageHandler,
-        ExperimentalFlag,
-        FileSystem,
-        FileSystemEntity,
-        NnbdMode,
-        ProcessedOptions,
-        Severity,
-        StandardFileSystem,
-        getMessageUri,
-        kernelForProgram,
-        parseExperimentalArguments,
-        parseExperimentalFlags,
-        printDiagnosticMessage,
-        resolveInputUri;
+    show CompilerOptions, CompilerResult, kernelForProgram, resolveInputUri;
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart';
@@ -36,11 +18,8 @@ import 'package:kernel/transformations/mixin_full_resolution.dart'
     as transformMixins show transformLibraries;
 import 'package:kernel/type_environment.dart';
 
-import 'package:vm/kernel_front_end.dart';
 import 'package:vm/transformations/type_flow/analysis.dart';
 import 'package:vm/transformations/type_flow/calls.dart' show DirectSelector;
-import 'package:vm/transformations/lowering.dart' as lowering
-    show transformLibraries, transformProcedure;
 import 'package:vm/transformations/type_flow/signature_shaking.dart';
 import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 import 'package:vm/transformations/type_flow/transformer.dart'
