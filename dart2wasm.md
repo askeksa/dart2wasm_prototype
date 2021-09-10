@@ -18,7 +18,7 @@ You don't need to build the Dart SDK to run the prototype, as long as you have a
 
 To compile a Dart file to Wasm, run:
 
-`dart --no-sound-null-safety --enable-asserts pkg/dart2wasm/bin/dart2wasm.dart` *options* *infile*`.dart` *outfile*`.wasm`
+`dart --enable-asserts pkg/dart2wasm/bin/dart2wasm.dart` *options* *infile*`.dart` *outfile*`.wasm`
 
 where *options* include:
 

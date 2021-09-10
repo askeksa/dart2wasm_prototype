@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 @pragma("wasm:entry-point")
-class _Function extends Function {
+class _Function {
   // TODO: Make non-nullable
   @pragma("wasm:entry-point")
   WasmDataRef context;
