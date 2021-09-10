@@ -35,8 +35,6 @@ import 'package:kernel/target/targets.dart';
 import 'package:kernel/transformations/mixin_full_resolution.dart'
     as transformMixins show transformLibraries;
 import 'package:kernel/type_environment.dart';
-import 'package:kernel/vm/constants_native_effects.dart'
-    show VmConstantsBackend;
 
 import 'package:vm/kernel_front_end.dart';
 import 'package:vm/transformations/type_flow/analysis.dart';
@@ -49,6 +47,7 @@ import 'package:vm/transformations/type_flow/transformer.dart'
     show CleanupAnnotations, AnnotateKernel, TFADevirtualization, TreeShaker;
 import 'package:vm/transformations/type_flow/unboxing_info.dart';
 
+import 'package:dart2wasm/constants_backend.dart';
 import 'package:dart2wasm/transformers.dart' as wasmTrans;
 import 'package:dart2wasm/translator.dart';
 
@@ -93,7 +92,7 @@ class WasmTarget extends Target {
 
   @override
   ConstantsBackend constantsBackend(CoreTypes coreTypes) =>
-      VmConstantsBackend(coreTypes);
+      WasmConstantsBackend(coreTypes);
 
   Expression instantiateInvocation(CoreTypes coreTypes, Expression receiver,
       String name, Arguments arguments, int offset, bool isSuper) {
