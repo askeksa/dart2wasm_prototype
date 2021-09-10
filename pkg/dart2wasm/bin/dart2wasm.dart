@@ -32,6 +32,9 @@ import 'package:dart2wasm/translator.dart';
 
 class WasmTarget extends Target {
   @override
+  late final ConstantsBackend constantsBackend;
+
+  @override
   String get name => 'wasm';
 
   TargetFlags get flags => TargetFlags(enableNullSafety: true);
@@ -40,6 +43,17 @@ class WasmTarget extends Target {
   List<String> get extraIndexedLibraries => const <String>[
         "dart:collection",
       ];
+
+  @override
+  void performPreConstantEvaluationTransformations(
+      Component component,
+      CoreTypes coreTypes,
+      List<Library> libraries,
+      DiagnosticReporter diagnosticReporter,
+      {void Function(String msg)? logger,
+      ChangedStructureNotifier? changedStructureNotifier}) {
+    constantsBackend = WasmConstantsBackend(coreTypes);
+  }
 
   @override
   void performModularTransformationsOnLibraries(
@@ -68,10 +82,6 @@ class WasmTarget extends Target {
       {void logger(String msg)?}) {
     wasmTrans.transformProcedure(procedure, coreTypes, hierarchy);
   }
-
-  @override
-  ConstantsBackend constantsBackend(CoreTypes coreTypes) =>
-      WasmConstantsBackend(coreTypes);
 
   Expression instantiateInvocation(CoreTypes coreTypes, Expression receiver,
       String name, Arguments arguments, int offset, bool isSuper) {

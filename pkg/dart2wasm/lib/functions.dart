@@ -34,7 +34,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   }
 
   void _import(Procedure procedure) {
-    String? externalName = getExternalName(procedure);
+    String? externalName = getExternalName(translator.coreTypes, procedure);
     if (externalName != null) {
       int dot = externalName.indexOf('.');
       if (dot != -1) {
