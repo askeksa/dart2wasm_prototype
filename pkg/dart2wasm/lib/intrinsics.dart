@@ -12,14 +12,83 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class Intrinsifier {
   final CodeGenerator codeGen;
-  final w.ValueType boolType;
-  final w.ValueType intType;
-  final w.ValueType doubleType;
+  static const w.ValueType boolType = w.NumType.i32;
+  static const w.ValueType intType = w.NumType.i64;
+  static const w.ValueType doubleType = w.NumType.f64;
 
-  late final Map<w.ValueType, Map<String, Map<w.ValueType, CodeGenCallback>>>
-      binaryOperatorMap;
-  late final Map<w.ValueType, Map<String, CodeGenCallback>> unaryOperatorMap;
-  late final Map<String, w.ValueType> unaryResultMap;
+  static final Map<w.ValueType, Map<String, Map<w.ValueType, CodeGenCallback>>>
+      binaryOperatorMap = {
+    intType: {
+      '+': {intType: (b) => b.i64_add()},
+      '-': {intType: (b) => b.i64_sub()},
+      '*': {intType: (b) => b.i64_mul()},
+      '~/': {intType: (b) => b.i64_div_s()},
+      '&': {intType: (b) => b.i64_and()},
+      '|': {intType: (b) => b.i64_or()},
+      '^': {intType: (b) => b.i64_xor()},
+      '<<': {intType: (b) => b.i64_shl()},
+      '>>': {intType: (b) => b.i64_shr_s()},
+      '>>>': {intType: (b) => b.i64_shr_u()},
+      '<': {intType: (b) => b.i64_lt_s()},
+      '<=': {intType: (b) => b.i64_le_s()},
+      '>': {intType: (b) => b.i64_gt_s()},
+      '>=': {intType: (b) => b.i64_ge_s()},
+    },
+    doubleType: {
+      '+': {doubleType: (b) => b.f64_add()},
+      '-': {doubleType: (b) => b.f64_sub()},
+      '*': {doubleType: (b) => b.f64_mul()},
+      '/': {doubleType: (b) => b.f64_div()},
+      '<': {doubleType: (b) => b.f64_lt()},
+      '<=': {doubleType: (b) => b.f64_le()},
+      '>': {doubleType: (b) => b.f64_gt()},
+      '>=': {doubleType: (b) => b.f64_ge()},
+    }
+  };
+  static final Map<w.ValueType, Map<String, CodeGenCallback>> unaryOperatorMap =
+      {
+    intType: {
+      'unary-': (b) {
+        b.i64_const(-1);
+        b.i64_mul();
+      },
+      '~': (b) {
+        b.i64_const(-1);
+        b.i64_xor();
+      },
+      'toDouble': (b) {
+        b.f64_convert_i64_s();
+      },
+    },
+    doubleType: {
+      'unary-': (b) {
+        b.f64_neg();
+      },
+      'toInt': (b) {
+        b.i64_trunc_sat_f64_s();
+      },
+      'roundToDouble': (b) {
+        b.f64_nearest();
+      },
+      'floorToDouble': (b) {
+        b.f64_floor();
+      },
+      'ceilToDouble': (b) {
+        b.f64_ceil();
+      },
+      'truncateToDouble': (b) {
+        b.f64_trunc();
+      },
+    },
+  };
+  static final Map<String, w.ValueType> unaryResultMap = {
+    'toDouble': w.NumType.f64,
+    'toInt': w.NumType.i64,
+    'roundToDouble': w.NumType.f64,
+    'floorToDouble': w.NumType.f64,
+    'ceilToDouble': w.NumType.f64,
+    'truncateToDouble': w.NumType.f64,
+  };
 
   Translator get translator => codeGen.translator;
   w.Instructions get b => codeGen.b;
@@ -35,84 +104,7 @@ class Intrinsifier {
   static bool isComparison(String op) =>
       op == '<' || op == '<=' || op == '>' || op == '>=';
 
-  Intrinsifier(this.codeGen)
-      : boolType = w.NumType.i32,
-        intType = w.NumType.i64,
-        doubleType = w.NumType.f64 {
-    binaryOperatorMap = {
-      intType: {
-        '+': {intType: (b) => b.i64_add()},
-        '-': {intType: (b) => b.i64_sub()},
-        '*': {intType: (b) => b.i64_mul()},
-        '~/': {intType: (b) => b.i64_div_s()},
-        '&': {intType: (b) => b.i64_and()},
-        '|': {intType: (b) => b.i64_or()},
-        '^': {intType: (b) => b.i64_xor()},
-        '<<': {intType: (b) => b.i64_shl()},
-        '>>': {intType: (b) => b.i64_shr_s()},
-        '>>>': {intType: (b) => b.i64_shr_u()},
-        '<': {intType: (b) => b.i64_lt_s()},
-        '<=': {intType: (b) => b.i64_le_s()},
-        '>': {intType: (b) => b.i64_gt_s()},
-        '>=': {intType: (b) => b.i64_ge_s()},
-      },
-      doubleType: {
-        '+': {doubleType: (b) => b.f64_add()},
-        '-': {doubleType: (b) => b.f64_sub()},
-        '*': {doubleType: (b) => b.f64_mul()},
-        '/': {doubleType: (b) => b.f64_div()},
-        '<': {doubleType: (b) => b.f64_lt()},
-        '<=': {doubleType: (b) => b.f64_le()},
-        '>': {doubleType: (b) => b.f64_gt()},
-        '>=': {doubleType: (b) => b.f64_ge()},
-      }
-    };
-
-    unaryOperatorMap = {
-      intType: {
-        'unary-': (b) {
-          b.i64_const(-1);
-          b.i64_mul();
-        },
-        '~': (b) {
-          b.i64_const(-1);
-          b.i64_xor();
-        },
-        'toDouble': (b) {
-          b.f64_convert_i64_s();
-        },
-      },
-      doubleType: {
-        'unary-': (b) {
-          b.f64_neg();
-        },
-        'toInt': (b) {
-          b.i64_trunc_sat_f64_s();
-        },
-        'roundToDouble': (b) {
-          b.f64_nearest();
-        },
-        'floorToDouble': (b) {
-          b.f64_floor();
-        },
-        'ceilToDouble': (b) {
-          b.f64_ceil();
-        },
-        'truncateToDouble': (b) {
-          b.f64_trunc();
-        },
-      },
-    };
-
-    unaryResultMap = {
-      'toDouble': w.NumType.f64,
-      'toInt': w.NumType.i64,
-      'roundToDouble': w.NumType.f64,
-      'floorToDouble': w.NumType.f64,
-      'ceilToDouble': w.NumType.f64,
-      'truncateToDouble': w.NumType.f64,
-    };
-  }
+  Intrinsifier(this.codeGen);
 
   w.ValueType? generateInstanceGetterIntrinsic(InstanceGet node) {
     DartType receiverType = dartTypeOf(node.receiver);

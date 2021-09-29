@@ -197,7 +197,6 @@ class Translator {
           "Warning: main returns a reference type. JS embedding may complain.");
     }
 
-    var codeGen = CodeGenerator(this);
     while (functions.pending.isNotEmpty) {
       Reference reference = functions.pending.removeLast();
       Member member = reference.asMember;
@@ -245,7 +244,8 @@ class Translator {
       if (member == mainFunction || options.exportAll) {
         m.exportFunction(exportName, function);
       }
-      codeGen.generate(reference, function, function.locals);
+      var codeGen = CodeGenerator(this, function, reference);
+      codeGen.generate();
 
       if (options.printWasm) {
         print(function.type);
@@ -253,7 +253,8 @@ class Translator {
       }
 
       for (Lambda lambda in codeGen.closures.lambdas.values) {
-        codeGen.generateLambda(lambda);
+        CodeGenerator(this, lambda.function, reference)
+            .generateLambda(lambda, codeGen.closures);
         _printFunction(lambda.function, "$exportName (closure)");
       }
     }

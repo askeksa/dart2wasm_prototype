@@ -19,15 +19,14 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     implements InitializerVisitor<void>, StatementVisitor<void> {
   final Translator translator;
-  final w.ValueType voidMarker;
-  late final Intrinsifier intrinsifier;
+  final w.DefinedFunction function;
+  final Reference reference;
+  late final List<w.Local> paramLocals;
+  final w.Label? returnLabel;
 
-  late Member member;
-  late w.DefinedFunction function;
-  late StaticTypeContext typeContext;
-  late List<w.Local> paramLocals;
-  w.Label? returnLabel;
-  late w.ValueType returnType;
+  late final Intrinsifier intrinsifier;
+  late final StaticTypeContext typeContext;
+  late final w.Instructions b;
 
   late Closures closures;
 
@@ -39,13 +38,22 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   Map<LabeledStatement, w.Label> labels = {};
   Map<SwitchCase, w.Label> switchLabels = {};
 
-  late w.Instructions b;
-
-  CodeGenerator(this.translator) : voidMarker = translator.voidMarker {
+  CodeGenerator(this.translator, this.function, this.reference,
+      {List<w.Local>? paramLocals, this.returnLabel}) {
+    this.paramLocals = paramLocals ?? function.locals;
     intrinsifier = Intrinsifier(this);
+    typeContext = StaticTypeContext(member, translator.typeEnvironment);
+    b = function.body;
   }
 
+  Member get member => reference.asMember;
+
+  w.ValueType get returnType => translator
+      .outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
+
   TranslatorOptions get options => translator.options;
+
+  w.ValueType get voidMarker => translator.voidMarker;
 
   w.ValueType translateType(DartType type) => translator.translateType(type);
 
@@ -77,15 +85,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     _unimplemented(node, node.runtimeType, []);
   }
 
-  void generate(Reference reference, w.DefinedFunction function,
-      List<w.Local> paramLocals,
-      {w.Label? returnLabel}) {
+  void generate() {
     closures = Closures(this);
 
-    Member member = reference.asMember;
-    b = function.body;
+    Member member = this.member;
 
     if (reference.isTearOffReference) {
+      // Tear-off getter
       w.DefinedFunction closureFunction =
           translator.getTearOffFunction(member as Procedure);
 
@@ -118,14 +124,6 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.end();
       return;
     }
-
-    this.member = member;
-    this.function = function;
-    this.paramLocals = paramLocals;
-    this.returnLabel = returnLabel;
-    typeContext = StaticTypeContext(member, translator.typeEnvironment);
-    returnType = translator
-        .outputOrVoid(returnLabel?.targetTypes ?? function.type.outputs);
 
     if (member is Field) {
       // Implicit getter or setter
@@ -194,9 +192,6 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       } else {
         preciseThisLocal = paramLocals[0];
       }
-    } else {
-      thisLocal = null;
-      preciseThisLocal = null;
     }
 
     closures.collectContexts(member);
@@ -246,21 +241,11 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     member.function!.body!.accept(this);
     _implicitReturn();
     b.end();
-
-    locals.clear();
-    typeLocals.clear();
   }
 
-  void generateLambda(Lambda lambda) {
-    function = lambda.function;
-    b = function.body;
-    paramLocals = function.locals;
-    returnType = function.type.outputs.single;
+  void generateLambda(Lambda lambda, Closures closures) {
+    this.closures = closures;
 
-    thisLocal = null;
-    preciseThisLocal = null;
-
-    locals.clear();
     final int implicitParams = 1;
     List<VariableDeclaration> positional =
         lambda.functionNode.positionalParameters;
@@ -379,8 +364,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         b.local_set(local);
       }
       w.Label block = b.block([], targetFunction.type.outputs);
-      CodeGenerator(translator)
-          .generate(target, function, inlinedLocals, returnLabel: block);
+      CodeGenerator(translator, function, target,
+              paramLocals: inlinedLocals, returnLabel: block)
+          .generate();
     } else {
       b.call(targetFunction);
     }
