@@ -264,7 +264,10 @@ class Translator {
     initFunction.body.end();
 
     for (ConstantInfo info in constants.constantInfo.values) {
-      _printFunction(info.function, info.constant);
+      w.DefinedFunction? function = info.function;
+      if (function != null) {
+        _printFunction(function, info.constant);
+      }
     }
     _printFunction(constants.oneByteStringFunction, "makeOneByteString");
     _printFunction(constants.twoByteStringFunction, "makeTwoByteString");
@@ -600,6 +603,15 @@ class Translator {
       b.array_new_default_with_rtt(type);
     } else {
       b.array_new_default(type);
+    }
+  }
+
+  void array_init(w.Instructions b, w.ArrayType type, int length) {
+    if (options.runtimeTypes) {
+      b.rtt_canon(type);
+      b.array_init(type, length);
+    } else {
+      b.array_init_static(type, length);
     }
   }
 

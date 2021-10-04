@@ -1175,7 +1175,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitStaticTearOff(StaticTearOff node, w.ValueType expectedType) {
     translator.constants.instantiateConstant(
-        function, StaticTearOffConstant(node.target), expectedType);
+        function, b, StaticTearOffConstant(node.target), expectedType);
     return expectedType;
   }
 
@@ -1515,7 +1515,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     for (int i = node.positional.length; i < paramInfo.positional.length; i++) {
       final w.ValueType type = signature.inputs[signatureOffset + i];
       translator.constants
-          .instantiateConstant(function, paramInfo.positional[i]!, type);
+          .instantiateConstant(function, b, paramInfo.positional[i]!, type);
     }
     // Named arguments
     final Map<String, w.Local> namedLocals = {};
@@ -1536,7 +1536,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         translator.convertType(function, namedLocal.type, type);
       } else {
         translator.constants
-            .instantiateConstant(function, paramInfo.named[name]!, type);
+            .instantiateConstant(function, b, paramInfo.named[name]!, type);
       }
     }
   }
@@ -1573,21 +1573,21 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitConstantExpression(
       ConstantExpression node, w.ValueType expectedType) {
     translator.constants
-        .instantiateConstant(function, node.constant, expectedType);
+        .instantiateConstant(function, b, node.constant, expectedType);
     return expectedType;
   }
 
   @override
   w.ValueType visitNullLiteral(NullLiteral node, w.ValueType expectedType) {
     translator.constants
-        .instantiateConstant(function, NullConstant(), expectedType);
+        .instantiateConstant(function, b, NullConstant(), expectedType);
     return expectedType;
   }
 
   @override
   w.ValueType visitStringLiteral(StringLiteral node, w.ValueType expectedType) {
     translator.constants.instantiateConstant(
-        function, StringConstant(node.value), expectedType);
+        function, b, StringConstant(node.value), expectedType);
     return expectedType;
   }
 
@@ -1731,7 +1731,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           InterfaceType(translator.typeClass, Nullability.nonNullable),
           type.typeArguments.map((t) => TypeLiteralConstant(t)).toList());
       translator.constants
-          .instantiateConstant(function, typeArgs, typeListExpectedType);
+          .instantiateConstant(function, b, typeArgs, typeListExpectedType);
     } else {
       w.ValueType listType = _makeList(
           type.typeArguments.map((t) => TypeLiteral(t)).toList(),

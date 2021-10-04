@@ -854,6 +854,26 @@ class Instructions with SerializerMixin {
     writeUnsigned(arrayType.index);
   }
 
+  void array_init(ArrayType arrayType, int length) {
+    ValueType elementType = arrayType.elementType.type.unpacked;
+    assert(_verifyTypes([...List.filled(length, elementType), Rtt(arrayType)],
+        [RefType.def(arrayType, nullable: false)],
+        trace: ['array.init', arrayType, length]));
+    writeBytes(const [0xFB, 0x19]);
+    writeUnsigned(arrayType.index);
+    writeUnsigned(length);
+  }
+
+  void array_init_static(ArrayType arrayType, int length) {
+    ValueType elementType = arrayType.elementType.type.unpacked;
+    assert(_verifyTypes([...List.filled(length, elementType)],
+        [RefType.def(arrayType, nullable: false)],
+        trace: ['array.init_static', arrayType, length]));
+    writeBytes(const [0xFB, 0x1a]);
+    writeUnsigned(arrayType.index);
+    writeUnsigned(length);
+  }
+
   void array_new(ArrayType arrayType) {
     assert(_verifyTypes([arrayType.elementType.type.unpacked, NumType.i32],
         [RefType.def(arrayType, nullable: false)],
