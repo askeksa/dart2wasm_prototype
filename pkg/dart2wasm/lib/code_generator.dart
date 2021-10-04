@@ -57,7 +57,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   w.ValueType translateType(DartType type) => translator.translateType(type);
 
-  w.ValueType typeForLocal(w.ValueType type) => translator.typeForLocal(type);
+  w.Local addLocal(w.ValueType type) {
+    return function.addLocal(translator.typeForLocal(type));
+  }
+
+  DartType dartTypeOf(Expression exp) {
+    return exp.getStaticType(typeContext);
+  }
 
   void _unimplemented(
       TreeNode node, Object message, List<w.ValueType> expectedTypes) {
@@ -185,7 +191,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       thisLocal = paramLocals[0];
       w.RefType thisType = info.nonNullableType;
       if (translator.needsConversion(paramLocals[0].type, thisType)) {
-        preciseThisLocal = function.addLocal(typeForLocal(thisType));
+        preciseThisLocal = addLocal(thisType);
         b.local_get(paramLocals[0]);
         translator.ref_cast(b, info);
         b.local_set(preciseThisLocal!);
@@ -258,8 +264,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.local_get(paramLocals[0]);
       translator.ref_cast(b, context.struct);
       while (true) {
-        w.Local contextLocal = function.addLocal(
-            typeForLocal(w.RefType.def(context!.struct, nullable: false)));
+        w.Local contextLocal =
+            addLocal(w.RefType.def(context!.struct, nullable: false));
         context.currentLocal = contextLocal;
         if (context.parent != null || context.containsThis) {
           b.local_tee(contextLocal);
@@ -275,8 +281,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         context = context.parent!;
       }
       if (context.containsThis) {
-        thisLocal = function.addLocal(typeForLocal(
-            context.struct.fields[context.thisFieldIndex].type.unpacked));
+        thisLocal = addLocal(
+            context.struct.fields[context.thisFieldIndex].type.unpacked);
         preciseThisLocal = thisLocal;
         b.struct_get(context.struct, context.thisFieldIndex);
         b.local_set(thisLocal!);
@@ -317,8 +323,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   void allocateContext(TreeNode node) {
     Context? context = closures.contexts[node];
     if (context != null && !context.isEmpty) {
-      w.Local contextLocal = function.addLocal(
-          typeForLocal(w.RefType.def(context.struct, nullable: false)));
+      w.Local contextLocal =
+          addLocal(w.RefType.def(context.struct, nullable: false));
       context.currentLocal = contextLocal;
       translator.struct_new_default(b, context.struct);
       b.local_set(contextLocal);
@@ -357,9 +363,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType _call(Reference target) {
     w.BaseFunction targetFunction = translator.functions.getFunction(target);
     if (translator.shouldInline(target)) {
-      List<w.Local> inlinedLocals = targetFunction.type.inputs
-          .map((t) => function.addLocal(typeForLocal(t)))
-          .toList();
+      List<w.Local> inlinedLocals =
+          targetFunction.type.inputs.map((t) => addLocal(t)).toList();
       for (w.Local local in inlinedLocals.reversed) {
         b.local_set(local);
       }
@@ -457,7 +462,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.Local? local;
     Capture? capture = closures.captures[node];
     if (capture == null || !capture.written) {
-      local = function.addLocal(typeForLocal(type));
+      local = addLocal(type);
       locals[node] = local;
     }
     if (node.initializer != null) {
@@ -695,7 +700,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       nullableType = w.RefType.eq(nullable: true);
       compare = () => b.ref_eq();
     }
-    w.Local valueLocal = function.addLocal(typeForLocal(valueType));
+    w.Local valueLocal = addLocal(valueType);
 
     // Special cases
     SwitchCase? defaultCase = node.cases
@@ -714,8 +719,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
 
     // Compute value and handle null
-    bool isNullable =
-        node.expression.getStaticType(typeContext).isPotentiallyNullable;
+    bool isNullable = dartTypeOf(node.expression).isPotentiallyNullable;
     if (isNullable) {
       w.Label nullLabel = nullCase != null
           ? switchLabels[nullCase]!
@@ -810,7 +814,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitConstructorInvocation(
       ConstructorInvocation node, w.ValueType expectedType) {
     ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
-    w.Local temp = function.addLocal(typeForLocal(info.nonNullableType));
+    w.Local temp = addLocal(info.nonNullableType);
     translator.struct_new_default(b, info);
     b.local_tee(temp);
     b.local_get(temp);
@@ -912,15 +916,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.ref_eq();
     } else {
       // Check operands for null, then call implementation
-      bool leftNullable =
-          node.left.getStaticType(typeContext).isPotentiallyNullable;
-      bool rightNullable =
-          node.right.getStaticType(typeContext).isPotentiallyNullable;
+      bool leftNullable = dartTypeOf(node.left).isPotentiallyNullable;
+      bool rightNullable = dartTypeOf(node.right).isPotentiallyNullable;
       w.RefType leftType = translator.topInfo.typeWithNullability(leftNullable);
       w.RefType rightType =
           translator.topInfo.typeWithNullability(rightNullable);
-      w.Local leftLocal = function.addLocal(typeForLocal(leftType));
-      w.Local rightLocal = function.addLocal(typeForLocal(rightType));
+      w.Local leftLocal = addLocal(leftType);
+      w.Local rightLocal = addLocal(rightType);
       w.Label? operandNull;
       w.Label? done;
       if (leftNullable || rightNullable) {
@@ -1022,8 +1024,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
 
     // Receiver is already on stack.
-    w.Local receiverVar =
-        function.addLocal(typeForLocal(selector.signature.inputs.first));
+    w.Local receiverVar = addLocal(selector.signature.inputs.first);
     b.local_tee(receiverVar);
     if (options.parameterNullability && receiverVar.type.nullable) {
       b.ref_as_non_null();
@@ -1051,7 +1052,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     Map<int, Reference> implementations = Map.from(selector.targets);
     implementations.removeWhere((id, target) => target.asMember.isAbstract);
 
-    w.Local idVar = function.addLocal(w.NumType.i32);
+    w.Local idVar = addLocal(w.NumType.i32);
     b.local_get(receiver);
     b.struct_get(translator.topInfo.struct, 0);
     b.local_set(idVar);
@@ -1135,8 +1136,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.local_get(capture.context.currentLocal);
       wrap(node.value, capture.type);
       if (preserved) {
-        w.Local temp =
-            function.addLocal(typeForLocal(translateType(node.variable.type)));
+        w.Local temp = addLocal(translateType(node.variable.type));
         b.local_tee(temp);
         b.struct_set(capture.context.struct, capture.fieldIndex);
         b.local_get(temp);
@@ -1199,8 +1199,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       wrap(node.value, targetFunction.type.inputs.single);
       w.Local? temp;
       if (preserved) {
-        temp = function
-            .addLocal(translateType(node.value.getStaticType(typeContext)));
+        temp = addLocal(translateType(dartTypeOf(node.value)));
         b.local_tee(temp);
       }
       _call(target.reference);
@@ -1328,7 +1327,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         w.ValueType paramType = signature.inputs.last;
         wrap(node.value, paramType);
         if (preserved) {
-          temp = function.addLocal(paramType);
+          temp = addLocal(paramType);
           b.local_tee(temp!);
         }
       }, getter: false, setter: true);
@@ -1352,7 +1351,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       wrap(receiver, receiverType);
       wrap(value, fieldType);
       if (preserved) {
-        temp = function.addLocal(fieldType);
+        temp = addLocal(fieldType);
         b.local_tee(temp);
       }
       b.struct_set(info.struct, fieldIndex);
@@ -1363,7 +1362,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       wrap(receiver, targetFunction.type.inputs.first);
       wrap(value, paramType);
       if (preserved) {
-        temp = function.addLocal(typeForLocal(paramType));
+        temp = addLocal(paramType);
         b.local_tee(temp);
         translator.convertType(function, temp.type, paramType);
       }
@@ -1387,8 +1386,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       }
       w.StructType struct = _instantiateClosure(node.function);
       if (locallyClosurized) {
-        w.Local local = function
-            .addLocal(typeForLocal(w.RefType.def(struct, nullable: false)));
+        w.Local local = addLocal(w.RefType.def(struct, nullable: false));
         locals[node.variable] = local;
         if (capture != null) {
           b.local_tee(local);
@@ -1445,7 +1443,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     FunctionType functionType = node.functionType!;
     int parameterCount = functionType.requiredParameterCount;
     w.StructType struct = translator.functionStructType(parameterCount);
-    w.Local temp = function.addLocal(typeForLocal(translateType(functionType)));
+    w.Local temp = addLocal(translateType(functionType));
     wrap(node.receiver, temp.type);
     b.local_tee(temp);
     b.struct_get(struct, 2); // Context
@@ -1524,7 +1522,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     for (var namedArg in node.named) {
       final w.ValueType type = signature
           .inputs[signatureOffset + paramInfo.nameIndex[namedArg.name]!];
-      final w.Local namedLocal = function.addLocal(typeForLocal(type));
+      final w.Local namedLocal = addLocal(type);
       namedLocals[namedArg.name] = namedLocal;
       wrap(namedArg.value, namedLocal.type);
       b.local_set(namedLocal);
@@ -1633,8 +1631,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     b.i32_const(length);
     translator.array_new_default(b, arrayType);
     if (length > 0) {
-      w.Local arrayLocal =
-          function.addLocal(typeForLocal(refType.withNullability(false)));
+      w.Local arrayLocal = addLocal(refType.withNullability(false));
       b.local_set(arrayLocal);
       for (int i = 0; i < length; i++) {
         b.local_get(arrayLocal);
@@ -1668,7 +1665,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.ValueType putReceiverType = mapPut.type.inputs[0];
     w.ValueType putKeyType = mapPut.type.inputs[1];
     w.ValueType putValueType = mapPut.type.inputs[2];
-    w.Local mapLocal = function.addLocal(typeForLocal(putReceiverType));
+    w.Local mapLocal = addLocal(putReceiverType);
     translator.convertType(function, factoryReturnType, mapLocal.type);
     b.local_set(mapLocal);
     for (MapLiteralEntry entry in node.entries) {
@@ -1768,7 +1765,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.i32_const(1);
       return w.NumType.i32;
     }
-    DartType operandType = node.operand.getStaticType(typeContext);
+    DartType operandType = dartTypeOf(node.operand);
     bool isNullable = operandType.isPotentiallyNullable;
     w.Label? resultLabel;
     w.Label? nullLabel;
@@ -1806,7 +1803,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.i32_const(info.classId);
       b.i32_eq();
     } else {
-      w.Local idLocal = function.addLocal(w.NumType.i32);
+      w.Local idLocal = addLocal(w.NumType.i32);
       b.struct_get(translator.topInfo.struct, 0);
       b.local_set(idLocal);
       w.Label done = b.block([], [w.NumType.i32]);

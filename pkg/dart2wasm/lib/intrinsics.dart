@@ -93,9 +93,7 @@ class Intrinsifier {
   Translator get translator => codeGen.translator;
   w.Instructions get b => codeGen.b;
 
-  DartType dartTypeOf(Expression exp) {
-    return exp.getStaticType(codeGen.typeContext);
-  }
+  DartType dartTypeOf(Expression exp) => codeGen.dartTypeOf(exp);
 
   w.ValueType typeOfExp(Expression exp) {
     return translator.translateType(dartTypeOf(exp));
@@ -256,8 +254,8 @@ class Intrinsifier {
   }
 
   w.ValueType? generateEqualsIntrinsic(EqualsCall node) {
-    w.ValueType leftType = translator.translateType(dartTypeOf(node.left));
-    w.ValueType rightType = translator.translateType(dartTypeOf(node.right));
+    w.ValueType leftType = typeOfExp(node.left);
+    w.ValueType rightType = typeOfExp(node.right);
 
     if (leftType == boolType && rightType == boolType) {
       codeGen.wrap(node.left, w.NumType.i32);
