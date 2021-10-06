@@ -130,6 +130,7 @@ class WasmTarget extends Target {
 final Map<String, void Function(TranslatorOptions, bool)> boolOptionMap = {
   "export-all": (o, value) => o.exportAll = value,
   "inlining": (o, value) => o.inlining = value,
+  "lazy-constants": (o, value) => o.lazyConstants = value,
   "local-nullability": (o, value) => o.localNullability = value,
   "nominal-types": (o, value) => o.nominalTypes = value,
   "parameter-nullability": (o, value) => o.parameterNullability = value,

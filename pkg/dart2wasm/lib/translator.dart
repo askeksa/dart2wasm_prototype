@@ -26,6 +26,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 class TranslatorOptions {
   bool exportAll = false;
   bool inlining = false;
+  bool lazyConstants = false;
   bool localNullability = false;
   bool nominalTypes = false;
   bool parameterNullability = true;
@@ -267,10 +268,17 @@ class Translator {
       w.DefinedFunction? function = info.function;
       if (function != null) {
         _printFunction(function, info.constant);
+      } else {
+        if (options.printWasm) {
+          print("Global #${info.global.index}: ${info.constant}");
+          print(info.global.initializer.trace);
+        }
       }
     }
-    _printFunction(constants.oneByteStringFunction, "makeOneByteString");
-    _printFunction(constants.twoByteStringFunction, "makeTwoByteString");
+    if (options.lazyConstants) {
+      _printFunction(constants.oneByteStringFunction, "makeOneByteString");
+      _printFunction(constants.twoByteStringFunction, "makeTwoByteString");
+    }
     _printFunction(initFunction, "init");
 
     return m;

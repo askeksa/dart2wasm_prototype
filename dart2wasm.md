@@ -26,6 +26,7 @@ where *options* include:
 | --------------------------------------- | ------- | ----------- |
 | `--`[`no-`]`export-all`                 | no      | Export all functions; otherwise, just export `main`.
 | `--`[`no-`]`inlining`                   | no      | Inline small functions.
+| `--`[`no-`]`lazy-constants`             | no      | Instantiate constants lazily.
 | `--`[`no-`]`local-nullability`          | no      | Use non-nullable types for non-nullable locals and temporaries.
 | `--`[`no-`]`nominal-types`              | no      | Emit experimental nominal types.
 | `--`[`no-`]`parameter-nullability`      | yes     | Use non-nullable types for non-nullable parameters and return values.
