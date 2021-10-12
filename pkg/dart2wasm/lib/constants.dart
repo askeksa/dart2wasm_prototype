@@ -55,14 +55,29 @@ class Constants {
         ((info.struct.fields.last.type as w.RefType).heapType as w.DefHeapType)
             .def as w.ArrayType;
 
-    w.RefType emptyStringType = info.nonNullableType;
-    emptyString = m.addGlobal(w.GlobalType(emptyStringType, mutable: false));
-    w.Instructions ib = emptyString.initializer;
-    ib.i32_const(info.classId);
-    ib.i32_const(initialIdentityHash);
-    translator.array_init(ib, arrayType, 0);
-    translator.struct_new(ib, info);
-    ib.end();
+    if (lazyConstants) {
+      w.RefType emptyStringType = info.nullableType;
+      emptyString = m.addGlobal(w.GlobalType(emptyStringType));
+      emptyString.initializer.ref_null(emptyStringType.heapType);
+      emptyString.initializer.end();
+
+      w.Instructions b = translator.initFunction.body;
+      b.i32_const(info.classId);
+      b.i32_const(initialIdentityHash);
+      b.i32_const(0);
+      translator.array_new_default(b, arrayType);
+      translator.struct_new(b, info);
+      b.global_set(emptyString);
+    } else {
+      w.RefType emptyStringType = info.nonNullableType;
+      emptyString = m.addGlobal(w.GlobalType(emptyStringType, mutable: false));
+      w.Instructions ib = emptyString.initializer;
+      ib.i32_const(info.classId);
+      ib.i32_const(initialIdentityHash);
+      translator.array_init(ib, arrayType, 0);
+      translator.struct_new(ib, info);
+      ib.end();
+    }
 
     Constant emptyStringConstant = StringConstant("");
     constantInfo[emptyStringConstant] =
@@ -77,16 +92,33 @@ class Constants {
         (refType.heapType as w.DefHeapType).def as w.ArrayType;
 
     // Create the empty type list with its type parameter uninitialized for now.
-    w.RefType emptyListType = info.nonNullableType;
-    emptyTypeList = m.addGlobal(w.GlobalType(emptyListType, mutable: false));
-    w.Instructions ib = emptyTypeList.initializer;
-    ib.i32_const(info.classId);
-    ib.i32_const(initialIdentityHash);
-    ib.ref_null(w.HeapType.def(typeInfo.struct)); // Initialized later
-    ib.i64_const(0);
-    translator.array_init(ib, arrayType, 0);
-    translator.struct_new(ib, info);
-    ib.end();
+    if (lazyConstants) {
+      w.RefType emptyListType = info.nullableType;
+      emptyTypeList = m.addGlobal(w.GlobalType(emptyListType));
+      emptyTypeList.initializer.ref_null(emptyListType.heapType);
+      emptyTypeList.initializer.end();
+
+      w.Instructions b = translator.initFunction.body;
+      b.i32_const(info.classId);
+      b.i32_const(initialIdentityHash);
+      b.ref_null(w.HeapType.def(typeInfo.struct)); // Initialized later
+      b.i64_const(0);
+      b.i32_const(0);
+      translator.array_new_default(b, arrayType);
+      translator.struct_new(b, info);
+      b.global_set(emptyTypeList);
+    } else {
+      w.RefType emptyListType = info.nonNullableType;
+      emptyTypeList = m.addGlobal(w.GlobalType(emptyListType, mutable: false));
+      w.Instructions ib = emptyTypeList.initializer;
+      ib.i32_const(info.classId);
+      ib.i32_const(initialIdentityHash);
+      ib.ref_null(w.HeapType.def(typeInfo.struct)); // Initialized later
+      ib.i64_const(0);
+      translator.array_init(ib, arrayType, 0);
+      translator.struct_new(ib, info);
+      ib.end();
+    }
 
     Constant emptyTypeListConstant = ListConstant(
         InterfaceType(translator.typeClass, Nullability.nonNullable), const []);
@@ -219,11 +251,16 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
     ConstantInfo info = ConstantCreator(this).ensureConstant(constant)!;
     w.ValueType globalType = info.global.type.type;
     if (globalType.nullable) {
-      w.Label done = b.block([], [globalType.withNullability(false)]);
-      b.global_get(info.global);
-      b.br_on_non_null(done);
-      b.call(info.function!);
-      b.end();
+      if (info.function != null) {
+        w.Label done = b.block([], [globalType.withNullability(false)]);
+        b.global_get(info.global);
+        b.br_on_non_null(done);
+        b.call(info.function!);
+        b.end();
+      } else {
+        b.global_get(info.global);
+        b.ref_as_non_null();
+      }
       return globalType.withNullability(false);
     } else {
       b.global_get(info.global);
