@@ -1632,21 +1632,29 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     b.i32_const(initialIdentityHash);
     _makeType(typeArg, node);
     b.i64_const(length);
-    b.i32_const(length);
-    translator.array_new_default(b, arrayType);
-    if (length > 0) {
-      w.Local arrayLocal = addLocal(refType.withNullability(false));
-      b.local_set(arrayLocal);
-      for (int i = 0; i < length; i++) {
+    if (options.lazyConstants) {
+      // Avoid array.init instruction in lazy constants mode
+      b.i32_const(length);
+      translator.array_new_default(b, arrayType);
+      if (length > 0) {
+        w.Local arrayLocal = addLocal(refType.withNullability(false));
+        b.local_set(arrayLocal);
+        for (int i = 0; i < length; i++) {
+          b.local_get(arrayLocal);
+          b.i32_const(i);
+          wrap(expressions[i], elementType);
+          b.array_set(arrayType);
+        }
         b.local_get(arrayLocal);
-        b.i32_const(i);
-        wrap(expressions[i], elementType);
-        b.array_set(arrayType);
+        if (arrayLocal.type.nullable) {
+          b.ref_as_non_null();
+        }
       }
-      b.local_get(arrayLocal);
-      if (arrayLocal.type.nullable) {
-        b.ref_as_non_null();
+    } else {
+      for (Expression expression in expressions) {
+        wrap(expression, elementType);
       }
+      translator.array_init(b, arrayType, length);
     }
     translator.struct_new(b, info);
 
