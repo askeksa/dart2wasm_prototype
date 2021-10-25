@@ -478,6 +478,10 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         wrap(node.initializer!, local!.type);
         b.local_set(local);
       }
+    } else if (local != null && !local.type.defaultable) {
+      // Uninitialized variable
+      translator.globals.instantiateDummyValue(b, local.type);
+      b.local_set(local);
     }
   }
 

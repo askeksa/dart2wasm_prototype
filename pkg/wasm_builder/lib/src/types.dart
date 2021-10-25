@@ -19,6 +19,8 @@ abstract class ValueType implements StorageType {
   bool get nullable => false;
 
   ValueType withNullability(bool nullable) => this;
+
+  bool get defaultable => true;
 }
 
 class InvalidType extends ValueType {
@@ -94,6 +96,9 @@ class Rtt extends ValueType {
   const Rtt(this.defType, [this.depth]);
 
   @override
+  bool get defaultable => false;
+
+  @override
   bool isSubtypeOf(StorageType other) =>
       other is Rtt &&
       defType == other.defType &&
@@ -150,6 +155,9 @@ class RefType extends ValueType {
   @override
   ValueType withNullability(bool nullable) =>
       nullable == this.nullable ? this : RefType(heapType, nullable: nullable);
+
+  @override
+  bool get defaultable => nullable;
 
   @override
   bool isSubtypeOf(StorageType other) {
