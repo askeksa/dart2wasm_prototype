@@ -4,6 +4,7 @@
 
 export 'src/module.dart'
     show
+        DataSegment,
         DefinedFunction,
         DefinedGlobal,
         BaseFunction,

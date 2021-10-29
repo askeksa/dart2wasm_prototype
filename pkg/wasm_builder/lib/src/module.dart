@@ -17,6 +17,7 @@ class Module with SerializerMixin {
   final List<BaseFunction> functions = [];
   final List<Table> tables = [];
   final List<Memory> memories = [];
+  final List<DataSegment> dataSegments = [];
   final List<Global> globals = [];
   final List<Export> exports = [];
   BaseFunction? startFunction = null;
@@ -81,6 +82,16 @@ class Module with SerializerMixin {
     return memory;
   }
 
+  DataSegment addDataSegment(Uint8List initialContent,
+      [Memory? memory, int? offset]) {
+    assert((memory != null) == (offset != null));
+    assert(memory == null ||
+        offset! >= 0 && offset + initialContent.length <= memory.minSize);
+    final DataSegment data = DataSegment(initialContent, memory, offset);
+    dataSegments.add(data);
+    return data;
+  }
+
   DefinedGlobal addGlobal(GlobalType type) {
     anyGlobalsDefined = true;
     final global = DefinedGlobal(this, globals.length, type);
@@ -132,6 +143,7 @@ class Module with SerializerMixin {
     ExportSection(this).serialize(this);
     StartSection(this).serialize(this);
     ElementSection(this).serialize(this);
+    DataCountSection(this).serialize(this);
     CodeSection(this).serialize(this);
     DataSection(this).serialize(this);
     return data;
@@ -270,14 +282,8 @@ class Memory implements Serializable {
   int index;
   int minSize;
   int? maxSize;
-  List<Data> data = [];
 
   Memory(this.index, this.minSize, [this.maxSize]);
-
-  void addData(int offset, Uint8List init) {
-    assert(offset >= 0 && offset + init.length <= minSize);
-    data.add(Data(offset, init));
-  }
 
   @override
   void serialize(Serializer s) {
@@ -292,11 +298,45 @@ class Memory implements Serializable {
   }
 }
 
-class Data {
-  int offset;
-  Uint8List init;
+class DataSegment implements Serializable {
+  BytesBuilder content;
+  Memory? memory;
+  int? offset;
 
-  Data(this.offset, this.init);
+  DataSegment(Uint8List initialContent, this.memory, this.offset)
+      : content = BytesBuilder()..add(initialContent);
+
+  bool get isActive => memory != null;
+  bool get isPassive => memory == null;
+
+  int get length => content.length;
+
+  void append(Uint8List data) {
+    content.add(data);
+    assert(isPassive ||
+        offset! >= 0 && offset! + content.length <= memory!.minSize);
+  }
+
+  @override
+  void serialize(Serializer s) {
+    if (memory != null) {
+      // Active segment
+      if (memory!.index == 0) {
+        s.writeByte(0x00);
+      } else {
+        s.writeByte(0x02);
+        s.writeUnsigned(memory!.index);
+      }
+      s.writeByte(0x41); // i32.const
+      s.writeSigned(offset!);
+      s.writeByte(0x0B); // end
+    } else {
+      // Passive segment
+      s.writeByte(0x01);
+    }
+    s.writeUnsigned(content.length);
+    s.writeBytes(content.toBytes());
+  }
 }
 
 abstract class Global {
@@ -593,6 +633,21 @@ class ElementSection extends Section {
   }
 }
 
+class DataCountSection extends Section {
+  DataCountSection(Module module) : super(module);
+
+  @override
+  int get id => 12;
+
+  @override
+  bool get isNotEmpty => false;
+
+  @override
+  void serializeContents() {
+    writeUnsigned(module.dataSegments.length);
+  }
+}
+
 class CodeSection extends Section {
   CodeSection(Module module) : super(module);
 
@@ -616,22 +671,10 @@ class DataSection extends Section {
   int get id => 11;
 
   @override
-  bool get isNotEmpty =>
-      module.memories.any((memory) => memory.data.isNotEmpty);
+  bool get isNotEmpty => module.dataSegments.isNotEmpty;
 
   @override
   void serializeContents() {
-    int length = module.memories.fold(0, (a, m) => a + m.data.length);
-    writeUnsigned(length);
-    for (Memory memory in module.memories) {
-      for (Data data in memory.data) {
-        writeUnsigned(memory.index);
-        writeByte(0x41); // i32.const
-        writeSigned(data.offset);
-        writeByte(0x0B); // end
-        writeUnsigned(data.init.length);
-        writeBytes(data.init);
-      }
-    }
+    writeList(module.dataSegments);
   }
 }

@@ -158,9 +158,9 @@ class Constants {
           ..add(oneByteStringsAsBytes))
         .toBytes();
 
-    w.Memory stringMemory = m.addMemory(
-        stringsAsBytes.length, stringsAsBytes.length)
-      ..addData(0, stringsAsBytes);
+    w.Memory stringMemory =
+        m.addMemory(stringsAsBytes.length, stringsAsBytes.length);
+    m.addDataSegment(stringsAsBytes, stringMemory, 0);
     makeStringFunctionBody(translator.oneByteStringClass, oneByteStringFunction,
         (b) {
       b.i32_load8_u(stringMemory, twoByteStringsAsBytes.length);
