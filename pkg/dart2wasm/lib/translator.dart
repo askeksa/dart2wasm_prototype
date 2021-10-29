@@ -623,6 +623,16 @@ class Translator {
     }
   }
 
+  void array_init_from_data(w.Instructions b, w.ArrayType type, int length,
+      w.DataSegment data, int offset) {
+    if (options.runtimeTypes) {
+      b.rtt_canon(type);
+      b.array_init_from_data(type, length, data, offset);
+    } else {
+      b.array_init_from_data_static(type, length, data, offset);
+    }
+  }
+
   void ref_test(w.Instructions b, Object type) {
     if (options.runtimeTypes) {
       _emitRtt(b, type);

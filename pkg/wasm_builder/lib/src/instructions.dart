@@ -890,6 +890,50 @@ class Instructions with SerializerMixin {
     writeUnsigned(arrayType.index);
   }
 
+  void array_init_from_data(
+      ArrayType arrayType, int length, DataSegment data, int offset) {
+    assert(arrayType.elementType.type.isPrimitive);
+    assert(
+        offset + length * arrayType.elementType.type.byteSize <= data.length);
+    assert(_verifyTypes([
+      Rtt(arrayType)
+    ], [
+      RefType.def(arrayType, nullable: false)
+    ], trace: [
+      'array.init_from_data',
+      arrayType,
+      length,
+      data.index,
+      offset
+    ]));
+    writeBytes(const [0xFB, 0x1d]);
+    writeUnsigned(arrayType.index);
+    writeUnsigned(length);
+    writeUnsigned(data.index);
+    writeUnsigned(offset);
+  }
+
+  void array_init_from_data_static(
+      ArrayType arrayType, int length, DataSegment data, int offset) {
+    assert(arrayType.elementType.type.isPrimitive);
+    assert(
+        offset + length * arrayType.elementType.type.byteSize <= data.length);
+    assert(_verifyTypes(const [], [
+      RefType.def(arrayType, nullable: false)
+    ], trace: [
+      'array.init_from_data_static',
+      arrayType,
+      length,
+      data.index,
+      offset
+    ]));
+    writeBytes(const [0xFB, 0x1e]);
+    writeUnsigned(arrayType.index);
+    writeUnsigned(length);
+    writeUnsigned(data.index);
+    writeUnsigned(offset);
+  }
+
   void i31_new() {
     assert(_verifyTypes(const [NumType.i32], const [RefType.i31()],
         trace: const ['i31.new']));

@@ -8,6 +8,10 @@ abstract class StorageType implements Serializable {
   bool isSubtypeOf(StorageType other);
 
   ValueType get unpacked;
+
+  bool get isPrimitive;
+
+  int get byteSize;
 }
 
 abstract class ValueType implements StorageType {
@@ -15,6 +19,12 @@ abstract class ValueType implements StorageType {
 
   @override
   ValueType get unpacked => this;
+
+  @override
+  bool get isPrimitive => false;
+
+  @override
+  int get byteSize => throw "Size of non-primitive type $runtimeType";
 
   bool get nullable => false;
 
@@ -50,6 +60,23 @@ class NumType extends ValueType {
 
   @override
   bool isSubtypeOf(StorageType other) => this == other;
+
+  @override
+  bool get isPrimitive => true;
+
+  @override
+  int get byteSize {
+    switch (kind) {
+      case NumTypeKind.i32:
+      case NumTypeKind.f32:
+        return 4;
+      case NumTypeKind.i64:
+      case NumTypeKind.f64:
+        return 8;
+      case NumTypeKind.v128:
+        return 16;
+    }
+  }
 
   @override
   void serialize(Serializer s) {
@@ -513,6 +540,19 @@ class PackedType implements StorageType {
 
   @override
   bool isSubtypeOf(StorageType other) => this == other;
+
+  @override
+  bool get isPrimitive => true;
+
+  @override
+  int get byteSize {
+    switch (kind) {
+      case PackedTypeKind.i8:
+        return 1;
+      case PackedTypeKind.i16:
+        return 2;
+    }
+  }
 
   @override
   void serialize(Serializer s) {

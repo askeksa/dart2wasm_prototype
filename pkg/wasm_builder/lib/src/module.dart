@@ -87,7 +87,8 @@ class Module with SerializerMixin {
     assert((memory != null) == (offset != null));
     assert(memory == null ||
         offset! >= 0 && offset + initialContent.length <= memory.minSize);
-    final DataSegment data = DataSegment(initialContent, memory, offset);
+    final DataSegment data =
+        DataSegment(dataSegments.length, initialContent, memory, offset);
     dataSegments.add(data);
     return data;
   }
@@ -299,11 +300,12 @@ class Memory implements Serializable {
 }
 
 class DataSegment implements Serializable {
-  BytesBuilder content;
-  Memory? memory;
-  int? offset;
+  final int index;
+  final BytesBuilder content;
+  final Memory? memory;
+  final int? offset;
 
-  DataSegment(Uint8List initialContent, this.memory, this.offset)
+  DataSegment(this.index, Uint8List initialContent, this.memory, this.offset)
       : content = BytesBuilder()..add(initialContent);
 
   bool get isActive => memory != null;
