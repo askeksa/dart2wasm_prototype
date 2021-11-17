@@ -49,6 +49,17 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
     }
   }
 
+  w.DefinedFunction addMainFunction(Reference target) {
+    pending.add(target);
+    Procedure node = target.asProcedure;
+    assert(!node.isInstanceMember);
+    assert(!node.isGetter);
+    w.FunctionType ftype = _makeFunctionType(
+        target, node.function.returnType, null,
+        getter: false, isEntryPoint: true);
+    return _functions[target] = m.addFunction(ftype);
+  }
+
   w.BaseFunction? getExistingFunction(Reference target) {
     return _functions[target];
   }
@@ -99,7 +110,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
 
   w.FunctionType _makeFunctionType(
       Reference target, DartType returnType, w.ValueType? receiverType,
-      {required bool getter}) {
+      {required bool getter, bool isEntryPoint = false}) {
     Member member = target.asMember;
     int typeParamCount = 0;
     Iterable<DartType> params;
@@ -133,11 +144,20 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
     inputs.addAll(typeParameters);
     inputs.addAll(params.map((t) => translator.translateType(t)));
 
+    // The JS embedder will not accept Wasm struct types as return type
+    // for functions called from JS. We need to use eqref instead.
+    w.ValueType adjustReturnType(w.ValueType type) {
+      if (isEntryPoint && type.isSubtypeOf(w.RefType.eq())) {
+        return w.RefType.eq();
+      }
+      return type;
+    }
+
     List<w.ValueType> outputs = returnType is VoidType ||
             returnType is NeverType ||
             returnType is NullType
         ? const []
-        : [translator.translateType(returnType)];
+        : [adjustReturnType(translator.translateType(returnType))];
 
     return m.addFunctionType(inputs, outputs);
   }

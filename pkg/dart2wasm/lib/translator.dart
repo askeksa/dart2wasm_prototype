@@ -191,12 +191,7 @@ class Translator {
 
     mainFunction =
         libraries.first.procedures.firstWhere((p) => p.name.text == "main");
-    var mainReturns =
-        functions.getFunction(mainFunction.reference).type.outputs;
-    if (mainReturns.any((t) => t is w.RefType)) {
-      print(
-          "Warning: main returns a reference type. JS embedding may complain.");
-    }
+    functions.addMainFunction(mainFunction.reference);
 
     while (functions.pending.isNotEmpty) {
       Reference reference = functions.pending.removeLast();
