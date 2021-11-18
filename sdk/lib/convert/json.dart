@@ -625,8 +625,7 @@ external dynamic _parseJson(String source, reviver(key, value)?);
 
 // Implementation of encoder/stringifier.
 
-dynamic _defaultToEncodable(dynamic object) =>
-    throw "Default toJson conversion not supported";
+dynamic _defaultToEncodable(dynamic object) => object.toJson();
 
 /// JSON encoder that traverses an object structure and writes JSON source.
 ///

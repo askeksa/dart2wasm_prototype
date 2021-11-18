@@ -319,9 +319,7 @@ class RangeError extends ArgumentError {
   /// Returns [index] if it is a valid index.
   static int checkValidIndex(int index, dynamic indexable,
       [String? name, int? length, String? message]) {
-    length ??= indexable is String
-        ? indexable.length
-        : (indexable as List<dynamic>).length;
+    length ??= (indexable.length as int);
     // Comparing with `0` as receiver produces better dart2js type inference.
     if (0 > index || index >= length) {
       name ??= "index";
@@ -425,7 +423,7 @@ class IndexError extends ArgumentError implements RangeError {
   IndexError(int invalidValue, dynamic indexable,
       [String? name, String? message, int? length])
       : this.indexable = indexable,
-        this.length = length ?? 0,
+        this.length = length ?? indexable.length,
         super.value(invalidValue, name, message ?? "Index out of range");
 
   // Getters inherited from RangeError.
