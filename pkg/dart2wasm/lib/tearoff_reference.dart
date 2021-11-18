@@ -17,3 +17,16 @@ extension IsTearOffReference on Reference {
     return member is Procedure && member.tearOffReference == this;
   }
 }
+
+extension ReferenceAs on Member {
+  Reference referenceAs({required bool getter, required bool setter}) {
+    Member member = this;
+    return member is Field
+        ? setter
+            ? member.setterReference!
+            : member.getterReference
+        : getter && member is Procedure && member.kind == ProcedureKind.Method
+            ? member.tearOffReference
+            : member.reference;
+  }
+}

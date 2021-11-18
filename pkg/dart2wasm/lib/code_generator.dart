@@ -1000,11 +1000,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       void pushArguments(w.FunctionType signature),
       {required bool getter,
       required bool setter}) {
-    int selectorId = getter
-        ? translator.tableSelectorAssigner.getterSelectorId(interfaceTarget)
-        : translator.tableSelectorAssigner
-            .methodOrSetterSelectorId(interfaceTarget);
-    SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
+    SelectorInfo selector = translator.dispatchTable.selectorForTarget(
+        interfaceTarget.referenceAs(getter: getter, setter: setter));
     assert(selector.name == interfaceTarget.name.text);
 
     pushReceiver(selector.signature);
@@ -1284,6 +1281,39 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
           (signature) => wrap(node.receiver, signature.inputs.first), (_) {},
           getter: true, setter: false);
     }
+  }
+
+  @override
+  w.ValueType visitDynamicGet(DynamicGet node, w.ValueType expectedType) {
+    // Provisional implementation of dynamic get which assumes the getter
+    // is present (otherwise it traps or calls something random) and
+    // does not support tearoffs. This is sufficient to handle the
+    // dynamic .length calls in the core libraries.
+
+    SelectorInfo selector =
+        translator.dispatchTable.selectorForDynamicName(node.name.text);
+
+    // Evaluate receiver
+    wrap(node.receiver, selector.signature.inputs.first);
+    w.Local receiverVar = addLocal(selector.signature.inputs.first);
+    b.local_tee(receiverVar);
+    if (options.parameterNullability && receiverVar.type.nullable) {
+      b.ref_as_non_null();
+    }
+
+    // Dispatch table call
+    int offset = selector.offset!;
+    b.local_get(receiverVar);
+    b.struct_get(translator.topInfo.struct, 0);
+    if (offset != 0) {
+      b.i32_const(offset);
+      b.i32_add();
+    }
+    b.call_indirect(selector.signature);
+
+    translator.functions.activateSelector(selector);
+
+    return translator.outputOrVoid(selector.signature.outputs);
   }
 
   w.ValueType _directGet(
@@ -1962,11 +1992,8 @@ class StubBodyTraversal extends RecursiveVisitor {
 
   void _virtualCall(Member interfaceTarget,
       {required bool getter, required bool setter}) {
-    int selectorId = getter
-        ? translator.tableSelectorAssigner.getterSelectorId(interfaceTarget)
-        : translator.tableSelectorAssigner
-            .methodOrSetterSelectorId(interfaceTarget);
-    SelectorInfo selector = translator.dispatchTable.selectorInfo[selectorId]!;
+    SelectorInfo selector = translator.dispatchTable.selectorForTarget(
+        interfaceTarget.referenceAs(getter: getter, setter: setter));
     translator.functions.activateSelector(selector);
   }
 }

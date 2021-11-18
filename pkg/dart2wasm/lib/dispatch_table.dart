@@ -29,10 +29,13 @@ class SelectorInfo {
 
   late final List<int> classIds;
   late final int targetCount;
+  bool forced = false;
   Reference? singularTarget;
   int? offset;
 
   String get name => paramInfo.member.name.text;
+
+  bool get alive => callCount > 0 && targetCount > 1 || forced;
 
   int get sortWeight => classIds.length * 10 + callCount;
 
@@ -132,6 +135,7 @@ class DispatchTable {
   final List<TableSelectorInfo> selectorMetadata;
 
   Map<int, SelectorInfo> selectorInfo = {};
+  Map<String, int> dynamicGets = {};
   late List<Reference?> table;
 
   DispatchTable(this.translator)
@@ -148,6 +152,12 @@ class DispatchTable {
             member is Procedure && member.function.returnType is! VoidType
         ? 1
         : 0;
+    bool calledDynamically = isGetter &&
+        translator.programAnalyzer.dynamicGets.contains(member.name.text);
+    if (calledDynamically) {
+      // Merge all same-named getter selectors that are called dynamically.
+      selectorId = dynamicGets.putIfAbsent(member.name.text, () => selectorId);
+    }
     var selector = selectorInfo.putIfAbsent(
         selectorId,
         () => SelectorInfo(
@@ -156,10 +166,15 @@ class DispatchTable {
             selectorMetadata[selectorId].callCount,
             selectorMetadata[selectorId].tornOff,
             paramInfo,
-            returnCount));
+            returnCount)
+          ..forced = calledDynamically);
     selector.paramInfo.merge(paramInfo);
     selector.returnCount = max(selector.returnCount, returnCount);
     return selector;
+  }
+
+  SelectorInfo selectorForDynamicName(String name) {
+    return selectorInfo[dynamicGets[name]!]!;
   }
 
   void build() {
@@ -206,7 +221,7 @@ class DispatchTable {
       selector.classIds = selector.targets.keys
           .where((id) => !(translator.classes[id].cls?.isAbstract ?? true))
           .toList()
-            ..sort();
+        ..sort();
       Set<Reference> targets =
           selector.targets.values.where((t) => !t.asMember.isAbstract).toSet();
       selector.targetCount = targets.length;
@@ -215,9 +230,9 @@ class DispatchTable {
 
     // Assign selector offsets
     List<SelectorInfo> selectors = selectorInfo.values
-        .where((s) => s.callCount > 0 && s.targetCount > 1)
+        .where((s) => s.alive)
         .toList()
-          ..sort((a, b) => b.sortWeight - a.sortWeight);
+      ..sort((a, b) => b.sortWeight - a.sortWeight);
     int firstAvailable = 0;
     table = [];
     bool first = true;
