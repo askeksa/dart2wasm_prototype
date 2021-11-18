@@ -168,6 +168,7 @@ Future<int> main(List<String> args) async {
     if (intOptionFun != null) {
       intOptionFun(options, int.parse(arg));
       intOptionFun = null;
+    } else if (arg.startsWith("--dart-sdk")) {
     } else if (arg.startsWith("--no-")) {
       var optionFun = boolOptionMap[arg.substring(5)];
       if (optionFun == null) usage("Unknown option $arg");
