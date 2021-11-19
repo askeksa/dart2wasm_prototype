@@ -7,6 +7,7 @@ import 'package:dart2wasm/tearoff_reference.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
+import 'package:kernel/core_types.dart';
 import 'package:kernel/external_name.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
@@ -14,26 +15,51 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   final Translator translator;
   final Map<Reference, w.BaseFunction> _functions = {};
+  final Map<Reference, String> exports = {};
   final List<Reference> pending = [];
 
   FunctionCollector(this.translator);
 
   w.Module get m => translator.m;
+  CoreTypes get coreTypes => translator.coreTypes;
 
-  void collectImports() {
+  String? _findExportName(Member member) {
+    for (Expression annotation in member.annotations) {
+      if (annotation is ConstantExpression) {
+        Constant constant = annotation.constant;
+        if (constant is InstanceConstant) {
+          if (constant.classNode == coreTypes.pragmaClass) {
+            Constant? name =
+                constant.fieldValues[coreTypes.pragmaName.fieldReference];
+            if (name is StringConstant && name.value == "wasm:export") {
+              Constant? options =
+                  constant.fieldValues[coreTypes.pragmaOptions.fieldReference];
+              if (options is StringConstant) {
+                return options.value;
+              }
+              return member.name.text;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  void collectImportsAndExports() {
     for (Library library in translator.libraries) {
       for (Procedure procedure in library.procedures) {
-        _import(procedure);
+        _importOrExport(procedure);
       }
       for (Class cls in library.classes) {
         for (Procedure procedure in cls.procedures) {
-          _import(procedure);
+          _importOrExport(procedure);
         }
       }
     }
   }
 
-  void _import(Procedure procedure) {
+  void _importOrExport(Procedure procedure) {
     String? externalName = getExternalName(translator.coreTypes, procedure);
     if (externalName != null) {
       int dot = externalName.indexOf('.');
@@ -47,17 +73,27 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
         _functions[procedure.reference] = m.importFunction(module, name, ftype);
       }
     }
+    String? exportName = _findExportName(procedure);
+    if (exportName != null) {
+      addExport(procedure.reference, exportName);
+    }
   }
 
-  w.DefinedFunction addMainFunction(Reference target) {
-    pending.add(target);
-    Procedure node = target.asProcedure;
-    assert(!node.isInstanceMember);
-    assert(!node.isGetter);
-    w.FunctionType ftype = _makeFunctionType(
-        target, node.function.returnType, null,
-        getter: false, isEntryPoint: true);
-    return _functions[target] = m.addFunction(ftype);
+  void addExport(Reference target, String exportName) {
+    exports[target] = exportName;
+  }
+
+  void initExports() {
+    for (Reference target in exports.keys) {
+      pending.add(target);
+      Procedure node = target.asProcedure;
+      assert(!node.isInstanceMember);
+      assert(!node.isGetter);
+      w.FunctionType ftype = _makeFunctionType(
+          target, node.function.returnType, null,
+          getter: false, isExport: true);
+      _functions[target] = m.addFunction(ftype);
+    }
   }
 
   w.BaseFunction? getExistingFunction(Reference target) {
@@ -110,7 +146,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
 
   w.FunctionType _makeFunctionType(
       Reference target, DartType returnType, w.ValueType? receiverType,
-      {required bool getter, bool isEntryPoint = false}) {
+      {required bool getter, bool isExport = false}) {
     Member member = target.asMember;
     int typeParamCount = 0;
     Iterable<DartType> params;
@@ -147,7 +183,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
     // The JS embedder will not accept Wasm struct types as return type
     // for functions called from JS. We need to use eqref instead.
     w.ValueType adjustReturnType(w.ValueType type) {
-      if (isEntryPoint && type.isSubtypeOf(w.RefType.eq())) {
+      if (isExport && type.isSubtypeOf(w.RefType.eq())) {
         return w.RefType.eq();
       }
       return type;

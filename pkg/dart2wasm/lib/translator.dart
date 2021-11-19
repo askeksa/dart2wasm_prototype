@@ -182,7 +182,12 @@ class Translator {
     dummyContext = m.addStructType("<context>");
 
     classInfoCollector.collect();
-    functions.collectImports();
+
+    functions.collectImportsAndExports();
+    mainFunction =
+        libraries.first.procedures.firstWhere((p) => p.name.text == "main");
+    functions.addExport(mainFunction.reference, "main");
+
     initFunction = m.addFunction(m.addFunctionType([], []));
     m.startFunction = initFunction;
 
@@ -193,31 +198,34 @@ class Translator {
     component.accept(programAnalyzer);
     dispatchTable.build();
 
-    mainFunction =
-        libraries.first.procedures.firstWhere((p) => p.name.text == "main");
-    functions.addMainFunction(mainFunction.reference);
-
+    functions.initExports();
     while (functions.pending.isNotEmpty) {
       Reference reference = functions.pending.removeLast();
       Member member = reference.asMember;
       var function =
           functions.getExistingFunction(reference) as w.DefinedFunction;
 
-      String exportName = "$member";
+      String canonicalName = "$member";
       if (reference.isSetter) {
-        exportName = "$exportName=";
+        canonicalName = "$canonicalName=";
       } else if (reference.isGetter || reference.isTearOffReference) {
-        int dot = exportName.indexOf('.');
-        exportName = exportName.substring(0, dot + 1) +
+        int dot = canonicalName.indexOf('.');
+        canonicalName = canonicalName.substring(0, dot + 1) +
             '=' +
-            exportName.substring(dot + 1);
+            canonicalName.substring(dot + 1);
       }
-      exportName = member.enclosingLibrary == libraries.first
-          ? exportName
-          : "${member.enclosingLibrary.importUri} $exportName";
+      canonicalName = member.enclosingLibrary == libraries.first
+          ? canonicalName
+          : "${member.enclosingLibrary.importUri} $canonicalName";
+
+      String? exportName = functions.exports[reference];
 
       if (options.printKernel || options.printWasm) {
-        print("#${function.index}: $exportName");
+        if (exportName != null) {
+          print("#${function.index}: $canonicalName (exported as $exportName)");
+        } else {
+          print("#${function.index}: $canonicalName");
+        }
         print(member.function
             ?.computeFunctionType(Nullability.nonNullable)
             .toStringInternal());
@@ -241,8 +249,10 @@ class Translator {
         if (!options.printWasm) print("");
       }
 
-      if (member == mainFunction || options.exportAll) {
+      if (exportName != null) {
         m.exportFunction(exportName, function);
+      } else if (options.exportAll) {
+        m.exportFunction(canonicalName, function);
       }
       var codeGen = CodeGenerator(this, function, reference);
       codeGen.generate();
@@ -255,7 +265,7 @@ class Translator {
       for (Lambda lambda in codeGen.closures.lambdas.values) {
         CodeGenerator(this, lambda.function, reference)
             .generateLambda(lambda, codeGen.closures);
-        _printFunction(lambda.function, "$exportName (closure)");
+        _printFunction(lambda.function, "$canonicalName (closure)");
       }
     }
 
