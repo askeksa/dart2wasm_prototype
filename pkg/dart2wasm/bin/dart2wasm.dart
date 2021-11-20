@@ -5,7 +5,14 @@
 import 'dart:io';
 
 import 'package:front_end/src/api_unstable/vm.dart'
-    show CompilerOptions, CompilerResult, kernelForProgram, resolveInputUri;
+    show
+        CompilerOptions,
+        CompilerResult,
+        DiagnosticMessage,
+        kernelForProgram,
+        printDiagnosticMessage,
+        resolveInputUri,
+        Severity;
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart';
@@ -195,17 +202,26 @@ Future<int> main(List<String> args) async {
   Uri mainUri = resolveInputUri(input);
 
   Target target = WasmTarget();
+  var succeeded = true;
+  void diagnosticMessageHandler(DiagnosticMessage message) {
+    if (message.severity == Severity.error) {
+      succeeded = false;
+    }
+    printDiagnosticMessage(message, print);
+  }
 
   CompilerOptions compilerOptions = CompilerOptions()
     ..target = target
     ..compileSdk = true
     ..sdkRoot = Uri.file(Directory("sdk").absolute.path)
     ..environmentDefines = {}
-    ..verbose = false;
+    ..verbose = false
+    ..onDiagnostic = diagnosticMessageHandler
+    ..setExitCodeOnProblem = true;
 
   CompilerResult? compilerResult =
       await kernelForProgram(mainUri, compilerOptions);
-  if (compilerResult == null) return 1;
+  if (compilerResult == null || !succeeded) return 1;
   Component component = compilerResult.component!;
   CoreTypes coreTypes = compilerResult.coreTypes!;
 
