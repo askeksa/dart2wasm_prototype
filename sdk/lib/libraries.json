@@ -172,6 +172,7 @@
       "async": {
         "uri": "async/async.dart",
         "patches": [
+          "_internal/wasm/lib/timer_patch.dart"
         ]
       },
       "collection": {

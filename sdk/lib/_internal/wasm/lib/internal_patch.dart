@@ -81,3 +81,28 @@ int floatToIntBits(double value) native;
 double intBitsToFloat(int value) native;
 int doubleToIntBits(double value) native;
 double intBitsToDouble(int value) native;
+
+// Exported call stubs to enable JS to call Dart closures. Since all closure
+// parameters and returns are boxed (their Wasm type is #Top) the Wasm type of
+// the closure will be the same as with all parameters and returns as dynamic.
+// Thus, the unsafeCast succeeds, and as long as the passed argumnets have the
+// correct types, the argument casts inside the closure will also succeed.
+
+@pragma("wasm:export", "\$call0")
+dynamic _callClosure0(dynamic closure) {
+  return unsafeCast<dynamic Function()>(closure)();
+}
+
+@pragma("wasm:export", "\$call1")
+dynamic _callClosure1(dynamic closure, dynamic arg1) {
+  return unsafeCast<dynamic Function(dynamic)>(closure)(arg1);
+}
+
+@pragma("wasm:export", "\$call2")
+dynamic _callClosure2(dynamic closure, dynamic arg1, dynamic arg2) {
+  return unsafeCast<dynamic Function(dynamic, dynamic)>(closure)(arg1, arg2);
+}
+
+// Schedule a callback from JS via setTimeout.
+void scheduleCallback(double millis, dynamic Function() callback)
+    native "dart2wasm.scheduleCallback";

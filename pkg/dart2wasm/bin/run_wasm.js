@@ -18,13 +18,20 @@ function printChar(char) {
     writeFun(String.fromCharCode(char));
 }
 
+function scheduleCallback(milliseconds, closure) {
+    setTimeout(function() {
+        inst.exports.$call0(closure);
+    }, milliseconds);
+}
+
 // Instantiate Wasm module, importing some functions.
 var importObject = {
     console: {
         log: console.log
     },
     dart2wasm: {
-        printChar: printChar
+        printChar: printChar,
+        scheduleCallback: scheduleCallback
     },
     Date: {
         now: Date.now

@@ -391,8 +391,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void visitFieldInitializer(FieldInitializer node) {
-    w.StructType struct = translator
-        .classInfo[(node.parent as Constructor).enclosingClass]!.struct;
+    Class cls = (node.parent as Constructor).enclosingClass;
+    w.StructType struct = translator.classInfo[cls]!.struct;
     int fieldIndex = translator.fieldIndex[node.field]!;
 
     b.local_get(thisLocal!);
@@ -402,9 +402,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void visitRedirectingInitializer(RedirectingInitializer node) {
+    Class cls = (node.parent as Constructor).enclosingClass;
     b.local_get(thisLocal!);
     if (options.parameterNullability && thisLocal!.type.nullable) {
       b.ref_as_non_null();
+    }
+    for (TypeParameter typeParam in cls.typeParameters) {
+      _makeType(TypeParameterType(typeParam, Nullability.nonNullable), node);
     }
     _visitArguments(node.arguments, node.targetReference, 1);
     _call(node.targetReference);
@@ -1755,6 +1759,11 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       return typeType;
     }
     ClassInfo info = translator.classInfo[translator.typeClass]!;
+    if (type is FutureOrType) {
+      // TODO
+      b.ref_null(info.nullableType.heapType);
+      return info.nullableType;
+    }
     if (type is! InterfaceType) {
       _unimplemented(node, type, [info.nullableType]);
       return info.nullableType;

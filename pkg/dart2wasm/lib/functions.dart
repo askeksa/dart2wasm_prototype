@@ -69,7 +69,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
         String name = externalName.substring(dot + 1);
         w.FunctionType ftype = _makeFunctionType(
             procedure.reference, procedure.function.returnType, null,
-            getter: procedure.isGetter);
+            getter: procedure.isGetter, isImportOrExport: true);
         _functions[procedure.reference] = m.importFunction(module, name, ftype);
       }
     }
@@ -91,7 +91,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
       assert(!node.isGetter);
       w.FunctionType ftype = _makeFunctionType(
           target, node.function.returnType, null,
-          getter: false, isExport: true);
+          getter: false, isImportOrExport: true);
       _functions[target] = m.addFunction(ftype);
     }
   }
@@ -146,7 +146,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
 
   w.FunctionType _makeFunctionType(
       Reference target, DartType returnType, w.ValueType? receiverType,
-      {required bool getter, bool isExport = false}) {
+      {required bool getter, bool isImportOrExport = false}) {
     Member member = target.asMember;
     int typeParamCount = 0;
     Iterable<DartType> params;
@@ -173,27 +173,28 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
     List<w.ValueType> typeParameters = List.filled(typeParamCount,
         translator.classInfo[translator.typeClass]!.nullableType);
 
-    List<w.ValueType> inputs = [];
-    if (receiverType != null) {
-      inputs.add(receiverType);
-    }
-    inputs.addAll(typeParameters);
-    inputs.addAll(params.map((t) => translator.translateType(t)));
-
-    // The JS embedder will not accept Wasm struct types as return type
-    // for functions called from JS. We need to use eqref instead.
-    w.ValueType adjustReturnType(w.ValueType type) {
-      if (isExport && type.isSubtypeOf(w.RefType.eq())) {
+    // The JS embedder will not accept Wasm struct types as parameter or return
+    // types for functions called from JS. We need to use eqref instead.
+    w.ValueType adjustExternalType(w.ValueType type) {
+      if (isImportOrExport && type.isSubtypeOf(w.RefType.eq())) {
         return w.RefType.eq();
       }
       return type;
     }
 
+    List<w.ValueType> inputs = [];
+    if (receiverType != null) {
+      inputs.add(adjustExternalType(receiverType));
+    }
+    inputs.addAll(typeParameters.map(adjustExternalType));
+    inputs.addAll(
+        params.map((t) => adjustExternalType(translator.translateType(t))));
+
     List<w.ValueType> outputs = returnType is VoidType ||
             returnType is NeverType ||
             returnType is NullType
         ? const []
-        : [adjustReturnType(translator.translateType(returnType))];
+        : [adjustExternalType(translator.translateType(returnType))];
 
     return m.addFunctionType(inputs, outputs);
   }

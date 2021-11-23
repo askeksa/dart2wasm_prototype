@@ -528,6 +528,9 @@ class Translator {
         ClassInfo info = classInfo[boxedClasses[to]!]!;
         if (!from.heapType.isSubtypeOf(w.HeapType.def(info.struct))) {
           // Cast to box type
+          if (!from.heapType.isSubtypeOf(w.HeapType.data)) {
+            b.ref_as_data();
+          }
           ref_cast(b, info);
         }
         b.struct_get(info.struct, 1);
@@ -540,6 +543,9 @@ class Translator {
         ClassInfo? info = classForHeapType[heapType];
         if (from.nullable && !to.nullable) {
           b.ref_as_non_null();
+        }
+        if (!(from as w.RefType).heapType.isSubtypeOf(w.HeapType.data)) {
+          b.ref_as_data();
         }
         ref_cast(b, info ?? parameterCountForFunctionStruct(heapType));
       }
