@@ -40,3 +40,37 @@ where *options* include:
 The resulting `.wasm` file can be run with:
 
 `d8 --experimental-wasm-gc --wasm-gc-js-interop pkg/dart2wasm/bin/run_wasm.js -- `*outfile*`.wasm`
+
+## Calling to and from JS
+
+To call a JS function from Dart, declare a global, native function with a native name that is two identifiers separated by a dot:
+```dart
+void fooBar(Object object) native "foo.bar";
+```
+which will call `foo.bar` on the JS side:
+```javascript
+var foo = {
+    bar: function(object) { /* implementation here */ }
+};
+```
+To call a Dart function from JS, export the function with `@pragma("wasm:export")`:
+```dart
+@pragma("wasm:export")
+void foo(double x) { /* implementation here */  }
+
+@pragma("wasm:export", "baz")
+void bar(double x) { /* implementation here */  }
+```
+With the Wasm module instance in `inst`, these can be called as:
+```javascript
+inst.exports.foo(1);
+inst.exports.baz(2);
+```
+
+### Types to use for interop
+
+In the signatures of imported and exported functions, use the following types:
+
+- For numbers, use `double`.
+- For Dart objects, use the corresponding Dart type. The fields of the underlying representation can be accessed on the JS side as `.$field0`, `.$field1` etc., but there is currently no defined way of finding the field index of a particular Dart field, so this mechanism is mainly useful for special objects with known layout.
+- For JS objects, use the `WasmAnyRef` type (or `WasmAnyRef?` as applicable) from the `dart:wasm` package. These can be passed around and stored as opaque values on the Dart side.
