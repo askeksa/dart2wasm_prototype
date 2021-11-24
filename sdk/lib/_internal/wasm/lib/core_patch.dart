@@ -50,3 +50,5 @@ import 'dart:math' show Random;
 
 import "dart:typed_data"
     show Endian, Uint8List, Int64List, Uint16List, Uint32List;
+
+import 'dart:wasm';

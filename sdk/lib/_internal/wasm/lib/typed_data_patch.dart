@@ -42,6 +42,8 @@ import "dart:collection" show ListBase;
 
 import 'dart:math' show Random;
 
+import 'dart:wasm';
+
 /// There are no parts in patch library:
 
 @patch

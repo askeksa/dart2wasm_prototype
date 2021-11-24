@@ -165,8 +165,7 @@
           "_internal/wasm/lib/internal_patch.dart",
           "_internal/wasm/lib/patch.dart",
           "_internal/wasm/lib/print_patch.dart",
-          "_internal/wasm/lib/symbol_patch.dart",
-          "_internal/wasm/lib/wasm_types.dart"
+          "_internal/wasm/lib/symbol_patch.dart"
         ]
       },
       "async": {
@@ -280,6 +279,9 @@
       },
       "vmservice_io": {
         "uri": "_internal/vm/bin/vmservice_io.dart"
+      },
+      "wasm": {
+        "uri": "_internal/wasm/lib/wasm_types.dart"
       }
     }
   },

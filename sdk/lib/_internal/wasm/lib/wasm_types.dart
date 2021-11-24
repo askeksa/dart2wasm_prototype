@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+library dart.wasm;
+
 @pragma("wasm:entry-point")
 abstract class _WasmBase {}
 
@@ -9,12 +11,18 @@ abstract class _WasmInt extends _WasmBase {}
 
 abstract class _WasmFloat extends _WasmBase {}
 
-abstract class _WasmArray extends _WasmBase {
-  int get length native;
-}
+@pragma("wasm:entry-point")
+class WasmAnyRef extends _WasmBase {}
 
 @pragma("wasm:entry-point")
-class WasmDataRef extends _WasmBase {}
+class WasmEqRef extends WasmAnyRef {}
+
+@pragma("wasm:entry-point")
+class WasmDataRef extends WasmEqRef {}
+
+abstract class _WasmArray extends WasmDataRef {
+  int get length native;
+}
 
 @pragma("wasm:entry-point")
 class WasmI8 extends _WasmInt {}

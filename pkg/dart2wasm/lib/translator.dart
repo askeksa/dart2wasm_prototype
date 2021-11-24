@@ -56,6 +56,8 @@ class Translator {
 
   late final Class wasmTypesBaseClass;
   late final Class wasmArrayBaseClass;
+  late final Class wasmAnyRefClass;
+  late final Class wasmEqRefClass;
   late final Class wasmDataRefClass;
   late final Class boxedBoolClass;
   late final Class boxedIntClass;
@@ -120,15 +122,17 @@ class Translator {
       return coreLibrary.classes.firstWhere((c) => c.name == name);
     }
 
-    Library internalLibrary =
-        component.libraries.firstWhere((l) => l.name == "dart._internal");
-    Class lookupInternal(String name) {
-      return internalLibrary.classes.firstWhere((c) => c.name == name);
+    Library wasmLibrary =
+        component.libraries.firstWhere((l) => l.name == "dart.wasm");
+    Class lookupWasm(String name) {
+      return wasmLibrary.classes.firstWhere((c) => c.name == name);
     }
 
-    wasmTypesBaseClass = lookupInternal("_WasmBase");
-    wasmArrayBaseClass = lookupInternal("_WasmArray");
-    wasmDataRefClass = lookupInternal("WasmDataRef");
+    wasmTypesBaseClass = lookupWasm("_WasmBase");
+    wasmArrayBaseClass = lookupWasm("_WasmArray");
+    wasmAnyRefClass = lookupWasm("WasmAnyRef");
+    wasmEqRefClass = lookupWasm("WasmEqRef");
+    wasmDataRefClass = lookupWasm("WasmDataRef");
     boxedBoolClass = lookupCore("_BoxedBool");
     boxedIntClass = lookupCore("_BoxedInt");
     boxedDoubleClass = lookupCore("_BoxedDouble");
@@ -158,16 +162,18 @@ class Translator {
       coreTypes.boolClass: w.NumType.i32,
       coreTypes.intClass: w.NumType.i64,
       coreTypes.doubleClass: w.NumType.f64,
-      wasmDataRefClass: w.RefType.data(),
+      wasmAnyRefClass: w.RefType.any(nullable: false),
+      wasmEqRefClass: w.RefType.eq(nullable: false),
+      wasmDataRefClass: w.RefType.data(nullable: false),
       boxedBoolClass: w.NumType.i32,
       boxedIntClass: w.NumType.i64,
       boxedDoubleClass: w.NumType.f64,
-      lookupInternal("WasmI8"): w.PackedType.i8,
-      lookupInternal("WasmI16"): w.PackedType.i16,
-      lookupInternal("WasmI32"): w.NumType.i32,
-      lookupInternal("WasmI64"): w.NumType.i64,
-      lookupInternal("WasmF32"): w.NumType.f32,
-      lookupInternal("WasmF64"): w.NumType.f64,
+      lookupWasm("WasmI8"): w.PackedType.i8,
+      lookupWasm("WasmI16"): w.PackedType.i16,
+      lookupWasm("WasmI32"): w.NumType.i32,
+      lookupWasm("WasmI64"): w.NumType.i64,
+      lookupWasm("WasmF32"): w.NumType.f32,
+      lookupWasm("WasmF64"): w.NumType.f64,
     };
     boxedClasses = {
       w.NumType.i32: boxedBoolClass,
@@ -321,8 +327,11 @@ class Translator {
   }
 
   bool isWasmType(Class cls) {
-    return cls.superclass == wasmTypesBaseClass ||
-        cls.superclass?.superclass == wasmTypesBaseClass;
+    while (cls.superclass != null) {
+      cls = cls.superclass!;
+      if (cls == wasmTypesBaseClass) return true;
+    }
+    return false;
   }
 
   w.StorageType typeForInfo(ClassInfo info, bool nullable) {
@@ -331,7 +340,10 @@ class Translator {
       w.StorageType? builtin = builtinTypes[cls];
       if (builtin != null) {
         if (!nullable) return builtin;
-        if (isWasmType(cls)) throw "Wasm numeric types can't be nullable";
+        if (isWasmType(cls)) {
+          if (builtin.isPrimitive) throw "Wasm numeric types can't be nullable";
+          return (builtin as w.RefType).withNullability(true);
+        }
         Class? boxedClass = boxedClasses[builtin];
         if (boxedClass != null) {
           info = classInfo[boxedClass]!;
