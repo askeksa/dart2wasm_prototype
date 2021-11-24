@@ -71,7 +71,7 @@ num pow(num x, num exponent) {
   return _pow(x.toDouble(), exponent.toDouble());
 }
 
-double _pow(double base, double exponent) native "math.pow";
+double _pow(double base, double exponent) native "Math.pow";
 
 int _intPow(int base, int exponent) {
   // Exponentiation by squaring.
@@ -110,16 +110,16 @@ double exp(num x) => _exp(x.toDouble());
 @patch
 double log(num x) => _log(x.toDouble());
 
-double _atan2(double a, double b) native "math.atan2";
-double _sin(double x) native "math.sin";
-double _cos(double x) native "math.cos";
-double _tan(double x) native "math.tan";
-double _acos(double x) native "math.acos";
-double _asin(double x) native "math.asin";
-double _atan(double x) native "math.atan";
-double _sqrt(double x) native "math.sqrt";
-double _exp(double x) native "math.exp";
-double _log(double x) native "math.log";
+double _atan2(double a, double b) native "Math.atan2";
+double _sin(double x) native "Math.sin";
+double _cos(double x) native "Math.cos";
+double _tan(double x) native "Math.tan";
+double _acos(double x) native "Math.acos";
+double _asin(double x) native "Math.asin";
+double _atan(double x) native "Math.atan";
+double _sqrt(double x) native "Math.sqrt";
+double _exp(double x) native "Math.exp";
+double _log(double x) native "Math.log";
 
 // TODO(iposva): Handle patch methods within a patch class correctly.
 @patch

@@ -39,4 +39,4 @@ where *options* include:
 
 The resulting `.wasm` file can be run with:
 
-`d8 --experimental-wasm-gc pkg/dart2wasm/bin/run_wasm.js -- `*outfile*`.wasm`
+`d8 --experimental-wasm-gc --wasm-gc-js-interop pkg/dart2wasm/bin/run_wasm.js -- `*outfile*`.wasm`

@@ -5,11 +5,4 @@
 // part of "internal_patch.dart";
 
 @patch
-void printToConsole(String line) {
-  for (int i = 0; i < line.length; i++) {
-    _printChar(line.codeUnitAt(i).toDouble());
-  }
-  _printChar(10);
-}
-
-void _printChar(double char) native "dart2wasm.printChar";
+void printToConsole(String line) native "dart2wasm.printToConsole";
