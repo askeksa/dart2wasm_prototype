@@ -544,6 +544,82 @@ class Intrinsifier {
       return true;
     }
 
+    if (member.enclosingLibrary.name == "dart._internal") {
+      switch (member.name.text) {
+        case "ensureTwoByteString":
+          ClassInfo oneByteInfo =
+              translator.classInfo[translator.oneByteStringClass]!;
+          ClassInfo twoByteInfo =
+              translator.classInfo[translator.twoByteStringClass]!;
+          w.Local inString = paramLocals[0];
+
+          // If the string is already a TwoByteString, just return it.
+          b.local_get(inString);
+          b.struct_get(translator.topInfo.struct, 0);
+          b.i32_const(twoByteInfo.classId);
+          b.i32_eq();
+          b.if_();
+          b.local_get(inString);
+          b.return_();
+          b.end();
+
+          // Locals for arrays, index and length
+          const int arrayFieldIndex = 2;
+          w.RefType oneByteType = oneByteInfo
+              .struct.fields[arrayFieldIndex].type.unpacked as w.RefType;
+          w.RefType twoByteType = twoByteInfo
+              .struct.fields[arrayFieldIndex].type.unpacked as w.RefType;
+          w.ArrayType oneByteArrayType =
+              (oneByteType.heapType as w.DefHeapType).def as w.ArrayType;
+          w.ArrayType twoByteArrayType =
+              (twoByteType.heapType as w.DefHeapType).def as w.ArrayType;
+          w.Local oneByteArray = codeGen.addLocal(oneByteType);
+          w.Local twoByteArray = codeGen.addLocal(twoByteType);
+          w.Local index = codeGen.addLocal(w.NumType.i32);
+          w.Local length = codeGen.addLocal(w.NumType.i32);
+
+          // Get input array and create array for TwoByteString.
+          b.local_get(inString);
+          translator.ref_cast(b, oneByteInfo);
+          b.struct_get(oneByteInfo.struct, arrayFieldIndex);
+          b.local_tee(oneByteArray);
+          b.array_len(oneByteArrayType);
+          b.local_tee(length);
+          translator.array_new_default(b, twoByteArrayType);
+          b.local_set(twoByteArray);
+
+          // Copy contents of string.
+          b.i32_const(0);
+          b.local_set(index);
+          w.Label block = b.block();
+          w.Label loop = b.loop();
+          b.local_get(index);
+          b.local_get(length);
+          b.i32_eq();
+          b.br_if(block);
+          b.local_get(twoByteArray);
+          b.local_get(index);
+          b.local_get(oneByteArray);
+          b.local_get(index);
+          b.array_get_u(oneByteArrayType);
+          b.array_set(twoByteArrayType);
+          b.local_get(index);
+          b.i32_const(1);
+          b.i32_add();
+          b.local_set(index);
+          b.br(loop);
+          b.end(); // loop
+          b.end(); // block
+
+          // Create TwoByteString object
+          b.i32_const(twoByteInfo.classId);
+          b.i32_const(initialIdentityHash);
+          b.local_get(twoByteArray);
+          translator.struct_new(b, twoByteInfo.struct);
+          return true;
+      }
+    }
+
     // int members
     if (member.enclosingClass == translator.boxedIntClass &&
         member.function.body == null) {

@@ -36,6 +36,8 @@ String allocateTwoByteString(int length)
 void writeIntoTwoByteString(String string, int index, int codePoint)
     native "Internal_writeIntoTwoByteString";
 
+String ensureTwoByteString(String string) native;
+
 const bool has63BitSmis = false;
 
 // Utility class now only used by the VM.

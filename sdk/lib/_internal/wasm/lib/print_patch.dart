@@ -5,4 +5,8 @@
 // part of "internal_patch.dart";
 
 @patch
-void printToConsole(String line) native "dart2wasm.printToConsole";
+void printToConsole(String line) {
+  printToConsoleJS(ensureTwoByteString(line));
+}
+
+void printToConsoleJS(String line) native "dart2wasm.printToConsole";
