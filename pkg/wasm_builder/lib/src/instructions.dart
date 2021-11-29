@@ -952,14 +952,14 @@ class Instructions with SerializerMixin {
     writeBytes(const [0xFB, 0x22]);
   }
 
-  void rtt_canon(DataType dataType) {
-    assert(_verifyTypes(const [], [Rtt(dataType, dataType.depth)],
-        trace: ['rtt.canon', dataType]));
+  void rtt_canon(DefType defType) {
+    assert(_verifyTypes(const [], [Rtt(defType, defType.depth)],
+        trace: ['rtt.canon', defType]));
     writeBytes(const [0xFB, 0x30]);
-    writeSigned(dataType.index);
+    writeSigned(defType.index);
   }
 
-  bool _verifyRttSub(DataType subType) {
+  bool _verifyRttSub(DefType subType) {
     if (!reachable) {
       return _debugTrace(['rtt.sub', subType], reachableAfter: false);
     }
@@ -975,10 +975,10 @@ class Instructions with SerializerMixin {
         trace: ['rtt.sub', subType]);
   }
 
-  void rtt_sub(DataType dataType) {
-    assert(_verifyRttSub(dataType));
+  void rtt_sub(DefType defType) {
+    assert(_verifyRttSub(defType));
     writeBytes(const [0xFB, 0x31]);
-    writeSigned(dataType.index);
+    writeSigned(defType.index);
   }
 
   bool _verifyCast(List<ValueType> Function(List<ValueType>) outputsFun,
