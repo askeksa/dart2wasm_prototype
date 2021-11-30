@@ -382,7 +382,10 @@ class Endian {
 
   static const Endian big = const Endian._(false);
   static const Endian little = const Endian._(true);
-  static const Endian host = Endian.little;
+  static final Endian host =
+      (new ByteData.view(new Uint16List.fromList([1]).buffer)).getInt8(0) == 1
+          ? little
+          : big;
 }
 
 /// A fixed-length, random-access sequence of bytes that also provides random

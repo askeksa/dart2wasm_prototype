@@ -16,6 +16,7 @@ import 'package:front_end/src/api_unstable/vm.dart'
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart';
+import 'package:kernel/clone.dart';
 import 'package:kernel/core_types.dart';
 import 'package:kernel/library_index.dart';
 import 'package:kernel/reference_from_index.dart';
@@ -49,7 +50,23 @@ class WasmTarget extends Target {
   @override
   List<String> get extraIndexedLibraries => const <String>[
         "dart:collection",
+        "dart:typed_data",
       ];
+
+  void _patchHostEndian(CoreTypes coreTypes) {
+    // Fix Endian.host to be a const field equal to Endian.little instead of
+    // a final field. Wasm is a little-endian platform.
+    // Can't use normal patching process for this because CFE does not
+    // support patching fields.
+    // See http://dartbug.com/32836 for the background.
+    final Field host =
+        coreTypes.index.getField('dart:typed_data', 'Endian', 'host');
+    final Field little =
+        coreTypes.index.getField('dart:typed_data', 'Endian', 'little');
+    host.isConst = true;
+    host.initializer = new CloneVisitorNotMembers().clone(little.initializer!)
+      ..parent = host;
+  }
 
   @override
   void performPreConstantEvaluationTransformations(
@@ -60,6 +77,7 @@ class WasmTarget extends Target {
       {void Function(String msg)? logger,
       ChangedStructureNotifier? changedStructureNotifier}) {
     constantsBackend = WasmConstantsBackend(coreTypes);
+    _patchHostEndian(coreTypes);
   }
 
   @override
