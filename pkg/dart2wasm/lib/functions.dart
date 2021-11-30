@@ -69,7 +69,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
         String name = externalName.substring(dot + 1);
         w.FunctionType ftype = _makeFunctionType(
             procedure.reference, procedure.function.returnType, null,
-            getter: procedure.isGetter, isImportOrExport: true);
+            isImportOrExport: true);
         _functions[procedure.reference] = m.importFunction(module, name, ftype);
       }
     }
@@ -91,7 +91,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
       assert(!node.isGetter);
       w.FunctionType ftype = _makeFunctionType(
           target, node.function.returnType, null,
-          getter: false, isImportOrExport: true);
+          isImportOrExport: true);
       _functions[target] = m.addFunction(ftype);
     }
   }
@@ -124,6 +124,10 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
 
   w.FunctionType visitField(Field node, Reference target) {
     if (!node.isInstanceMember) {
+      if (target == node.fieldReference) {
+        // Static field initializer function
+        return _makeFunctionType(target, node.type, null);
+      }
       String kind = target == node.setterReference ? "setter" : "getter";
       throw "No implicit $kind function for static field: $node";
     }
@@ -134,19 +138,17 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
     assert(!node.isAbstract);
     return node.isInstanceMember
         ? translator.dispatchTable.selectorForTarget(node.reference).signature
-        : _makeFunctionType(target, node.function.returnType, null,
-            getter: node.isGetter);
+        : _makeFunctionType(target, node.function.returnType, null);
   }
 
   w.FunctionType visitConstructor(Constructor node, Reference target) {
     return _makeFunctionType(target, VoidType(),
-        translator.classInfo[node.enclosingClass]!.nonNullableType,
-        getter: false);
+        translator.classInfo[node.enclosingClass]!.nonNullableType);
   }
 
   w.FunctionType _makeFunctionType(
       Reference target, DartType returnType, w.ValueType? receiverType,
-      {required bool getter, bool isImportOrExport = false}) {
+      {bool isImportOrExport = false}) {
     Member member = target.asMember;
     int typeParamCount = 0;
     Iterable<DartType> params;

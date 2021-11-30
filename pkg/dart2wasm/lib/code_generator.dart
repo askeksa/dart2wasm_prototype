@@ -132,6 +132,28 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
 
     if (member is Field) {
+      if (member.isStatic) {
+        // Static field initializer function
+        assert(reference == member.fieldReference);
+        closures.findCaptures(member);
+        closures.collectContexts(member);
+        closures.buildContexts();
+
+        w.Global global = translator.globals.getGlobal(member);
+        w.Global? flag = translator.globals.getGlobalInitializedFlag(member);
+        wrap(member.initializer!, global.type.type);
+        b.global_set(global);
+        if (flag != null) {
+          b.i32_const(1);
+          b.global_set(flag);
+        }
+        b.global_get(global);
+        translator.convertType(
+            function, global.type.type, function.type.outputs.single);
+        b.end();
+        return;
+      }
+
       // Implicit getter or setter
       w.StructType struct =
           translator.classInfo[member.enclosingClass!]!.struct;
@@ -1169,9 +1191,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitStaticGet(StaticGet node, w.ValueType expectedType) {
     Member target = node.target;
     if (target is Field) {
-      w.Global global = translator.globals.getGlobal(target);
-      b.global_get(global);
-      return global.type.type;
+      return translator.globals.readGlobal(b, target);
     } else {
       return _call(target.reference);
     }

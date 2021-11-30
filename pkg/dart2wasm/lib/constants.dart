@@ -224,6 +224,10 @@ class Constants {
     b.end();
   }
 
+  void ensureConstant(Constant constant) {
+    ConstantCreator(this).ensureConstant(constant);
+  }
+
   void instantiateConstant(w.DefinedFunction? function, w.Instructions b,
       Constant constant, w.ValueType expectedType) {
     ConstantInstantiator(this, function, b, expectedType).instantiate(constant);
@@ -248,7 +252,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
   }
 
   w.ValueType defaultConstant(Constant constant) {
-    ConstantInfo info = ConstantCreator(this).ensureConstant(constant)!;
+    ConstantInfo info = ConstantCreator(constants).ensureConstant(constant)!;
     w.ValueType globalType = info.global.type.type;
     if (globalType.nullable) {
       if (info.function != null) {
@@ -324,14 +328,13 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
 }
 
 class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
-  final ConstantInstantiator instantiator;
+  final Constants constants;
 
-  ConstantCreator(this.instantiator);
+  ConstantCreator(this.constants);
 
-  Translator get translator => instantiator.translator;
-  Constants get constants => instantiator.constants;
-  w.Module get m => instantiator.m;
-  bool get lazyConstants => instantiator.constants.lazyConstants;
+  Translator get translator => constants.translator;
+  w.Module get m => constants.m;
+  bool get lazyConstants => constants.lazyConstants;
 
   ConstantInfo? ensureConstant(Constant constant) {
     ConstantInfo? info = constants.constantInfo[constant];

@@ -125,7 +125,7 @@ class WasmTarget extends Target {
   bool get supportsLateLoweringSentinel => false;
 
   @override
-  bool get useStaticFieldLowering => true;
+  bool get useStaticFieldLowering => false;
 
   @override
   bool enableNative(Uri uri) => true;
