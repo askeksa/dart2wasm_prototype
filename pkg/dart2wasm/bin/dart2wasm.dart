@@ -34,6 +34,9 @@ import 'package:vm/transformations/type_flow/transformer.dart'
     show CleanupAnnotations, AnnotateKernel, TFADevirtualization, TreeShaker;
 import 'package:vm/transformations/type_flow/unboxing_info.dart';
 
+import 'package:vm/transformations/type_flow/transformer.dart' as globalTypeFlow
+    show transformComponent;
+
 import 'package:dart2wasm/constants_backend.dart';
 import 'package:dart2wasm/transformers.dart' as wasmTrans;
 import 'package:dart2wasm/translator.dart';
@@ -243,48 +246,16 @@ Future<int> main(List<String> args) async {
   Component component = compilerResult.component!;
   CoreTypes coreTypes = compilerResult.coreTypes!;
 
-  final hierarchy = compilerResult.classHierarchy as ClosedWorldClassHierarchy;
-  final libraryIndex = new LibraryIndex.all(component);
-  final typeFlowAnalysis = TypeFlowAnalysis(
-      target,
+  final tableSelectorAssigner = globalTypeFlow.transformComponent(
+      target, coreTypes, component,
+      treeShakeSignatures: true, treeShakeWriteOnlyFields: false);
+
+  var translator = Translator(
       component,
       coreTypes,
-      hierarchy,
-      GenericInterfacesInfoImpl(coreTypes, hierarchy),
-      TypeEnvironment(coreTypes, hierarchy),
-      libraryIndex,
-      null,
-      null);
-  typeFlowAnalysis.addRawCall(DirectSelector(component.mainMethod!));
-
-  CleanupAnnotations(coreTypes, libraryIndex, null).visitComponent(component);
-
-  typeFlowAnalysis.process();
-
-  final treeShaker =
-      TreeShaker(component, typeFlowAnalysis, treeShakeWriteOnlyFields: false);
-  treeShaker.transformComponent(component);
-
-  final devirtualization = new TFADevirtualization(
-      component, typeFlowAnalysis, hierarchy, treeShaker.fieldMorpher);
-  devirtualization.visitComponent(component);
-
-  final tableSelectorAssigner = new TableSelectorAssigner(component);
-
-  final signatureShaker =
-      new SignatureShaker(typeFlowAnalysis, tableSelectorAssigner);
-  signatureShaker.transformComponent(component);
-
-  // Not used but needed by AnnotateKernel
-  final unboxingInfo = new UnboxingInfoManager(typeFlowAnalysis)
-    ..analyzeComponent(component, typeFlowAnalysis, tableSelectorAssigner);
-
-  new AnnotateKernel(component, typeFlowAnalysis, treeShaker.fieldMorpher,
-          tableSelectorAssigner, unboxingInfo)
-      .visitComponent(component);
-
-  var translator = Translator(component, coreTypes,
-      TypeEnvironment(coreTypes, hierarchy), tableSelectorAssigner, options);
+      TypeEnvironment(coreTypes, compilerResult.classHierarchy!),
+      tableSelectorAssigner,
+      options);
   File(output).writeAsBytesSync(translator.translate().encode());
 
   return 0;
