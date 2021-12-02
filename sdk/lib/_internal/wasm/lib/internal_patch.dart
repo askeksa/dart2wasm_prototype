@@ -5,20 +5,14 @@
 import "dart:typed_data" show Uint8List;
 
 /// The returned string is a [_OneByteString] with uninitialized content.
-@pragma("vm:recognized", "asm-intrinsic")
-String allocateOneByteString(int length)
-    native "Internal_allocateOneByteString";
+String allocateOneByteString(int length) native;
 
 /// The [string] must be a [_OneByteString]. The [index] must be valid.
-@pragma("vm:recognized", "asm-intrinsic")
-void writeIntoOneByteString(String string, int index, int codePoint)
-    native "Internal_writeIntoOneByteString";
+void writeIntoOneByteString(String string, int index, int codePoint) native;
 
 /// It is assumed that [from] is a native [Uint8List] class and [to] is a
 /// [_OneByteString]. The [fromStart] and [toStart] indices together with the
 /// [length] must specify ranges within the bounds of the list / string.
-@pragma("vm:recognized", "other")
-@pragma("vm:prefer-inline")
 void copyRangeFromUint8ListToOneByteString(
     Uint8List from, String to, int fromStart, int toStart, int length) {
   for (int i = 0; i < length; i++) {
@@ -27,14 +21,10 @@ void copyRangeFromUint8ListToOneByteString(
 }
 
 /// The returned string is a [_TwoByteString] with uninitialized content.
-@pragma("vm:recognized", "asm-intrinsic")
-String allocateTwoByteString(int length)
-    native "Internal_allocateTwoByteString";
+String allocateTwoByteString(int length) native;
 
 /// The [string] must be a [_TwoByteString]. The [index] must be valid.
-@pragma("vm:recognized", "asm-intrinsic")
-void writeIntoTwoByteString(String string, int index, int codePoint)
-    native "Internal_writeIntoTwoByteString";
+void writeIntoTwoByteString(String string, int index, int codePoint) native;
 
 String ensureTwoByteString(String string) native;
 
@@ -42,7 +32,6 @@ const bool has63BitSmis = false;
 
 // Utility class now only used by the VM.
 class Lists {
-  @pragma("vm:prefer-inline")
   static void copy(List src, int srcStart, List dst, int dstStart, int count) {
     if (srcStart < dstStart) {
       for (int i = srcStart + count - 1, j = dstStart + count - 1;
@@ -66,8 +55,7 @@ class Lists {
 T unsafeCast<T>(Object? v) native "Internal_unsafeCast";
 
 // Thomas Wang 64-bit mix.
-// http://www.concentric.net/~Ttwang/tech/inthash.htm
-// via. http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm
+// https://gist.github.com/badboy/6267743
 int mix64(int n) {
   n = (~n) + (n << 21); // n = (n << 21) - n - 1;
   n = n ^ (n >>> 24);

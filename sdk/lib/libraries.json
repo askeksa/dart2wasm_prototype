@@ -165,7 +165,7 @@
           "_internal/wasm/lib/internal_patch.dart",
           "_internal/wasm/lib/patch.dart",
           "_internal/wasm/lib/print_patch.dart",
-          "_internal/wasm/lib/symbol_patch.dart"
+          "_internal/vm/lib/symbol_patch.dart"
         ]
       },
       "async": {
@@ -192,9 +192,9 @@
         "patches": [
           "_internal/wasm/lib/core_patch.dart",
           "_internal/wasm/lib/array.dart",
-          "_internal/wasm/lib/array_patch.dart",
+          "_internal/vm/lib/array_patch.dart",
           "_internal/wasm/lib/bool.dart",
-          "_internal/wasm/lib/bool_patch.dart",
+          "_internal/vm/lib/bool_patch.dart",
           "_internal/wasm/lib/date_patch.dart",
           "_internal/wasm/lib/double.dart",
           "_internal/wasm/lib/expando_patch.dart",
@@ -203,8 +203,8 @@
           "_internal/wasm/lib/identical_patch.dart",
           "_internal/wasm/lib/immutable_map.dart",
           "_internal/wasm/lib/int.dart",
-          "_internal/wasm/lib/integers_patch.dart",
-          "_internal/wasm/lib/null_patch.dart",
+          "_internal/vm/lib/integers_patch.dart",
+          "_internal/vm/lib/null_patch.dart",
           "_internal/wasm/lib/map_patch.dart",
           "_internal/wasm/lib/object_patch.dart",
           "_internal/wasm/lib/string_buffer_patch.dart",

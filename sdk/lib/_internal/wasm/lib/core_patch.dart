@@ -25,11 +25,6 @@ import "dart:_internal"
         makeListFixedLength,
         patch,
         unsafeCast,
-        WasmDataRef,
-        WasmI8,
-        WasmI16,
-        WasmIntArray,
-        WasmObjectArray,
         writeIntoOneByteString,
         writeIntoTwoByteString;
 
@@ -52,3 +47,5 @@ import "dart:typed_data"
     show Endian, Uint8List, Int64List, Uint16List, Uint32List;
 
 import 'dart:wasm';
+
+typedef _Smi = int; // For compatibility with VM patch files

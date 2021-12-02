@@ -42,7 +42,6 @@ class Object {
   static String _toString(obj) => "Instance of '${obj.runtimeType}'";
 
   @patch
-  @pragma("vm:entry-point", "call")
   dynamic noSuchMethod(Invocation invocation) {
     // TODO(regis): Remove temp constructor identifier 'withInvocation'.
     throw new NoSuchMethodError.withInvocation(this, invocation);
@@ -52,20 +51,3 @@ class Object {
   // Result type is either "dart:core#_Type" or "dart:core#_FunctionType".
   Type get runtimeType native "Object_runtimeType";
 }
-
-// Used by DartLibraryCalls::Equals.
-@pragma("vm:entry-point", "call")
-bool _objectEquals(Object? o1, Object? o2) => o1 == o2;
-
-// Used by DartLibraryCalls::HashCode.
-@pragma("vm:entry-point", "call")
-int _objectHashCode(Object? obj) => obj.hashCode;
-
-// Used by DartLibraryCalls::ToString.
-@pragma("vm:entry-point", "call")
-String _objectToString(Object? obj) => obj.toString();
-
-// Used by DartEntry::InvokeNoSuchMethod.
-@pragma("vm:entry-point", "call")
-dynamic _objectNoSuchMethod(Object? obj, Invocation invocation) =>
-    obj.noSuchMethod(invocation);
