@@ -14,6 +14,9 @@ class String {
   @patch
   factory String.fromCharCodes(Iterable<int> charCodes,
       [int start = 0, int? end]) {
+    // TODO: Remove these null checks once all code is opted into strong nonnullable mode.
+    if (charCodes == null) throw new ArgumentError.notNull("charCodes");
+    if (start == null) throw new ArgumentError.notNull("start");
     return _StringBase.createFromCharCodes(charCodes, start, end, null);
   }
 
@@ -42,8 +45,9 @@ class String {
   }
 
   @patch
-  const factory String.fromEnvironment(String name, {String defaultValue = ""})
-      native "String_fromEnvironment";
+  @pragma("vm:external-name", "String_fromEnvironment")
+  external const factory String.fromEnvironment(String name,
+      {String defaultValue = ""});
 
   bool get _isOneByte;
   String _substringUnchecked(int startIndex, int endIndex);
@@ -154,6 +158,7 @@ abstract class _StringBase implements String {
     int bits = 0;
     for (int i = start; i < end; i++) {
       int code = charCodes[i];
+      if (code is! _Smi) throw new ArgumentError(charCodes);
       bits |= code;
     }
     return bits;
@@ -215,6 +220,8 @@ abstract class _StringBase implements String {
     return createFromCharCodes(charCodeList, 0, length, bits);
   }
 
+  // Inlining is disabled as a workaround to http://dartbug.com/37800.
+  @pragma("vm:never-inline")
   static String _createOneByteString(List<int> charCodes, int start, int len) {
     // It's always faster to do this in Dart than to call into the runtime.
     var s = _OneByteString._allocate(len);
@@ -232,15 +239,22 @@ abstract class _StringBase implements String {
     return s;
   }
 
-  static String _createFromCodePoints(List<int> codePoints, int start, int end)
-      native "StringBase_createFromCodePoints";
+  @pragma("vm:external-name", "StringBase_createFromCodePoints")
+  external static String _createFromCodePoints(
+      List<int> codePoints, int start, int end);
 
   String operator [](int index) => String.fromCharCode(codeUnitAt(index));
 
   int codeUnitAt(int index); // Implemented in the subclasses.
 
+  @pragma("vm:recognized", "graph-intrinsic")
+  @pragma("vm:exact-result-type", "dart:core#_Smi")
+  @pragma("vm:prefer-inline")
+  @pragma("vm:external-name", "String_getLength")
   int get length; // Implemented in the subclasses.
 
+  @pragma("vm:recognized", "asm-intrinsic")
+  @pragma("vm:exact-result-type", bool)
   bool get isEmpty {
     return this.length == 0;
   }
@@ -253,6 +267,7 @@ abstract class _StringBase implements String {
     return this;
   }
 
+  @pragma("vm:exact-result-type", bool)
   bool operator ==(Object other) {
     if (identical(this, other)) {
       return true;
@@ -288,6 +303,8 @@ abstract class _StringBase implements String {
     return 0;
   }
 
+  @pragma("vm:recognized", "asm-intrinsic")
+  @pragma("vm:exact-result-type", bool)
   bool _substringMatches(int start, String other) {
     if (other.isEmpty) return true;
     final len = other.length;
@@ -365,17 +382,7 @@ abstract class _StringBase implements String {
   }
 
   String substring(int startIndex, [int? endIndex]) {
-    endIndex ??= this.length;
-
-    if ((startIndex < 0) || (startIndex > this.length)) {
-      throw new RangeError.value(startIndex);
-    }
-    if ((endIndex < 0) || (endIndex > this.length)) {
-      throw new RangeError.value(endIndex);
-    }
-    if (startIndex > endIndex) {
-      throw new RangeError.value(startIndex);
-    }
+    endIndex = RangeError.checkValidRange(startIndex, endIndex, this.length);
     return _substringUnchecked(startIndex, endIndex);
   }
 
@@ -397,8 +404,8 @@ abstract class _StringBase implements String {
     return _substringUncheckedNative(startIndex, endIndex);
   }
 
-  String _substringUncheckedNative(int startIndex, int endIndex)
-      native "StringBase_substringUnchecked";
+  @pragma("vm:external-name", "StringBase_substringUnchecked")
+  external String _substringUncheckedNative(int startIndex, int endIndex);
 
   // Checks for one-byte whitespaces only.
   static bool _isOneByteWhitespace(int codeUnit) {
@@ -618,7 +625,7 @@ abstract class _StringBase implements String {
     if (replacement == null) throw new ArgumentError.notNull("replacement");
 
     int startIndex = 0;
-    // String fragments that replace the the prefix [this] up to [startIndex].
+    // String fragments that replace the prefix [this] up to [startIndex].
     List matches = [];
     int length = 0; // Length of all fragments.
     int replacementLength = replacement.length;
@@ -659,7 +666,7 @@ abstract class _StringBase implements String {
     int writeIndex = 0;
     for (int i = 0; i < matches.length; i++) {
       var entry = matches[i];
-      if (entry is int) {
+      if (entry is _Smi) {
         int sliceStart = entry;
         int sliceEnd;
         if (sliceStart < 0) {
@@ -701,10 +708,9 @@ abstract class _StringBase implements String {
    * If they are, then we have to check the base string slices to know
    * whether the result must be a one-byte string.
    */
-  static String
-      _joinReplaceAllResult(String base, List matches, int length,
-          bool replacementStringsAreOneByte)
-      native "StringBase_joinReplaceAllResult";
+  @pragma("vm:external-name", "StringBase_joinReplaceAllResult")
+  external static String _joinReplaceAllResult(
+      String base, List matches, int length, bool replacementStringsAreOneByte);
 
   String replaceAllMapped(Pattern pattern, String replace(Match match)) {
     if (pattern == null) throw new ArgumentError.notNull("pattern");
@@ -803,6 +809,18 @@ abstract class _StringBase implements String {
     return buffer.toString();
   }
 
+  // Convert single object to string.
+  @pragma("vm:entry-point", "call")
+  static String _interpolateSingle(Object? o) {
+    if (o is String) return o;
+    final s = o.toString();
+    // TODO(40614): Remove once non-nullability is sound.
+    if (s is! String) {
+      throw _interpolationError(o, s);
+    }
+    return s;
+  }
+
   /**
    * Convert all objects in [values] to strings and concat them
    * into a result string.
@@ -831,6 +849,12 @@ abstract class _StringBase implements String {
     }
     // All strings were one-byte strings.
     return _OneByteString._concatAll(values, totalLength);
+  }
+
+  static ArgumentError _interpolationError(Object? o, Object? result) {
+    // Since Dart 2.0, [result] can only be null.
+    return new ArgumentError.value(
+        o, "object", "toString method returned 'null'");
   }
 
   Iterable<Match> allMatches(String string, [int start = 0]) {
@@ -895,9 +919,11 @@ abstract class _StringBase implements String {
 
   Runes get runes => new Runes(this);
 
-  String toUpperCase() native "String_toUpperCase";
+  @pragma("vm:external-name", "String_toUpperCase")
+  external String toUpperCase();
 
-  String toLowerCase() native "String_toLowerCase";
+  @pragma("vm:external-name", "String_toLowerCase")
+  external String toLowerCase();
 
   // Concatenate ['start', 'end'[ elements of 'strings'.
   static String _concatRange(List<String> strings, int start, int end) {
@@ -987,16 +1013,17 @@ class _OneByteString extends _StringBase {
   }
 
   List<String> _splitWithCharCode(int charCode) {
-    List<String> result = [];
+    final parts = <String>[];
+    int i = 0;
     int start = 0;
-    for (int i = 0; i < length; i++) {
-      if (codeUnitAt(i) == charCode) {
-        result.add(_substringUnchecked(start, i));
+    for (i = 0; i < this.length; ++i) {
+      if (this.codeUnitAt(i) == charCode) {
+        parts.add(this._substringUnchecked(start, i));
         start = i + 1;
       }
     }
-    result.add(_substringUnchecked(start, length));
-    return result;
+    parts.add(this._substringUnchecked(start, i));
+    return parts;
   }
 
   List<String> split(Pattern pattern) {
@@ -1244,8 +1271,9 @@ class _OneByteString extends _StringBase {
     return unsafeCast<_OneByteString>(allocateOneByteString(length));
   }
 
-  static _OneByteString _allocateFromOneByteList(List<int> list, int start,
-      int end) native "OneByteString_allocateFromOneByteList";
+  @pragma("vm:external-name", "OneByteString_allocateFromOneByteList")
+  external static _OneByteString _allocateFromOneByteList(
+      List<int> list, int start, int end);
 
   // This is internal helper method. Code point value must be a valid
   // Latin1 value (0..0xFF), index must be valid.
@@ -1255,6 +1283,7 @@ class _OneByteString extends _StringBase {
   }
 
   // Should be optimizable to a memory move.
+  // Accepts both _OneByteString and _ExternalOneByteString as argument.
   // Returns index after last character written.
   int _setRange(int index, String oneByteString, int start, int end) {
     assert(oneByteString._isOneByte);
