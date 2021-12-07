@@ -11,6 +11,8 @@ import "dart:_internal" as internal;
 
 import "dart:_internal" show patch, IterableElementError;
 
+import "dart:math" show max;
+
 import "dart:typed_data" show Uint32List;
 
 class _TypeTest<T> {
