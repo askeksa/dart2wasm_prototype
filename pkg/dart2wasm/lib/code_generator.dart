@@ -935,6 +935,18 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   }
 
   @override
+  w.ValueType visitDynamicInvocation(
+      DynamicInvocation node, w.ValueType expectedType) {
+    if (node.name.text != "call") {
+      _unimplemented(node, "Dynamic invocation of ${node.name.text}",
+          [if (expectedType != voidMarker) expectedType]);
+      return expectedType;
+    }
+    return _functionCall(
+        node.arguments.positional.length, node.receiver, node.arguments);
+  }
+
+  @override
   w.ValueType visitEqualsCall(EqualsCall node, w.ValueType expectedType) {
     w.ValueType? intrinsicResult = intrinsifier.generateEqualsIntrinsic(node);
     if (intrinsicResult != null) return intrinsicResult;
@@ -1500,12 +1512,17 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       FunctionInvocation node, w.ValueType expectedType) {
     FunctionType functionType = node.functionType!;
     int parameterCount = functionType.requiredParameterCount;
+    return _functionCall(parameterCount, node.receiver, node.arguments);
+  }
+
+  w.ValueType _functionCall(
+      int parameterCount, Expression receiver, Arguments arguments) {
     w.StructType struct = translator.functionStructType(parameterCount);
-    w.Local temp = addLocal(translateType(functionType));
-    wrap(node.receiver, temp.type);
+    w.Local temp = addLocal(w.RefType.def(struct, nullable: false));
+    wrap(receiver, temp.type);
     b.local_tee(temp);
     b.struct_get(struct, 2); // Context
-    for (Expression arg in node.arguments.positional) {
+    for (Expression arg in arguments.positional) {
       wrap(arg, translator.topInfo.nullableType);
     }
     b.local_get(temp);

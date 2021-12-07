@@ -118,8 +118,8 @@ final _initialData = new List.filled(0, null);
 
 @pragma("wasm:entry-point")
 mixin _LinkedHashMapMixin<K, V> implements _HashBase {
-  int _hashCode(K e);
-  bool _equals(K e1, K e2);
+  int _hashCode(e);
+  bool _equals(e1, e2);
   int get _checkSum;
   bool _isModifiedSince(List oldData, int oldCheckSum);
 
@@ -261,7 +261,7 @@ mixin _LinkedHashMapMixin<K, V> implements _HashBase {
     final int size = _index.length;
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
-    final int fullHash = _hashCode(key as K);
+    final int fullHash = _hashCode(key);
     final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int pair = _index[i];
@@ -270,7 +270,7 @@ mixin _LinkedHashMapMixin<K, V> implements _HashBase {
         final int entry = hashPattern ^ pair;
         if (entry < maxEntries) {
           final int d = entry << 1;
-          if (_equals(key as K, _data[d])) {
+          if (_equals(key, _data[d])) {
             _index[i] = _HashBase._DELETED_PAIR;
             _HashBase._setDeletedAt(_data, d);
             V value = _data[d + 1];
@@ -291,7 +291,7 @@ mixin _LinkedHashMapMixin<K, V> implements _HashBase {
     final int size = _index.length;
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
-    final int fullHash = _hashCode(key as K);
+    final int fullHash = _hashCode(key);
     final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int pair = _index[i];
@@ -300,7 +300,7 @@ mixin _LinkedHashMapMixin<K, V> implements _HashBase {
         final int entry = hashPattern ^ pair;
         if (entry < maxEntries) {
           final int d = entry << 1;
-          if (_equals(key as K, _data[d])) {
+          if (_equals(key, _data[d])) {
             return _data[d + 1];
           }
         }
@@ -357,13 +357,13 @@ class _CompactLinkedIdentityHashMap<K, V> extends _HashFieldBase
 class _CompactLinkedCustomHashMap<K, V> extends _HashFieldBase
     with MapMixin<K, V>, _LinkedHashMapMixin<K, V>, _HashBase
     implements LinkedHashMap<K, V> {
-  final bool Function(K, K) _equality;
-  final int Function(K) _hasher;
-  final bool Function(Object?) _validKey;
+  final _equality;
+  final _hasher;
+  final _validKey;
 
   // TODO(koda): Ask gbracha why I cannot have fields _equals/_hashCode.
-  int _hashCode(K e) => _hasher(e);
-  bool _equals(K e1, K e2) => _equality(e1, e2);
+  int _hashCode(e) => _hasher(e);
+  bool _equals(e1, e2) => _equality(e1, e2);
 
   bool containsKey(Object? o) => _validKey(o) ? super.containsKey(o) : false;
   V? operator [](Object? o) => _validKey(o) ? super[o] : null;
@@ -608,9 +608,9 @@ class _CompactLinkedIdentityHashSet<E> extends _CompactLinkedHashSet<E>
 }
 
 class _CompactLinkedCustomHashSet<E> extends _CompactLinkedHashSet<E> {
-  final bool Function(E, E) _equality;
-  final int Function(E) _hasher;
-  final bool Function(Object?) _validKey;
+  final _equality;
+  final _hasher;
+  final _validKey;
 
   int _hashCode(e) => _hasher(e);
   bool _equals(e1, e2) => _equality(e1, e2);
