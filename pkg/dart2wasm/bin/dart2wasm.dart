@@ -18,21 +18,12 @@ import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart';
 import 'package:kernel/clone.dart';
 import 'package:kernel/core_types.dart';
-import 'package:kernel/library_index.dart';
 import 'package:kernel/reference_from_index.dart';
 import 'package:kernel/target/changed_structure_notifier.dart';
 import 'package:kernel/target/targets.dart';
 import 'package:kernel/transformations/mixin_full_resolution.dart'
     as transformMixins show transformLibraries;
 import 'package:kernel/type_environment.dart';
-
-import 'package:vm/transformations/type_flow/analysis.dart';
-import 'package:vm/transformations/type_flow/calls.dart' show DirectSelector;
-import 'package:vm/transformations/type_flow/signature_shaking.dart';
-import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
-import 'package:vm/transformations/type_flow/transformer.dart'
-    show CleanupAnnotations, AnnotateKernel, TFADevirtualization, TreeShaker;
-import 'package:vm/transformations/type_flow/unboxing_info.dart';
 
 import 'package:vm/transformations/type_flow/transformer.dart' as globalTypeFlow
     show transformComponent;
