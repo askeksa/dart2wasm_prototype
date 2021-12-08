@@ -35,6 +35,7 @@ class TranslatorOptions {
   bool printKernel = false;
   bool printWasm = false;
   bool runtimeTypes = true;
+  bool stringDataSegments = false;
   bool stubBodies = false;
   List<int>? watchPoints = null;
 
@@ -650,13 +651,13 @@ class Translator {
     }
   }
 
-  void array_init_from_data(w.Instructions b, w.ArrayType type, int length,
-      w.DataSegment data, int offset) {
+  void array_init_from_data(
+      w.Instructions b, w.ArrayType type, w.DataSegment data) {
     if (options.runtimeTypes) {
       b.rtt_canon(type);
-      b.array_init_from_data(type, length, data, offset);
+      b.array_init_from_data(type, data);
     } else {
-      b.array_init_from_data_static(type, length, data, offset);
+      b.array_init_from_data_static(type, data);
     }
   }
 

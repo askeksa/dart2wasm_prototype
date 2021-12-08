@@ -82,8 +82,9 @@ class Module with SerializerMixin {
     return memory;
   }
 
-  DataSegment addDataSegment(Uint8List initialContent,
-      [Memory? memory, int? offset]) {
+  DataSegment addDataSegment(
+      [Uint8List? initialContent, Memory? memory, int? offset]) {
+    initialContent ??= Uint8List(0);
     assert((memory != null) == (offset != null));
     assert(memory == null ||
         offset! >= 0 && offset + initialContent.length <= memory.minSize);

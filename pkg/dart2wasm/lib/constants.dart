@@ -31,6 +31,8 @@ class Constants {
   final StringBuffer twoByteStrings = StringBuffer();
   late final w.DefinedFunction oneByteStringFunction;
   late final w.DefinedFunction twoByteStringFunction;
+  late final w.DataSegment oneByteStringSegment;
+  late final w.DataSegment twoByteStringSegment;
   late final w.DefinedGlobal emptyString;
   late final w.DefinedGlobal emptyTypeList;
   late final ClassInfo typeInfo = translator.classInfo[translator.typeClass]!;
@@ -41,6 +43,9 @@ class Constants {
     if (lazyConstants) {
       oneByteStringFunction = makeStringFunction(translator.oneByteStringClass);
       twoByteStringFunction = makeStringFunction(translator.twoByteStringClass);
+    } else if (stringDataSegments) {
+      oneByteStringSegment = m.addDataSegment();
+      twoByteStringSegment = m.addDataSegment();
     }
     initEmptyString();
     initEmptyTypeList();
@@ -48,6 +53,7 @@ class Constants {
 
   w.Module get m => translator.m;
   bool get lazyConstants => translator.options.lazyConstants;
+  bool get stringDataSegments => translator.options.stringDataSegments;
 
   void initEmptyString() {
     ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
@@ -412,10 +418,30 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
 
         b.i32_const(info.classId);
         b.i32_const(initialIdentityHash);
-        for (int charCode in constant.value.codeUnits) {
-          b.i32_const(charCode);
+        if (constants.stringDataSegments) {
+          w.DataSegment segment;
+          Uint8List bytes;
+          if (isOneByte) {
+            segment = constants.oneByteStringSegment;
+            bytes = Uint8List.fromList(constant.value.codeUnits);
+          } else {
+            assert(Endian.host == Endian.little);
+            segment = constants.twoByteStringSegment;
+            bytes = Uint16List.fromList(constant.value.codeUnits)
+                .buffer
+                .asUint8List();
+          }
+          int offset = segment.length;
+          segment.append(bytes);
+          b.i32_const(constant.value.length);
+          b.i32_const(offset);
+          translator.array_init_from_data(b, arrayType, segment);
+        } else {
+          for (int charCode in constant.value.codeUnits) {
+            b.i32_const(charCode);
+          }
+          translator.array_init(b, arrayType, constant.value.length);
         }
-        translator.array_init(b, arrayType, constant.value.length);
         translator.struct_new(b, info);
       }
     });
