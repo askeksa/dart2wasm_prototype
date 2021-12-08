@@ -230,6 +230,7 @@ class Constants {
 
   void instantiateConstant(w.DefinedFunction? function, w.Instructions b,
       Constant constant, w.ValueType expectedType) {
+    if (expectedType == translator.voidMarker) return;
     ConstantInstantiator(this, function, b, expectedType).instantiate(constant);
   }
 }
