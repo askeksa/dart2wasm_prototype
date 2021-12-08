@@ -15,7 +15,7 @@ class _BoxedBool implements bool {
         : false;
   }
 
-  bool operator &(bool other) => this & other;
-  bool operator ^(bool other) => this ^ other;
-  bool operator |(bool other) => this | other;
+  bool operator &(bool other) => this & other; // Intrinsic &
+  bool operator ^(bool other) => this ^ other; // Intrinsic ^
+  bool operator |(bool other) => this | other; // Intrinsic |
 }

@@ -5,10 +5,11 @@
 import "dart:typed_data" show Uint8List;
 
 /// The returned string is a [_OneByteString] with uninitialized content.
-String allocateOneByteString(int length) native;
+String allocateOneByteString(int length) native "allocateOneByteString";
 
 /// The [string] must be a [_OneByteString]. The [index] must be valid.
-void writeIntoOneByteString(String string, int index, int codePoint) native;
+void writeIntoOneByteString(String string, int index, int codePoint)
+    native "writeIntoOneByteString";
 
 /// It is assumed that [from] is a native [Uint8List] class and [to] is a
 /// [_OneByteString]. The [fromStart] and [toStart] indices together with the
@@ -21,12 +22,13 @@ void copyRangeFromUint8ListToOneByteString(
 }
 
 /// The returned string is a [_TwoByteString] with uninitialized content.
-String allocateTwoByteString(int length) native;
+String allocateTwoByteString(int length) native "allocateTwoByteString";
 
 /// The [string] must be a [_TwoByteString]. The [index] must be valid.
-void writeIntoTwoByteString(String string, int index, int codePoint) native;
+void writeIntoTwoByteString(String string, int index, int codePoint)
+    native "writeIntoTwoByteString";
 
-String ensureTwoByteString(String string) native;
+String ensureTwoByteString(String string) native "ensureTwoByteString";
 
 const bool has63BitSmis = false;
 
@@ -67,10 +69,10 @@ int mix64(int n) {
   return n;
 }
 
-int floatToIntBits(double value) native;
-double intBitsToFloat(int value) native;
-int doubleToIntBits(double value) native;
-double intBitsToDouble(int value) native;
+int floatToIntBits(double value) native "floatToIntBits";
+double intBitsToFloat(int value) native "intBitsToFloat";
+int doubleToIntBits(double value) native "doubleToIntBits";
+double intBitsToDouble(int value) native "intBitsToDouble";
 
 // Exported call stubs to enable JS to call Dart closures. Since all closure
 // parameters and returns are boxed (their Wasm type is #Top) the Wasm type of

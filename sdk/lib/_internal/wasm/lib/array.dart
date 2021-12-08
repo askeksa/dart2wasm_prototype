@@ -235,15 +235,18 @@ class _ImmutableList<E> extends UnmodifiableListBase<E> {
         "ImmutableArray can only be allocated by the VM");
   }
 
-  factory _ImmutableList._from(List from, int offset, int length)
-      native "ImmutableList_from";
+  @pragma("vm:external-name", "ImmutableList_from")
+  external factory _ImmutableList._from(List from, int offset, int length);
 
   @pragma("vm:recognized", "graph-intrinsic")
-  E operator [](int index) native "List_getIndexed";
+  @pragma("vm:external-name", "List_getIndexed")
+  external E operator [](int index);
 
   @pragma("vm:recognized", "graph-intrinsic")
+  @pragma("vm:exact-result-type", "dart:core#_Smi")
   @pragma("vm:prefer-inline")
-  int get length native "List_getLength";
+  @pragma("vm:external-name", "List_getLength")
+  external int get length;
 
   List<E> sublist(int start, [int? end]) {
     final int actualEnd = RangeError.checkValidRange(start, end, this.length);

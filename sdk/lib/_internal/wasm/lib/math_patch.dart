@@ -14,6 +14,8 @@ import "dart:typed_data" show Uint32List;
 /// There are no parts of this patch library.
 
 @patch
+@pragma("vm:recognized", "other")
+@pragma("vm:prefer-inline")
 T min<T extends num>(T a, T b) {
   if (a > b) return b;
   if (a < b) return a;
@@ -37,6 +39,8 @@ T min<T extends num>(T a, T b) {
 }
 
 @patch
+@pragma("vm:recognized", "other")
+@pragma("vm:prefer-inline")
 T max<T extends num>(T a, T b) {
   if (a > b) return a;
   if (a < b) return b;
@@ -64,15 +68,17 @@ T max<T extends num>(T a, T b) {
 // If [x] is an [int] and [exponent] is a non-negative [int], the result is
 // an [int], otherwise the result is a [double].
 @patch
+@pragma("vm:prefer-inline")
 num pow(num x, num exponent) {
   if ((x is int) && (exponent is int) && (exponent >= 0)) {
     return _intPow(x, exponent);
   }
-  return _pow(x.toDouble(), exponent.toDouble());
+  return _doublePow(x.toDouble(), exponent.toDouble());
 }
 
-double _pow(double base, double exponent) native "Math.pow";
+double _doublePow(double base, double exponent) native "Math.pow";
 
+@pragma("vm:recognized", "other")
 int _intPow(int base, int exponent) {
   // Exponentiation by squaring.
   int result = 1;
@@ -124,6 +130,8 @@ double _log(double x) native "Math.log";
 // TODO(iposva): Handle patch methods within a patch class correctly.
 @patch
 class Random {
+  static final Random _secureRandom = _SecureRandom();
+
   @patch
   factory Random([int? seed]) {
     var state = _Random._setupSeed((seed == null) ? _Random._nextSeed() : seed);
@@ -136,9 +144,7 @@ class Random {
   }
 
   @patch
-  factory Random.secure() {
-    return new _SecureRandom();
-  }
+  factory Random.secure() => _secureRandom;
 }
 
 class _Random implements Random {
@@ -224,7 +230,8 @@ class _SecureRandom implements Random {
   }
 
   // Return count bytes of entropy as a positive integer; count <= 8.
-  static int _getBytes(int count) native "SecureRandom_getBytes";
+  @pragma("vm:external-name", "SecureRandom_getBytes")
+  external static int _getBytes(int count);
 
   int nextInt(int max) {
     RangeError.checkValueInInterval(
