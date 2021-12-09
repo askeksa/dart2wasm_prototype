@@ -229,12 +229,14 @@ Future<int> main(List<String> args) async {
     ..sdkRoot = Uri.file(Directory("sdk").absolute.path)
     ..environmentDefines = {}
     ..verbose = false
-    ..onDiagnostic = diagnosticMessageHandler
-    ..setExitCodeOnProblem = true;
+    ..onDiagnostic = diagnosticMessageHandler;
 
   CompilerResult? compilerResult =
       await kernelForProgram(mainUri, compilerOptions);
-  if (compilerResult == null || !succeeded) return 1;
+  if (compilerResult == null || !succeeded) {
+    exitCode = 1;
+    return exitCode;
+  }
   Component component = compilerResult.component!;
   CoreTypes coreTypes = compilerResult.coreTypes!;
 
