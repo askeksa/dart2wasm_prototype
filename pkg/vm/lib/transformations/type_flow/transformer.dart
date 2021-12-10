@@ -161,9 +161,7 @@ class MoveFieldInitializers {
   void transformComponent(Component component) {
     for (Library library in component.libraries) {
       for (Class cls in library.classes) {
-        if (!cls.isMixinDeclaration) {
-          transformClass(cls);
-        }
+        transformClass(cls);
       }
     }
   }
