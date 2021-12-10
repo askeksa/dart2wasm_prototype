@@ -33,6 +33,15 @@ import 'package:dart2wasm/transformers.dart' as wasmTrans;
 import 'package:dart2wasm/translator.dart';
 
 class WasmTarget extends Target {
+  Class? _growableList;
+  Class? _list;
+  Class? _immutableMap;
+  Class? _unmodifiableSet;
+  Class? _compactLinkedCustomHashMap;
+  Class? _compactLinkedHashSet;
+  Class? _oneByteString;
+  Class? _twoByteString;
+
   @override
   late final ConstantsBackend constantsBackend;
 
@@ -141,6 +150,54 @@ class WasmTarget extends Target {
 
   @override
   bool enableNative(Uri uri) => true;
+
+  @override
+  Class concreteListLiteralClass(CoreTypes coreTypes) {
+    return _growableList ??=
+        coreTypes.index.getClass('dart:core', '_GrowableList');
+  }
+
+  @override
+  Class concreteConstListLiteralClass(CoreTypes coreTypes) {
+    return _list ??= coreTypes.index.getClass('dart:core', '_List');
+  }
+
+  @override
+  Class concreteMapLiteralClass(CoreTypes coreTypes) {
+    return _compactLinkedCustomHashMap ??= coreTypes.index
+        .getClass('dart:collection', '_CompactLinkedCustomHashMap');
+  }
+
+  @override
+  Class concreteConstMapLiteralClass(CoreTypes coreTypes) {
+    return _immutableMap ??=
+        coreTypes.index.getClass('dart:collection', '_ImmutableMap');
+  }
+
+  @override
+  Class concreteSetLiteralClass(CoreTypes coreTypes) {
+    return _compactLinkedHashSet ??=
+        coreTypes.index.getClass('dart:collection', '_CompactLinkedHashSet');
+  }
+
+  @override
+  Class concreteConstSetLiteralClass(CoreTypes coreTypes) {
+    return _unmodifiableSet ??=
+        coreTypes.index.getClass('dart:collection', '_UnmodifiableSet');
+  }
+
+  @override
+  Class concreteStringLiteralClass(CoreTypes coreTypes, String value) {
+    const int maxLatin1 = 0xff;
+    for (int i = 0; i < value.length; ++i) {
+      if (value.codeUnitAt(i) > maxLatin1) {
+        return _twoByteString ??=
+            coreTypes.index.getClass('dart:core', '_TwoByteString');
+      }
+    }
+    return _oneByteString ??=
+        coreTypes.index.getClass('dart:core', '_OneByteString');
+  }
 
   @override
   bool isSupportedPragma(String pragmaName) => pragmaName.startsWith("wasm:");
