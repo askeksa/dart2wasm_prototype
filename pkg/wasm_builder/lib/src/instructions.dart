@@ -10,7 +10,7 @@ abstract class Label {
   final List<ValueType> inputs;
   final List<ValueType> outputs;
 
-  int? index;
+  int? ordinal;
   late final int depth;
   late final int baseStackHeight;
   bool reachable = true;
@@ -19,10 +19,10 @@ abstract class Label {
 
   List<ValueType> get targetTypes;
 
-  bool get hasIndex => index != null;
+  bool get hasOrdinal => ordinal != null;
 
   @override
-  String toString() => "L$index";
+  String toString() => "L$ordinal";
 }
 
 class Expression extends Label {
@@ -63,12 +63,13 @@ class Instructions with SerializerMixin {
   final List<Local> locals;
 
   bool traceEnabled = true;
-  int lineNumberWidth = 7;
+  bool byteOffsetEnabled = false;
+  int byteOffsetWidth = 7;
   int instructionColumnWidth = 50;
-  int _indent = 0;
+  int _indent = 1;
   List<String> _traceLines = [];
 
-  int labelIndex = 0;
+  int labelCount = 0;
   final List<Label> labelStack = [];
   final List<ValueType> _stackTypes = [];
   bool reachable = true;
@@ -87,8 +88,9 @@ class Instructions with SerializerMixin {
       int indentAfter = 0}) {
     if (traceEnabled && trace != null) {
       _indent += indentBefore;
-      String byteOffset = "${data.length}  ".padLeft(lineNumberWidth + 2);
-      String instr = "  " * _indent + trace.join(" ");
+      String byteOffset =
+          byteOffsetEnabled ? "${data.length}".padLeft(byteOffsetWidth) : "";
+      String instr = "  " * _indent + " " + trace.join(" ");
       instr = instr.length > instructionColumnWidth - 2
           ? instr.substring(0, instructionColumnWidth - 4) + "... "
           : instr.padRight(instructionColumnWidth);
@@ -103,8 +105,9 @@ class Instructions with SerializerMixin {
 
   bool _comment(String text) {
     if (traceEnabled) {
-      final String line =
-          " " * (lineNumberWidth + 2) + "  " * _indent + ";; $text\n";
+      final String line = " " * (byteOffsetEnabled ? byteOffsetWidth : 0) +
+          "  " * _indent +
+          " ;; $text\n";
       _traceLines.add(line);
     }
     return true;
@@ -115,7 +118,7 @@ class Instructions with SerializerMixin {
   }
 
   ValueType get _topOfStack {
-    if (!reachable) return const InvalidType();
+    if (!reachable) return RefType.any();
     if (_stackTypes.isEmpty) _reportError("Stack underflow");
     return _stackTypes.last;
   }
@@ -213,7 +216,7 @@ class Instructions with SerializerMixin {
     assert(_stackTypes.length >= label.baseStackHeight);
     _stackTypes.length = label.baseStackHeight;
     _stackTypes.addAll(outputs);
-    return _debugTrace([if (label.hasIndex) "$label:", ...trace],
+    return _debugTrace([if (label.hasOrdinal) "$label:", ...trace],
         reachableAfter: reachableAfter,
         indentBefore: -1,
         indentAfter: reindent ? 1 : 0);
@@ -241,7 +244,7 @@ class Instructions with SerializerMixin {
 
   Label _beginBlock(int encoding, Label label, {required List<Object> trace}) {
     assert(_verifyTypes(label.inputs, label.inputs));
-    label.index = ++labelIndex;
+    label.ordinal = ++labelCount;
     label.depth = labelStack.length;
     label.baseStackHeight = _stackTypes.length - label.inputs.length;
     label.reachable = reachable;
@@ -394,21 +397,15 @@ class Instructions with SerializerMixin {
     writeByte(0x1A);
   }
 
-  void select([ValueType? type]) {
-    assert(_verifyTypes(const [NumType.i32], const []));
-    if (type != null) {
-      assert(_verifyTypes([type, type], [type], trace: ['select', type]));
+  void select(ValueType type) {
+    assert(_verifyTypes([type, type, NumType.i32], [type],
+        trace: ['select', type]));
+    if (type is NumType) {
+      writeByte(0x1B);
+    } else {
       writeByte(0x1C);
       writeUnsigned(1);
       write(type);
-    } else {
-      assert(_topOfStack is NumType ||
-          _reportError(
-              "Input to implicitly typed select instruction must be a numtype"
-              " (was $_topOfStack)"));
-      assert(_verifyTypes([_topOfStack, _topOfStack], [_topOfStack],
-          trace: const ['select']));
-      writeByte(0x1B);
     }
   }
 

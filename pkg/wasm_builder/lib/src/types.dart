@@ -33,18 +33,6 @@ abstract class ValueType implements StorageType {
   bool get defaultable => true;
 }
 
-class InvalidType extends ValueType {
-  const InvalidType();
-
-  @override
-  bool isSubtypeOf(StorageType other) => false;
-
-  @override
-  void serialize(Serializer s) {
-    throw "Serializing invalid type";
-  }
-}
-
 enum NumTypeKind { i32, i64, f32, f64, v128 }
 
 class NumType extends ValueType {
