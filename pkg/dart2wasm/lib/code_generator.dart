@@ -266,7 +266,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       }
     }
 
-    member.function!.body!.accept(this);
+    member.function!.body?.accept(this);
     _implicitReturn();
     b.end();
   }

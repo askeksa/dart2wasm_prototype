@@ -240,7 +240,7 @@ Future<int> main(List<String> args) async {
 
   final tableSelectorAssigner = globalTypeFlow.transformComponent(
       target, coreTypes, component,
-      treeShakeSignatures: true, treeShakeWriteOnlyFields: false);
+      treeShakeSignatures: true, treeShakeWriteOnlyFields: true);
 
   var translator = Translator(
       component,
