@@ -12,7 +12,6 @@ import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/type_environment.dart';
-import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
@@ -157,8 +156,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       // Implicit getter or setter
       w.StructType struct =
           translator.classInfo[member.enclosingClass!]!.struct;
-      int index = translator.fieldIndex[member]!;
-      w.ValueType fieldType = struct.fields[index].type.unpacked;
+      int fieldIndex = translator.fieldIndex[member]!;
+      w.ValueType fieldType = struct.fields[fieldIndex].type.unpacked;
 
       void getThis() {
         w.Local thisLocal = paramLocals[0];
@@ -170,7 +169,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       if (reference.isImplicitGetter) {
         // Implicit getter
         getThis();
-        b.struct_get(struct, index);
+        b.struct_get(struct, fieldIndex);
         translator.convertType(function, fieldType, returnType);
       } else {
         // Implicit setter
@@ -178,7 +177,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         getThis();
         b.local_get(valueLocal);
         translator.convertType(function, valueLocal.type, fieldType);
-        b.struct_set(struct, index);
+        b.struct_set(struct, fieldIndex);
       }
       b.end();
       return;
@@ -849,7 +848,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     b.local_tee(temp);
     b.local_get(temp);
     b.i32_const(info.classId);
-    b.struct_set(info.struct, 0);
+    b.struct_set(info.struct, FieldIndex.classId);
     if (options.parameterNullability && temp.type.nullable) {
       b.ref_as_non_null();
     }
@@ -1074,7 +1073,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       _polymorphicSpecialization(selector, receiverVar);
     } else {
       b.local_get(receiverVar);
-      b.struct_get(translator.topInfo.struct, 0);
+      b.struct_get(translator.topInfo.struct, FieldIndex.classId);
       if (offset != 0) {
         b.i32_const(offset);
         b.i32_add();
@@ -1093,7 +1092,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
     w.Local idVar = addLocal(w.NumType.i32);
     b.local_get(receiver);
-    b.struct_get(translator.topInfo.struct, 0);
+    b.struct_get(translator.topInfo.struct, FieldIndex.classId);
     b.local_set(idVar);
 
     w.Label block =
@@ -1340,7 +1339,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     // Dispatch table call
     int offset = selector.offset!;
     b.local_get(receiverVar);
-    b.struct_get(translator.topInfo.struct, 0);
+    b.struct_get(translator.topInfo.struct, FieldIndex.classId);
     if (offset != 0) {
       b.i32_const(offset);
       b.i32_add();
@@ -1521,12 +1520,12 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.Local temp = addLocal(w.RefType.def(struct, nullable: false));
     wrap(receiver, temp.type);
     b.local_tee(temp);
-    b.struct_get(struct, 2); // Context
+    b.struct_get(struct, FieldIndex.closureContext);
     for (Expression arg in arguments.positional) {
       wrap(arg, translator.topInfo.nullableType);
     }
     b.local_get(temp);
-    b.struct_get(struct, 3); // Function
+    b.struct_get(struct, FieldIndex.closureFunction);
     b.call_ref();
     return translator.topInfo.nullableType;
   }
@@ -1887,12 +1886,12 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.i32_const(0);
     } else if (concrete.length == 1) {
       ClassInfo info = translator.classInfo[concrete.single]!;
-      b.struct_get(translator.topInfo.struct, 0);
+      b.struct_get(translator.topInfo.struct, FieldIndex.classId);
       b.i32_const(info.classId);
       b.i32_eq();
     } else {
       w.Local idLocal = addLocal(w.NumType.i32);
-      b.struct_get(translator.topInfo.struct, 0);
+      b.struct_get(translator.topInfo.struct, FieldIndex.classId);
       b.local_set(idLocal);
       w.Label done = b.block([], [w.NumType.i32]);
       b.i32_const(1);

@@ -311,7 +311,7 @@ class Intrinsifier {
           Expression arg = node.arguments.positional[0];
           w.ValueType objectType = translator.objectInfo.nullableType;
           codeGen.wrap(arg, objectType);
-          b.struct_get(translator.objectInfo.struct, 1);
+          b.struct_get(translator.objectInfo.struct, FieldIndex.identityHash);
           b.i64_extend_i32_u();
           return w.NumType.i64;
         case "_setHash":
@@ -321,7 +321,7 @@ class Intrinsifier {
           codeGen.wrap(arg, objectType);
           codeGen.wrap(hash, w.NumType.i64);
           b.i32_wrap_i64();
-          b.struct_set(translator.objectInfo.struct, 1);
+          b.struct_set(translator.objectInfo.struct, FieldIndex.identityHash);
           return codeGen.voidMarker;
       }
     }
@@ -452,7 +452,7 @@ class Intrinsifier {
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
       b.local_get(receiver);
-      b.struct_get(translator.topInfo.struct, 0);
+      b.struct_get(translator.topInfo.struct, FieldIndex.classId);
       b.i64_extend_i32_u();
       // TODO: Type arguments
       b.global_get(translator.constants.emptyTypeList);
@@ -474,7 +474,7 @@ class Intrinsifier {
       w.Label ref_eq = b.block();
       b.local_get(first);
       b.br_on_null(ref_eq);
-      b.struct_get(translator.topInfo.struct, 0);
+      b.struct_get(translator.topInfo.struct, FieldIndex.classId);
       b.local_tee(cid);
 
       // Both bool?
@@ -483,14 +483,14 @@ class Intrinsifier {
       b.if_();
       b.local_get(first);
       translator.ref_cast(b, boolInfo);
-      b.struct_get(boolInfo.struct, 1);
+      b.struct_get(boolInfo.struct, FieldIndex.boxValue);
       w.Label bothBool = b.block([], [boolInfo.nullableType]);
       b.local_get(second);
       translator.br_on_cast(b, bothBool, boolInfo);
       b.i32_const(0);
       b.return_();
       b.end();
-      b.struct_get(boolInfo.struct, 1);
+      b.struct_get(boolInfo.struct, FieldIndex.boxValue);
       b.i32_eq();
       b.return_();
       b.end();
@@ -502,14 +502,14 @@ class Intrinsifier {
       b.if_();
       b.local_get(first);
       translator.ref_cast(b, intInfo);
-      b.struct_get(intInfo.struct, 1);
+      b.struct_get(intInfo.struct, FieldIndex.boxValue);
       w.Label bothInt = b.block([], [intInfo.nullableType]);
       b.local_get(second);
       translator.br_on_cast(b, bothInt, intInfo);
       b.i32_const(0);
       b.return_();
       b.end();
-      b.struct_get(intInfo.struct, 1);
+      b.struct_get(intInfo.struct, FieldIndex.boxValue);
       b.i64_eq();
       b.return_();
       b.end();
@@ -521,7 +521,7 @@ class Intrinsifier {
       b.if_();
       b.local_get(first);
       translator.ref_cast(b, doubleInfo);
-      b.struct_get(doubleInfo.struct, 1);
+      b.struct_get(doubleInfo.struct, FieldIndex.boxValue);
       b.i64_reinterpret_f64();
       w.Label bothDouble = b.block([], [doubleInfo.nullableType]);
       b.local_get(second);
@@ -529,7 +529,7 @@ class Intrinsifier {
       b.i32_const(0);
       b.return_();
       b.end();
-      b.struct_get(doubleInfo.struct, 1);
+      b.struct_get(doubleInfo.struct, FieldIndex.boxValue);
       b.i64_reinterpret_f64();
       b.i64_eq();
       b.return_();
@@ -555,7 +555,7 @@ class Intrinsifier {
 
           // If the string is already a TwoByteString, just return it.
           b.local_get(inString);
-          b.struct_get(translator.topInfo.struct, 0);
+          b.struct_get(translator.topInfo.struct, FieldIndex.classId);
           b.i32_const(twoByteInfo.classId);
           b.i32_eq();
           b.if_();
@@ -564,11 +564,10 @@ class Intrinsifier {
           b.end();
 
           // Locals for arrays, index and length
-          const int arrayFieldIndex = 2;
           w.RefType oneByteType = oneByteInfo
-              .struct.fields[arrayFieldIndex].type.unpacked as w.RefType;
+              .struct.fields[FieldIndex.stringArray].type.unpacked as w.RefType;
           w.RefType twoByteType = twoByteInfo
-              .struct.fields[arrayFieldIndex].type.unpacked as w.RefType;
+              .struct.fields[FieldIndex.stringArray].type.unpacked as w.RefType;
           w.ArrayType oneByteArrayType =
               (oneByteType.heapType as w.DefHeapType).def as w.ArrayType;
           w.ArrayType twoByteArrayType =
@@ -581,7 +580,7 @@ class Intrinsifier {
           // Get input array and create array for TwoByteString.
           b.local_get(inString);
           translator.ref_cast(b, oneByteInfo);
-          b.struct_get(oneByteInfo.struct, arrayFieldIndex);
+          b.struct_get(oneByteInfo.struct, FieldIndex.stringArray);
           b.local_tee(oneByteArray);
           b.array_len(oneByteArrayType);
           b.local_tee(length);

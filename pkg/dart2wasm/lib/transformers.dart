@@ -6,7 +6,6 @@ import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart';
 import 'package:kernel/core_types.dart';
 import 'package:kernel/type_environment.dart';
-import 'package:kernel/visitor.dart';
 
 void transformLibraries(
     List<Library> libraries, CoreTypes coreTypes, ClassHierarchy hierarchy) {

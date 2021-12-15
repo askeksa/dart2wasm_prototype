@@ -414,6 +414,7 @@ class Translator {
       w.StructType struct = m.addStructType("Function$parameterCount",
           fields: info.struct.fields,
           superType: options.nominalTypes ? info.struct : null);
+      assert(struct.fields.length == FieldIndex.closureFunction);
       struct.fields.add(w.FieldType(
           w.RefType.def(functionType(parameterCount), nullable: false),
           mutable: false));
@@ -546,7 +547,7 @@ class Translator {
           }
           ref_cast(b, info);
         }
-        b.struct_get(info.struct, 1);
+        b.struct_get(info.struct, FieldIndex.boxValue);
       } else if (from.withNullability(false).isSubtypeOf(to)) {
         // Null check
         b.ref_as_non_null();

@@ -9,7 +9,6 @@ import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/type_algebra.dart' show substitute;
-import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 

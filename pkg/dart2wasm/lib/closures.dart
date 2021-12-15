@@ -6,7 +6,6 @@ import 'package:dart2wasm/code_generator.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
-import 'package:kernel/visitor.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 

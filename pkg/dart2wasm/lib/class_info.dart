@@ -10,6 +10,38 @@ import 'package:kernel/ast.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+/// Wasm struct field indices for fields that are accessed explicitly from Wasm
+/// code, e.g. in intrinsics.
+///
+/// The values are validated by asserts, typically either through
+/// [ClassInfo.addField] (for manually added fields) or by a line in
+/// [FieldIndex.validate] (for fields declared in Dart code).
+class FieldIndex {
+  static const classId = 0;
+  static const boxValue = 1;
+  static const identityHash = 1;
+  static const stringArray = 2;
+  static const closureContext = 2;
+  static const closureFunction = 3;
+
+  static void validate(Translator translator) {
+    void check(Class cls, String name, int expectedIndex) {
+      assert(
+          translator.fieldIndex[
+                  cls.fields.firstWhere((f) => f.name.text == name)] ==
+              expectedIndex,
+          "Unexpected field index for ${cls.name}.$name");
+    }
+
+    check(translator.boxedBoolClass, "value", FieldIndex.boxValue);
+    check(translator.boxedIntClass, "value", FieldIndex.boxValue);
+    check(translator.boxedDoubleClass, "value", FieldIndex.boxValue);
+    check(translator.oneByteStringClass, "_array", FieldIndex.stringArray);
+    check(translator.twoByteStringClass, "_array", FieldIndex.stringArray);
+    check(translator.functionClass, "context", FieldIndex.closureContext);
+  }
+}
+
 const int initialIdentityHash = 0;
 
 class ClassInfo {
@@ -35,6 +67,11 @@ class ClassInfo {
       rtt = coll.makeRtt(struct, superInfo);
     }
     implementedBy.add(this);
+  }
+
+  void addField(w.FieldType fieldType, [int? expectedIndex]) {
+    assert(expectedIndex == null || expectedIndex == struct.fields.length);
+    struct.fields.add(fieldType);
   }
 }
 
@@ -174,15 +211,15 @@ class ClassInfoCollector {
     ClassInfo? superInfo = info.superInfo;
     if (superInfo == null) {
       // Top - add class id field
-      info.struct.fields.add(w.FieldType(w.NumType.i32));
+      info.addField(w.FieldType(w.NumType.i32), FieldIndex.classId);
     } else if (info.struct != superInfo.struct) {
       // Copy fields from superclass
       for (w.FieldType fieldType in superInfo.struct.fields) {
-        info.struct.fields.add(fieldType);
+        info.addField(fieldType);
       }
       if (info.cls!.superclass == null) {
         // Object - add identity hash code field
-        info.struct.fields.add(w.FieldType(w.NumType.i32));
+        info.addField(w.FieldType(w.NumType.i32), FieldIndex.identityHash);
       }
       // Add fields for type variables
       late w.FieldType typeType =
@@ -195,7 +232,7 @@ class ClassInfoCollector {
               translator.typeParameterIndex[match]!;
         } else {
           translator.typeParameterIndex[parameter] = info.struct.fields.length;
-          info.struct.fields.add(typeType);
+          info.addField(typeType);
         }
       }
       // Add fields for Dart instance fields
@@ -207,7 +244,7 @@ class ClassInfoCollector {
             wasmType = wasmType.withNullability(true);
           }
           translator.fieldIndex[field] = info.struct.fields.length;
-          info.struct.fields.add(w.FieldType(wasmType));
+          info.addField(w.FieldType(wasmType));
         }
       }
     } else {
@@ -234,5 +271,7 @@ class ClassInfoCollector {
     for (ClassInfo info in translator.classes) {
       generateFields(info);
     }
+
+    FieldIndex.validate(translator);
   }
 }
