@@ -9,11 +9,10 @@
 // support forwarding const constructors.
 @pragma("vm:entry-point")
 class _ImmutableMap<K, V> implements Map<K, V> {
-  final _ImmutableList _kvPairs;
+  final _List _kvPairs;
 
   @pragma("vm:entry-point")
-  const _ImmutableMap._create(_ImmutableList keyValuePairs)
-      : _kvPairs = keyValuePairs;
+  const _ImmutableMap._create(_List keyValuePairs) : _kvPairs = keyValuePairs;
 
   Map<K2, V2> cast<K2, V2>() => Map.castFrom<K, V, K2, V2>(this);
   V? operator [](Object? key) {

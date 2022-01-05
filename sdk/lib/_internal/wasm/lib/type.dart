@@ -7,6 +7,7 @@ class _Type implements Type {
   final int classId;
   final List<_Type> typeArguments;
 
+  @pragma("wasm:entry-point")
   const _Type(this.classId, [this.typeArguments = const []]);
 
   bool operator ==(Object other) {

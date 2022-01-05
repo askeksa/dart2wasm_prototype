@@ -699,7 +699,7 @@ class SummaryCollector extends RecursiveResultVisitor<TypeExpr?> {
       for (int i = 0; i < function.positionalParameters.length; ++i) {
         final decl = function.positionalParameters[i];
         _declareParameter(
-            decl.name ?? "",
+            decl.name!,
             _useTypeCheckForParameter(decl)
                 ? null
                 : useTypesFrom.positionalParameters[i].type,
@@ -708,7 +708,7 @@ class SummaryCollector extends RecursiveResultVisitor<TypeExpr?> {
       for (int i = 0; i < function.namedParameters.length; ++i) {
         final decl = function.namedParameters[i];
         _declareParameter(
-            decl.name ?? "",
+            decl.name!,
             _useTypeCheckForParameter(decl)
                 ? null
                 : useTypesFrom.namedParameters[i].type,
