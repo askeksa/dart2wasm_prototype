@@ -11,6 +11,7 @@ import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
 
+import 'package:vm/metadata/procedure_attributes.dart';
 import 'package:vm/metadata/table_selector.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
@@ -133,20 +134,30 @@ class SelectorInfo {
 class DispatchTable {
   final Translator translator;
   final List<TableSelectorInfo> selectorMetadata;
+  final Map<TreeNode, ProcedureAttributesMetadata> procedureAttributeMetadata;
 
   Map<int, SelectorInfo> selectorInfo = {};
   Map<String, int> dynamicGets = {};
   late List<Reference?> table;
 
   DispatchTable(this.translator)
-      : selectorMetadata = translator.tableSelectorAssigner.metadata.selectors;
+      : selectorMetadata =
+            (translator.component.metadata["vm.table-selector.metadata"]
+                    as TableSelectorMetadataRepository)
+                .mapping[translator.component]!
+                .selectors,
+        procedureAttributeMetadata =
+            (translator.component.metadata["vm.procedure-attributes.metadata"]
+                    as ProcedureAttributesMetadataRepository)
+                .mapping;
 
   SelectorInfo selectorForTarget(Reference target) {
     Member member = target.asMember;
     bool isGetter = target.isGetter || target.isTearOffReference;
+    ProcedureAttributesMetadata metadata = procedureAttributeMetadata[member]!;
     int selectorId = isGetter
-        ? translator.tableSelectorAssigner.getterSelectorId(member)
-        : translator.tableSelectorAssigner.methodOrSetterSelectorId(member);
+        ? metadata.getterSelectorId
+        : metadata.methodOrSetterSelectorId;
     ParameterInfo paramInfo = ParameterInfo.fromMember(target);
     int returnCount = isGetter ||
             member is Procedure && member.function.returnType is! VoidType

@@ -297,18 +297,13 @@ Future<int> main(List<String> args) async {
   Component component = compilerResult.component!;
   CoreTypes coreTypes = compilerResult.coreTypes!;
 
-  final tableSelectorAssigner = globalTypeFlow.transformComponent(
-      target, coreTypes, component,
+  globalTypeFlow.transformComponent(target, coreTypes, component,
       treeShakeSignatures: true,
       treeShakeWriteOnlyFields: true,
       useRapidTypeAnalysis: false);
 
-  var translator = Translator(
-      component,
-      coreTypes,
-      TypeEnvironment(coreTypes, compilerResult.classHierarchy!),
-      tableSelectorAssigner,
-      options);
+  var translator = Translator(component, coreTypes,
+      TypeEnvironment(coreTypes, compilerResult.classHierarchy!), options);
   File(output).writeAsBytesSync(translator.translate().encode());
 
   return 0;

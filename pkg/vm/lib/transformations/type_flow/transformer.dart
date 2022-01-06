@@ -40,7 +40,7 @@ const bool kDumpClassHierarchy =
 
 /// Whole-program type flow analysis and transformation.
 /// Assumes strong mode and closed world.
-TableSelectorAssigner transformComponent(
+Component transformComponent(
     Target target, CoreTypes coreTypes, Component component,
     {PragmaAnnotationParser? matcher,
     bool treeShakeSignatures: true,
@@ -151,7 +151,7 @@ TableSelectorAssigner transformComponent(
 
   Statistics.print("TFA statistics");
 
-  return tableSelectorAssigner;
+  return component;
 }
 
 // Move instance field initializers with possible side-effects

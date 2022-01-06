@@ -28,7 +28,7 @@ runTestCase(
 
   final coreTypes = new CoreTypes(component);
 
-  transformComponent(target, coreTypes, component,
+  component = transformComponent(target, coreTypes, component,
       matcher: new ConstantPragmaAnnotationParser(coreTypes, target),
       treeShakeProtobufs: true);
 

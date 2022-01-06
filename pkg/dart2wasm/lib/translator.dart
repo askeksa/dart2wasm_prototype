@@ -20,7 +20,6 @@ import 'package:kernel/core_types.dart';
 import 'package:kernel/src/printer.dart';
 import 'package:kernel/type_environment.dart';
 import 'package:vm/metadata/direct_call.dart';
-import 'package:vm/transformations/type_flow/table_selector_assigner.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
@@ -51,7 +50,6 @@ class Translator {
   List<Library> libraries;
   CoreTypes coreTypes;
   TypeEnvironment typeEnvironment;
-  TableSelectorAssigner tableSelectorAssigner;
   ClosedWorldClassHierarchy hierarchy;
   late ClassHierarchySubtypes subtypes;
 
@@ -107,8 +105,7 @@ class Translator {
   ClassInfo get topInfo => classes[0];
   ClassInfo get objectInfo => classInfo[coreTypes.objectClass]!;
 
-  Translator(this.component, this.coreTypes, this.typeEnvironment,
-      this.tableSelectorAssigner, this.options)
+  Translator(this.component, this.coreTypes, this.typeEnvironment, this.options)
       : libraries = component.libraries,
         hierarchy =
             ClassHierarchy(component, coreTypes) as ClosedWorldClassHierarchy {
