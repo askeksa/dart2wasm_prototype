@@ -213,9 +213,11 @@ class Instructions with SerializerMixin {
       }
       _checkStackTypes(label.outputs);
     }
-    assert(_stackTypes.length >= label.baseStackHeight);
-    _stackTypes.length = label.baseStackHeight;
-    _stackTypes.addAll(outputs);
+    if (label.reachable) {
+      assert(_stackTypes.length >= label.baseStackHeight);
+      _stackTypes.length = label.baseStackHeight;
+      _stackTypes.addAll(outputs);
+    }
     return _debugTrace([if (label.hasOrdinal) "$label:", ...trace],
         reachableAfter: reachableAfter,
         indentBefore: -1,

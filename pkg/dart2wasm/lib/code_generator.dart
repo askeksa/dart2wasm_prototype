@@ -1842,25 +1842,29 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitIsExpression(IsExpression node, w.ValueType expectedType) {
-    DartType type = node.type;
+    wrap(node.operand, translator.topInfo.nullableType);
+    emitTypeTest(node.type, dartTypeOf(node.operand), node);
+    return w.NumType.i32;
+  }
+
+  /// Test value against a Dart type. Expects the value on the stack as a
+  /// (ref null #Top) and leaves the result on the stack as an i32.
+  void emitTypeTest(DartType type, DartType operandType, TreeNode node) {
     if (type is! InterfaceType) {
-      // TODO: Check
+      // TODO: Implement type test for remaining types
       print("Not implemented: Type test with non-interface type $type"
           " at ${node.location}");
-      wrap(node.operand, translator.topInfo.nullableType);
       b.drop();
       b.i32_const(1);
-      return w.NumType.i32;
+      return;
     }
-    DartType operandType = dartTypeOf(node.operand);
     bool isNullable = operandType.isPotentiallyNullable;
     w.Label? resultLabel;
     w.Label? nullLabel;
     if (isNullable) {
-      resultLabel = b.block([], [w.NumType.i32]);
-      nullLabel = b.block([], []);
+      resultLabel = b.block([translator.topInfo.nullableType], [w.NumType.i32]);
+      nullLabel = b.block([translator.topInfo.nullableType], []);
     }
-    wrap(node.operand, translator.topInfo.nullableType);
     if (isNullable) {
       b.br_on_null(nullLabel!);
     }
@@ -1912,12 +1916,11 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       b.i32_const(type.declaredNullability == Nullability.nullable ? 1 : 0);
       b.end(); // resultLabel
     }
-    return w.NumType.i32;
   }
 
   @override
   w.ValueType visitAsExpression(AsExpression node, w.ValueType expectedType) {
-    // TODO: Check
+    // TODO: Emit type test and throw exception on failure
     return wrap(node.operand, expectedType);
   }
 }
