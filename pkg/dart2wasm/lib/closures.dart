@@ -10,8 +10,8 @@ import 'package:kernel/ast.dart';
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class Lambda {
-  FunctionNode functionNode;
-  w.DefinedFunction function;
+  final FunctionNode functionNode;
+  final w.DefinedFunction function;
 
   Lambda(this.functionNode, this.function);
 }
@@ -53,11 +53,11 @@ class Capture {
 
 class Closures {
   final CodeGenerator codeGen;
-  Map<VariableDeclaration, Capture> captures = {};
+  final Map<VariableDeclaration, Capture> captures = {};
   bool isThisCaptured = false;
-  Map<FunctionNode, Lambda> lambdas = {};
-  Map<TreeNode, Context> contexts = {};
-  Set<FunctionDeclaration> closurizedFunctions = {};
+  final Map<FunctionNode, Lambda> lambdas = {};
+  final Map<TreeNode, Context> contexts = {};
+  final Set<FunctionDeclaration> closurizedFunctions = {};
 
   Closures(this.codeGen);
 

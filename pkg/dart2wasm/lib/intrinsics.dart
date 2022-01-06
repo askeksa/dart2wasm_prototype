@@ -484,7 +484,7 @@ class Intrinsifier {
       b.local_get(first);
       translator.ref_cast(b, boolInfo);
       b.struct_get(boolInfo.struct, FieldIndex.boxValue);
-      w.Label bothBool = b.block([], [boolInfo.nullableType]);
+      w.Label bothBool = b.block(const [], [boolInfo.nullableType]);
       b.local_get(second);
       translator.br_on_cast(b, bothBool, boolInfo);
       b.i32_const(0);
@@ -503,7 +503,7 @@ class Intrinsifier {
       b.local_get(first);
       translator.ref_cast(b, intInfo);
       b.struct_get(intInfo.struct, FieldIndex.boxValue);
-      w.Label bothInt = b.block([], [intInfo.nullableType]);
+      w.Label bothInt = b.block(const [], [intInfo.nullableType]);
       b.local_get(second);
       translator.br_on_cast(b, bothInt, intInfo);
       b.i32_const(0);
@@ -523,7 +523,7 @@ class Intrinsifier {
       translator.ref_cast(b, doubleInfo);
       b.struct_get(doubleInfo.struct, FieldIndex.boxValue);
       b.i64_reinterpret_f64();
-      w.Label bothDouble = b.block([], [doubleInfo.nullableType]);
+      w.Label bothDouble = b.block(const [], [doubleInfo.nullableType]);
       b.local_get(second);
       translator.br_on_cast(b, bothDouble, doubleInfo);
       b.i32_const(0);
@@ -654,7 +654,7 @@ class Intrinsifier {
           }
           // num parameter
           ClassInfo intInfo = translator.classInfo[translator.boxedIntClass]!;
-          w.Label intArg = b.block([], [intInfo.nonNullableType]);
+          w.Label intArg = b.block(const [], [intInfo.nonNullableType]);
           b.local_get(function.locals[1]);
           translator.br_on_cast(b, intArg, intInfo);
           // double argument

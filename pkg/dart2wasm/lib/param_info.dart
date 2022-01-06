@@ -43,6 +43,7 @@ class ParameterInfo {
               : function.typeParameters)
           .length;
       positional = List.generate(function.positionalParameters.length, (i) {
+        // A required parameter has no default value.
         if (i < function.requiredParameterCount) return null;
         return defaultValue(function.positionalParameters[i]);
       });
@@ -51,6 +52,7 @@ class ParameterInfo {
           param.name!: defaultValue(param)
       };
     } else {
+      // A setter parameter has no default value.
       positional = [if (target.isSetter) null];
       named = {};
     }

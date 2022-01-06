@@ -26,7 +26,7 @@ class SelectorInfo {
   int returnCount;
 
   final Map<int, Reference> targets = {};
-  late w.FunctionType signature = computeSignature();
+  late final w.FunctionType signature = computeSignature();
 
   late final List<int> classIds;
   late final int targetCount;
@@ -58,19 +58,19 @@ class SelectorInfo {
       Member member = target.asMember;
       if (member is Field) {
         if (target.isImplicitGetter) {
-          positional = [];
-          named = {};
+          positional = const [];
+          named = const {};
           returns = [member.getterType];
         } else {
           positional = [member.setterType];
-          named = {};
-          returns = [];
+          named = const {};
+          returns = const [];
         }
       } else {
         FunctionNode function = member.function!;
         if (target.isTearOffReference) {
-          positional = [];
-          named = {};
+          positional = const [];
+          named = const {};
           returns = [function.computeFunctionType(Nullability.nonNullable)];
         } else {
           positional = [
@@ -81,8 +81,9 @@ class SelectorInfo {
             for (VariableDeclaration param in function.namedParameters)
               param.name!: param.type
           };
-          returns =
-              function.returnType is VoidType ? [] : [function.returnType];
+          returns = function.returnType is VoidType
+              ? const []
+              : [function.returnType];
         }
       }
       assert(returns.length <= outputSets.length);
@@ -136,9 +137,9 @@ class DispatchTable {
   final List<TableSelectorInfo> selectorMetadata;
   final Map<TreeNode, ProcedureAttributesMetadata> procedureAttributeMetadata;
 
-  Map<int, SelectorInfo> selectorInfo = {};
-  Map<String, int> dynamicGets = {};
-  late List<Reference?> table;
+  final Map<int, SelectorInfo> selectorInfo = {};
+  final Map<String, int> dynamicGets = {};
+  late final List<Reference?> table;
 
   DispatchTable(this.translator)
       : selectorMetadata =
@@ -276,7 +277,6 @@ class DispatchTable {
         firstAvailable++;
       }
     }
-    //print(table.map((e) => e != null ? "!" : ".").join());
   }
 
   void output() {
@@ -288,7 +288,6 @@ class DispatchTable {
         w.BaseFunction? fun = translator.functions.getExistingFunction(target);
         if (fun != null) {
           wasmTable.setElement(i, fun);
-          //print("$i: $fun");
         }
       }
     }

@@ -48,6 +48,7 @@ class WasmTarget extends Target {
   @override
   String get name => 'wasm';
 
+  @override
   TargetFlags get flags => TargetFlags(enableNullSafety: true);
 
   @override
@@ -111,6 +112,7 @@ class WasmTarget extends Target {
     wasmTrans.transformProcedure(procedure, coreTypes, hierarchy);
   }
 
+  @override
   Expression instantiateInvocation(CoreTypes coreTypes, Expression receiver,
       String name, Arguments arguments, int offset, bool isSuper) {
     throw "Unsupported: instantiateInvocation";
@@ -137,6 +139,7 @@ class WasmTarget extends Target {
   @override
   int get enabledLateLowerings => LateLowering.all;
 
+  @override
   int get enabledConstructorTearOffLowerings => ConstructorTearOffLowering.all;
 
   @override

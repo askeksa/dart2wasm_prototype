@@ -4,9 +4,15 @@
 
 import 'package:kernel/ast.dart';
 
-Expando<Reference> _tearOffReference = Expando();
+// Extend procedures with a tearOffReference that refers to the tear-off
+// implementation for that procedure. This enables a Reference to refer to any
+// implementation relating to a member, including its tear-off, which it can't
+// do in plain kernel.
 
 extension TearOffReference on Procedure {
+  // Use an Expando to avoid keeping the procedure alive.
+  static final Expando<Reference> _tearOffReference = Expando();
+
   Reference get tearOffReference =>
       _tearOffReference[this] ??= Reference()..node = this;
 }

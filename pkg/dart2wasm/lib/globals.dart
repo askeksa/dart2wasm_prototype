@@ -11,10 +11,10 @@ import 'package:dart2wasm/translator.dart';
 class Globals {
   final Translator translator;
 
-  Map<Field, w.Global> globals = {};
-  Map<Field, w.BaseFunction> globalInitializers = {};
-  Map<Field, w.Global> globalInitializedFlag = {};
-  Map<w.HeapType, w.DefinedGlobal> dummyValues = {};
+  final Map<Field, w.Global> globals = {};
+  final Map<Field, w.BaseFunction> globalInitializers = {};
+  final Map<Field, w.Global> globalInitializedFlag = {};
+  final Map<w.HeapType, w.DefinedGlobal> dummyValues = {};
 
   Globals(this.translator) {
     if (translator.options.localNullability) {

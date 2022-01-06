@@ -29,13 +29,13 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   late Closures closures;
 
-  Map<VariableDeclaration, w.Local> locals = {};
+  final Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
   w.Local? preciseThisLocal;
-  Map<TypeParameter, w.Local> typeLocals = {};
-  List<Statement> finalizers = [];
-  Map<LabeledStatement, w.Label> labels = {};
-  Map<SwitchCase, w.Label> switchLabels = {};
+  final Map<TypeParameter, w.Local> typeLocals = {};
+  final List<Statement> finalizers = [];
+  final Map<LabeledStatement, w.Label> labels = {};
+  final Map<SwitchCase, w.Label> switchLabels = {};
 
   CodeGenerator(this.translator, this.function, this.reference,
       {List<w.Local>? paramLocals, this.returnLabel}) {
@@ -69,14 +69,14 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     final text = "Not implemented: $message at ${node.location}";
     print(text);
     b.comment(text);
-    b.block([], expectedTypes);
+    b.block(const [], expectedTypes);
     b.unreachable();
     b.end();
   }
 
   @override
   void defaultInitializer(Initializer node) {
-    _unimplemented(node, node.runtimeType, []);
+    _unimplemented(node, node.runtimeType, const []);
   }
 
   @override
@@ -87,7 +87,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void defaultStatement(Statement node) {
-    _unimplemented(node, node.runtimeType, []);
+    _unimplemented(node, node.runtimeType, const []);
   }
 
   void generate() {
@@ -389,7 +389,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       for (w.Local local in inlinedLocals.reversed) {
         b.local_set(local);
       }
-      w.Label block = b.block([], targetFunction.type.outputs);
+      w.Label block = b.block(const [], targetFunction.type.outputs);
       CodeGenerator(translator, function, target,
               paramLocals: inlinedLocals, returnLabel: block)
           .generate();
@@ -901,7 +901,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         case "toString":
           late w.Label done;
           w.ValueType resultType = _virtualCall(node, target, (signature) {
-            done = b.block([], signature.outputs);
+            done = b.block(const [], signature.outputs);
             w.Label nullString = b.block();
             wrap(node.receiver, translator.topInfo.nullableType);
             b.br_on_null(nullString);
@@ -967,7 +967,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       w.Label? operandNull;
       w.Label? done;
       if (leftNullable || rightNullable) {
-        done = b.block([], [w.NumType.i32]);
+        done = b.block(const [], const [w.NumType.i32]);
         operandNull = b.block();
       }
       wrap(node.left, leftLocal.type);
@@ -1274,7 +1274,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         case "hashCode":
           late w.Label hashDone;
           w.ValueType resultType = _virtualCall(node, target, (signature) {
-            hashDone = b.block([], signature.outputs);
+            hashDone = b.block(const [], signature.outputs);
             w.Label nullHash = b.block();
             wrap(node.receiver, translator.topInfo.nullableType);
             b.br_on_null(nullHash);
@@ -1291,7 +1291,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
             throw "Not supported: Virtual runtimeType at ${node.location}";
           }
           w.ValueType resultType = translator.objectInfo.nonNullableType;
-          w.Label typeDone = b.block([], [resultType]);
+          w.Label typeDone = b.block(const [], [resultType]);
           w.Label nullType = b.block();
           wrap(node.receiver, translator.topInfo.nullableType);
           b.br_on_null(nullType);
@@ -1632,7 +1632,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     // TODO: Throw exception
     b.comment(node.toStringInternal());
     b.drop();
-    b.block([], [if (expectedType != voidMarker) expectedType]);
+    b.block(const [], [if (expectedType != voidMarker) expectedType]);
     b.unreachable();
     b.end();
     return expectedType;
@@ -1796,7 +1796,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
     ClassInfo info = translator.classInfo[translator.typeClass]!;
     if (type is FutureOrType) {
-      // TODO
+      // TODO: Have an actual representation of FutureOr types
       b.ref_null(info.nullableType.heapType);
       return info.nullableType;
     }
@@ -1862,8 +1862,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.Label? resultLabel;
     w.Label? nullLabel;
     if (isNullable) {
-      resultLabel = b.block([translator.topInfo.nullableType], [w.NumType.i32]);
-      nullLabel = b.block([translator.topInfo.nullableType], []);
+      resultLabel =
+          b.block([translator.topInfo.nullableType], const [w.NumType.i32]);
+      nullLabel = b.block([translator.topInfo.nullableType], const []);
     }
     if (isNullable) {
       b.br_on_null(nullLabel!);
@@ -1897,7 +1898,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       w.Local idLocal = addLocal(w.NumType.i32);
       b.struct_get(translator.topInfo.struct, FieldIndex.classId);
       b.local_set(idLocal);
-      w.Label done = b.block([], [w.NumType.i32]);
+      w.Label done = b.block(const [], const [w.NumType.i32]);
       b.i32_const(1);
       for (Class cls in concrete) {
         ClassInfo info = translator.classInfo[cls]!;

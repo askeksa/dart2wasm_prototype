@@ -45,26 +45,27 @@ class FieldIndex {
 const int initialIdentityHash = 0;
 
 class ClassInfo {
-  Class? cls;
-  int classId;
-  int depth;
-  w.StructType struct;
-  late w.DefinedGlobal rtt;
-  ClassInfo? superInfo;
-  Map<TypeParameter, TypeParameter> typeParameterMatch = {};
+  final Class? cls;
+  final int classId;
+  final int depth;
+  final w.StructType struct;
+  late final w.DefinedGlobal rtt;
+  final ClassInfo? superInfo;
+  final Map<TypeParameter, TypeParameter> typeParameterMatch;
   late ClassInfo repr;
-  List<ClassInfo> implementedBy = [];
+  final List<ClassInfo> implementedBy = [];
 
-  late w.RefType nullableType = w.RefType.def(struct, nullable: true);
-  late w.RefType nonNullableType = w.RefType.def(struct, nullable: false);
+  late final w.RefType nullableType = w.RefType.def(struct, nullable: true);
+  late final w.RefType nonNullableType = w.RefType.def(struct, nullable: false);
 
   w.RefType typeWithNullability(bool nullable) =>
       nullable ? nullableType : nonNullableType;
 
   ClassInfo(this.cls, this.classId, this.depth, this.struct, this.superInfo,
-      ClassInfoCollector coll) {
-    if (coll.options.useRttGlobals) {
-      rtt = coll.makeRtt(struct, superInfo);
+      ClassInfoCollector collector,
+      {this.typeParameterMatch = const {}}) {
+    if (collector.options.useRttGlobals) {
+      rtt = collector.makeRtt(struct, superInfo);
     }
     implementedBy.add(this);
   }
@@ -97,9 +98,12 @@ ClassInfo upperBound(Iterable<ClassInfo> classes) {
 }
 
 class ClassInfoCollector {
-  Translator translator;
+  final Translator translator;
   int nextClassId = 0;
-  late ClassInfo topInfo;
+  late final ClassInfo topInfo;
+
+  late final w.FieldType typeType =
+      w.FieldType(translator.classInfo[translator.typeClass]!.nullableType);
 
   ClassInfoCollector(this.translator);
 
@@ -186,8 +190,8 @@ class ClassInfoCollector {
                 ? m.addStructType(cls.name, superType: superInfo.struct)
                 : m.addStructType(cls.name);
         info = ClassInfo(
-            cls, nextClassId++, superInfo.depth + 1, struct, superInfo, this)
-          ..typeParameterMatch = typeParameterMatch;
+            cls, nextClassId++, superInfo.depth + 1, struct, superInfo, this,
+            typeParameterMatch: typeParameterMatch);
         for (Supertype interface in cls.implementedTypes) {
           ClassInfo? interfaceInfo = translator.classInfo[interface.classNode];
           while (interfaceInfo != null) {
@@ -222,8 +226,6 @@ class ClassInfoCollector {
         info.addField(w.FieldType(w.NumType.i32), FieldIndex.identityHash);
       }
       // Add fields for type variables
-      late w.FieldType typeType =
-          w.FieldType(translator.classInfo[translator.typeClass]!.nullableType);
       for (TypeParameter parameter in info.cls!.typeParameters) {
         TypeParameter? match = info.typeParameterMatch[parameter];
         if (match != null) {
@@ -257,6 +259,7 @@ class ClassInfoCollector {
   }
 
   void collect() {
+    // Create class info and Wasm structs for all classes.
     initializeTop();
     for (Library library in translator.component.libraries) {
       for (Class cls in library.classes) {
@@ -264,14 +267,21 @@ class ClassInfoCollector {
       }
     }
 
+    // For each class, compute which Wasm struct should be used for the type of
+    // variables bearing that class as their Dart type. This is the struct
+    // corresponding to the least common supertype of all Dart classes
+    // implementing this class.
     for (ClassInfo info in translator.classes) {
       computeRepresentation(info);
     }
 
+    // Now that the representation types for all classes have been computed,
+    // fill in the types of the fields in the generated Wasm structs.
     for (ClassInfo info in translator.classes) {
       generateFields(info);
     }
 
+    // Validate that all internally used fields have the expected indices.
     FieldIndex.validate(translator);
   }
 }

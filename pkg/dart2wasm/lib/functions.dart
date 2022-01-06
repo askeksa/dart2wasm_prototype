@@ -118,10 +118,12 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
     }
   }
 
+  @override
   w.FunctionType defaultMember(Member node, Reference target) {
     throw "No Wasm function for member: $node";
   }
 
+  @override
   w.FunctionType visitField(Field node, Reference target) {
     if (!node.isInstanceMember) {
       if (target == node.fieldReference) {
@@ -134,6 +136,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
     return translator.dispatchTable.selectorForTarget(target).signature;
   }
 
+  @override
   w.FunctionType visitProcedure(Procedure node, Reference target) {
     assert(!node.isAbstract);
     return node.isInstanceMember
@@ -141,6 +144,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
         : _makeFunctionType(target, node.function.returnType, null);
   }
 
+  @override
   w.FunctionType visitConstructor(Constructor node, Reference target) {
     return _makeFunctionType(target, VoidType(),
         translator.classInfo[node.enclosingClass]!.nonNullableType);

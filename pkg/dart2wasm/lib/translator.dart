@@ -45,12 +45,12 @@ typedef CodeGenCallback = void Function(w.Instructions);
 class Translator {
   final TranslatorOptions options;
 
-  Component component;
-  List<Library> libraries;
-  CoreTypes coreTypes;
-  TypeEnvironment typeEnvironment;
-  ClosedWorldClassHierarchy hierarchy;
-  late ClassHierarchySubtypes subtypes;
+  final Component component;
+  final List<Library> libraries;
+  final CoreTypes coreTypes;
+  final TypeEnvironment typeEnvironment;
+  final ClosedWorldClassHierarchy hierarchy;
+  late final ClassHierarchySubtypes subtypes;
 
   late final Class wasmTypesBaseClass;
   late final Class wasmArrayBaseClass;
@@ -81,24 +81,24 @@ class Translator {
   late final Constants constants;
   late final FunctionCollector functions;
 
-  List<ClassInfo> classes = [];
-  Map<Class, ClassInfo> classInfo = {};
-  Map<w.HeapType, ClassInfo> classForHeapType = {};
-  Map<Field, int> fieldIndex = {};
-  Map<TypeParameter, int> typeParameterIndex = {};
-  Map<Reference, ParameterInfo> staticParamInfo = {};
+  final List<ClassInfo> classes = [];
+  final Map<Class, ClassInfo> classInfo = {};
+  final Map<w.HeapType, ClassInfo> classForHeapType = {};
+  final Map<Field, int> fieldIndex = {};
+  final Map<TypeParameter, int> typeParameterIndex = {};
+  final Map<Reference, ParameterInfo> staticParamInfo = {};
   late Procedure mainFunction;
   late final w.Module m;
   late final w.DefinedFunction initFunction;
   late final w.ValueType voidMarker;
   late final w.StructType dummyContext;
 
-  Map<w.StorageType, w.ArrayType> arrayTypeCache = {};
-  Map<int, w.StructType> functionTypeCache = {};
-  Map<w.StructType, int> functionTypeParameterCount = {};
-  Map<int, w.DefinedGlobal> functionTypeRtt = {};
-  Map<w.DefinedFunction, w.DefinedGlobal> functionRefCache = {};
-  Map<Procedure, w.DefinedFunction> tearOffFunctionCache = {};
+  final Map<w.StorageType, w.ArrayType> arrayTypeCache = {};
+  final Map<int, w.StructType> functionTypeCache = {};
+  final Map<w.StructType, int> functionTypeParameterCount = {};
+  final Map<int, w.DefinedGlobal> functionTypeRtt = {};
+  final Map<w.DefinedFunction, w.DefinedGlobal> functionRefCache = {};
+  final Map<Procedure, w.DefinedFunction> tearOffFunctionCache = {};
 
   ClassInfo get topInfo => classes[0];
   ClassInfo get objectInfo => classInfo[coreTypes.objectClass]!;
@@ -190,7 +190,7 @@ class Translator {
         libraries.first.procedures.firstWhere((p) => p.name.text == "main");
     functions.addExport(mainFunction.reference, "main");
 
-    initFunction = m.addFunction(m.addFunctionType([], []));
+    initFunction = m.addFunction(m.addFunctionType(const [], const []));
     m.startFunction = initFunction;
 
     globals = Globals(this);
@@ -731,6 +731,7 @@ class NodeCounter extends Visitor<void> with VisitorVoidMixin {
     return count;
   }
 
+  @override
   void defaultNode(Node node) {
     count++;
     node.visitChildren(this);
@@ -742,16 +743,25 @@ class ClassForType extends DartTypeVisitor<Class> {
 
   ClassForType(this.coreTypes);
 
+  @override
   Class defaultDartType(DartType node) => throw "Unsupported type $node";
 
+  @override
   Class visitDynamicType(DynamicType node) => coreTypes.objectClass;
+  @override
   Class visitVoidType(VoidType node) => coreTypes.objectClass;
+  @override
   Class visitInterfaceType(InterfaceType node) => node.classNode;
+  @override
   Class visitFutureOrType(FutureOrType node) => coreTypes.objectClass;
+  @override
   Class visitFunctionType(FunctionType node) => coreTypes.objectClass; // TODO
+  @override
   Class visitTypeParameterType(TypeParameterType node) =>
       node.bound.accept(this);
+  @override
   Class visitNeverType(NeverType node) => coreTypes.objectClass;
+  @override
   Class visitNullType(NullType node) => coreTypes.objectClass;
 }
 

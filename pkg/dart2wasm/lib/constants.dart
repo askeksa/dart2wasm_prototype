@@ -13,9 +13,9 @@ import 'package:kernel/type_algebra.dart' show substitute;
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
 class ConstantInfo {
-  Constant constant;
-  w.DefinedGlobal global;
-  w.DefinedFunction? function;
+  final Constant constant;
+  final w.DefinedGlobal global;
+  final w.DefinedFunction? function;
 
   ConstantInfo(this.constant, this.global, this.function);
 }
@@ -257,12 +257,13 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
     assert(!translator.needsConversion(resultType, expectedType));
   }
 
+  @override
   w.ValueType defaultConstant(Constant constant) {
     ConstantInfo info = ConstantCreator(constants).ensureConstant(constant)!;
     w.ValueType globalType = info.global.type.type;
     if (globalType.nullable) {
       if (info.function != null) {
-        w.Label done = b.block([], [globalType.withNullability(false)]);
+        w.Label done = b.block(const [], [globalType.withNullability(false)]);
         b.global_get(info.global);
         b.br_on_non_null(done);
         b.call(info.function!);
@@ -290,7 +291,7 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
         // This only happens in invalid but unreachable code produced by the
         // TFA dead-code elimination.
         b.comment("Non-nullable null constant");
-        b.block([], [expectedType]);
+        b.block(const [], [expectedType]);
         b.unreachable();
         b.end();
       }
@@ -362,7 +363,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
           m.addGlobal(w.GlobalType(type.withNullability(true)));
       global.initializer.ref_null(type.heapType);
       global.initializer.end();
-      w.FunctionType ftype = m.addFunctionType([], [type]);
+      w.FunctionType ftype = m.addFunctionType(const [], [type]);
       w.DefinedFunction function = m.addFunction(ftype);
       generator(function, function.body);
       w.Local temp = function.addLocal(translator.typeForLocal(type));

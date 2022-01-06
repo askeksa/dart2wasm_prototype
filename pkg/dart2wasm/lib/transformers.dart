@@ -87,7 +87,7 @@ class _WasmTransformer extends Transformer {
       ..fileOffset = iterable.fileOffset;
 
     final condition = InstanceInvocation(InstanceAccessKind.Instance,
-        VariableGet(iterator), Name('moveNext'), Arguments([]),
+        VariableGet(iterator), Name('moveNext'), Arguments(const []),
         interfaceTarget: coreTypes.iteratorMoveNext,
         functionType: coreTypes.iteratorMoveNext.function
             .computeFunctionType(Nullability.nonNullable))
@@ -102,7 +102,7 @@ class _WasmTransformer extends Transformer {
 
     final Block body = Block([variable, stmt.body]);
 
-    return Block([iterator, ForStatement([], condition, [], body)])
+    return Block([iterator, ForStatement(const [], condition, const [], body)])
         .accept<TreeNode>(this);
   }
 }
