@@ -163,8 +163,7 @@ class DispatchTable {
             member is Procedure && member.function.returnType is! VoidType
         ? 1
         : 0;
-    bool calledDynamically = isGetter &&
-        translator.programAnalyzer.dynamicGets.contains(member.name.text);
+    bool calledDynamically = isGetter && metadata.getterCalledDynamically;
     if (calledDynamically) {
       // Merge all same-named getter selectors that are called dynamically.
       selectorId = dynamicGets.putIfAbsent(member.name.text, () => selectorId);

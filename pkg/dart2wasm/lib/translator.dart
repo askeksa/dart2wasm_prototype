@@ -2,7 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:dart2wasm/analysis.dart';
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/closures.dart';
 import 'package:dart2wasm/code_generator.dart';
@@ -77,7 +76,6 @@ class Translator {
   late final Map<w.ValueType, Class> boxedClasses;
 
   late final ClassInfoCollector classInfoCollector;
-  late final ProgramAnalyzer programAnalyzer;
   late final DispatchTable dispatchTable;
   late final Globals globals;
   late final Constants constants;
@@ -197,9 +195,7 @@ class Translator {
 
     globals = Globals(this);
     constants = Constants(this);
-    programAnalyzer = ProgramAnalyzer(this);
 
-    component.accept(programAnalyzer);
     dispatchTable.build();
 
     functions.initExports();
