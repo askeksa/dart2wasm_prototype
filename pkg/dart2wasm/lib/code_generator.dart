@@ -1860,14 +1860,15 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
     bool isNullable = operandType.isPotentiallyNullable;
     w.Label? resultLabel;
-    w.Label? nullLabel;
     if (isNullable) {
-      resultLabel =
-          b.block([translator.topInfo.nullableType], const [w.NumType.i32]);
-      nullLabel = b.block([translator.topInfo.nullableType], const []);
-    }
-    if (isNullable) {
-      b.br_on_null(nullLabel!);
+      // Store operand in a temporary variable, since Binaryen does not support
+      // block inputs.
+      w.Local operand = addLocal(translator.topInfo.nullableType);
+      b.local_set(operand);
+      resultLabel = b.block(const [], const [w.NumType.i32]);
+      w.Label nullLabel = b.block(const [], const []);
+      b.local_get(operand);
+      b.br_on_null(nullLabel);
     }
     if (type.typeArguments.any((t) => t is! DynamicType)) {
       // If the tested-against type as an instance of the static operand type
