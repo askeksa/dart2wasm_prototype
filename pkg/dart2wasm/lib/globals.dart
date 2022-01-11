@@ -15,25 +15,23 @@ class Globals {
   final Map<Field, w.BaseFunction> globalInitializers = {};
   final Map<Field, w.Global> globalInitializedFlag = {};
   final Map<w.HeapType, w.DefinedGlobal> dummyValues = {};
+  late final w.DefinedGlobal dummyGlobal;
 
   Globals(this.translator) {
-    if (translator.options.localNullability) {
-      _initDummyValues();
-    }
+    _initDummyValues();
   }
 
   void _initDummyValues() {
-    // Create dummy struct for anyref/eqref/dataref dummy values
+    // Create dummy struct for anyref/eqref/dataref/context dummy values
     w.StructType structType = translator.m.addStructType("#Dummy");
     w.RefType type = w.RefType.def(structType, nullable: false);
-    w.DefinedGlobal global =
-        translator.m.addGlobal(w.GlobalType(type, mutable: false));
-    w.Instructions ib = global.initializer;
+    dummyGlobal = translator.m.addGlobal(w.GlobalType(type, mutable: false));
+    w.Instructions ib = dummyGlobal.initializer;
     translator.struct_new(ib, structType);
     ib.end();
-    dummyValues[w.HeapType.any] = global;
-    dummyValues[w.HeapType.eq] = global;
-    dummyValues[w.HeapType.data] = global;
+    dummyValues[w.HeapType.any] = dummyGlobal;
+    dummyValues[w.HeapType.eq] = dummyGlobal;
+    dummyValues[w.HeapType.data] = dummyGlobal;
   }
 
   w.Global? prepareDummyValue(w.ValueType type) {

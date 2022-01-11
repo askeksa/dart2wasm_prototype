@@ -91,7 +91,6 @@ class Translator {
   late final w.Module m;
   late final w.DefinedFunction initFunction;
   late final w.ValueType voidMarker;
-  late final w.StructType dummyContext;
 
   final Map<w.StorageType, w.ArrayType> arrayTypeCache = {};
   final Map<int, w.StructType> functionTypeCache = {};
@@ -181,7 +180,6 @@ class Translator {
   w.Module translate() {
     m = w.Module(watchPoints: options.watchPoints);
     voidMarker = w.RefType.def(w.StructType("void"), nullable: true);
-    dummyContext = m.addStructType("<context>");
 
     classInfoCollector.collect();
 

@@ -1501,8 +1501,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         b.ref_as_non_null();
       }
     } else {
-      // TODO: Put dummy context in global variable
-      translator.struct_new(b, translator.dummyContext);
+      b.global_get(translator.globals.dummyGlobal); // Dummy context
     }
   }
 

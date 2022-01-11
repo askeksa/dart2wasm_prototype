@@ -555,8 +555,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
 
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
-      // TODO: Put dummy context in global variable
-      translator.struct_new(b, translator.dummyContext);
+      b.global_get(translator.globals.dummyGlobal); // Dummy context
       if (lazyConstants) {
         w.DefinedGlobal global = translator.makeFunctionRef(closureFunction);
         b.global_get(global);
