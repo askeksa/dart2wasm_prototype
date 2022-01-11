@@ -64,6 +64,7 @@ class Translator {
   late final Class listBaseClass;
   late final Class fixedLengthListClass;
   late final Class growableListClass;
+  late final Class immutableListClass;
   late final Class stringBaseClass;
   late final Class oneByteStringClass;
   late final Class twoByteStringClass;
@@ -135,6 +136,7 @@ class Translator {
     fixedLengthListClass = lookupCore("_List");
     listBaseClass = lookupCore("_ListBase");
     growableListClass = lookupCore("_GrowableList");
+    immutableListClass = lookupCore("_ImmutableList");
     stringBaseClass = lookupCore("_StringBase");
     oneByteStringClass = lookupCore("_OneByteString");
     twoByteStringClass = lookupCore("_TwoByteString");

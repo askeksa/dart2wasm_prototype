@@ -21,11 +21,38 @@ abstract class _ListBase<E> extends ListBase<E> {
     return unsafeCast(_data.read(index));
   }
 
+  int get length => _length;
+
+  List<E> sublist(int start, [int? end]) {
+    final int listLength = this.length;
+    final int actualEnd = RangeError.checkValidRange(start, end, listLength);
+    int length = actualEnd - start;
+    if (length == 0) return <E>[];
+    return _GrowableList<E>(length)..setRange(0, length, this);
+  }
+
+  void forEach(f(E element)) {
+    final length = this.length;
+    for (int i = 0; i < length; i++) {
+      f(this[i]);
+    }
+  }
+
+  List<E> toList({bool growable: true}) {
+    return List.from(this, growable: growable);
+  }
+}
+
+@pragma("wasm:entry-point")
+abstract class _ModifiableList<E> extends _ListBase<E> {
+  _ModifiableList(int length, int capacity) : super(length, capacity);
+
+  _ModifiableList._withData(int length, WasmObjectArray<Object?> data)
+      : super._withData(length, data);
+
   void operator []=(int index, E value) {
     _data.write(index, value);
   }
-
-  int get length => _length;
 
   // List interface.
   void setRange(int start, int end, Iterable<E> iterable, [int skipCount = 0]) {
@@ -75,60 +102,16 @@ abstract class _ListBase<E> extends ListBase<E> {
     }
     Lists.copy(iterableAsList, 0, this, index, length);
   }
-
-  List<E> sublist(int start, [int? end]) {
-    final int listLength = this.length;
-    final int actualEnd = RangeError.checkValidRange(start, end, listLength);
-    int length = actualEnd - start;
-    if (length == 0) return <E>[];
-    return _GrowableList<E>(length)..setRange(0, length, this);
-  }
-
-  // Iterable interface.
-
-  @pragma("vm:prefer-inline")
-  void forEach(f(E element)) {
-    final length = this.length;
-    for (int i = 0; i < length; i++) {
-      f(this[i]);
-    }
-  }
-
-  @pragma("vm:prefer-inline")
-  Iterator<E> get iterator {
-    return new _FixedSizeListIterator<E>(this);
-  }
-
-  E get first {
-    if (length > 0) return this[0];
-    throw IterableElementError.noElement();
-  }
-
-  E get last {
-    if (length > 0) return this[length - 1];
-    throw IterableElementError.noElement();
-  }
-
-  E get single {
-    if (length == 1) return this[0];
-    if (length == 0) throw IterableElementError.noElement();
-    throw IterableElementError.tooMany();
-  }
-
-  List<E> toList({bool growable: true}) {
-    return List.from(this, growable: growable);
-  }
 }
 
 @pragma("wasm:entry-point")
-class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
+class _List<E> extends _ModifiableList<E> with FixedLengthListMixin<E> {
   _List._(int length) : super(length, length);
 
   factory _List(int length) => _List._(length);
 
   // Specialization of List.empty constructor for growable == false.
   // Used by pkg/vm/lib/transformations/list_factory_specializer.dart.
-  @pragma("vm:prefer-inline")
   factory _List.empty() => _List<E>(0);
 
   // Specialization of List.filled constructor for growable == false.
@@ -145,7 +128,6 @@ class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
 
   // Specialization of List.generate constructor for growable == false.
   // Used by pkg/vm/lib/transformations/list_factory_specializer.dart.
-  @pragma("vm:prefer-inline")
   factory _List.generate(int length, E generator(int index)) {
     final result = _List<E>(length);
     for (int i = 0; i < result.length; ++i) {
@@ -156,14 +138,8 @@ class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
 
   // Specialization of List.of constructor for growable == false.
   factory _List.of(Iterable<E> elements) {
-    if (elements is _GrowableList) {
-      return _List._ofGrowableList(unsafeCast(elements));
-    }
-    if (elements is _List) {
-      return _List._ofList(unsafeCast(elements));
-    }
-    if (elements is _ImmutableList) {
-      return _List._ofImmutableList(unsafeCast(elements));
+    if (elements is _ListBase) {
+      return _List._ofListBase(unsafeCast(elements));
     }
     if (elements is EfficientLengthIterable) {
       return _List._ofEfficientLengthIterable(unsafeCast(elements));
@@ -171,25 +147,7 @@ class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
     return _List._ofOther(elements);
   }
 
-  factory _List._ofGrowableList(_GrowableList<E> elements) {
-    final int length = elements.length;
-    final list = _List<E>(length);
-    for (int i = 0; i < length; i++) {
-      list[i] = elements[i];
-    }
-    return list;
-  }
-
-  factory _List._ofList(_List<E> elements) {
-    final int length = elements.length;
-    final list = _List<E>(length);
-    for (int i = 0; i < length; i++) {
-      list[i] = elements[i];
-    }
-    return list;
-  }
-
-  factory _List._ofImmutableList(_ImmutableList<E> elements) {
+  factory _List._ofListBase(_ListBase<E> elements) {
     final int length = elements.length;
     final list = _List<E>(length);
     for (int i = 0; i < length; i++) {
@@ -219,90 +177,32 @@ class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
     // system List types.
     return unsafeCast(makeListFixedLength(_GrowableList<E>._ofOther(elements)));
   }
-}
 
-// This is essentially the same class as _List, but it does not
-// permit any modification of list elements from Dart code. We use
-// this class for lists constructed from Dart list literals.
-// TODO(hausner): We should consider the trade-offs between two
-// classes (and inline cache misses) versus a field in the native
-// implementation (checks when modifying). We should keep watching
-// the inline cache misses.
-@pragma("vm:entry-point")
-class _ImmutableList<E> extends UnmodifiableListBase<E> {
-  factory _ImmutableList._uninstantiable() {
-    throw new UnsupportedError(
-        "ImmutableList can only be allocated by the runtime");
-  }
-
-  @pragma("vm:external-name", "ImmutableList_from")
-  external factory _ImmutableList._from(List from, int offset, int length);
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  @pragma("vm:external-name", "List_getIndexed")
-  external E operator [](int index);
-
-  @pragma("vm:recognized", "graph-intrinsic")
-  @pragma("vm:exact-result-type", "dart:core#_Smi")
-  @pragma("vm:prefer-inline")
-  @pragma("vm:external-name", "List_getLength")
-  external int get length;
-
-  List<E> sublist(int start, [int? end]) {
-    final int actualEnd = RangeError.checkValidRange(start, end, this.length);
-    int length = actualEnd - start;
-    if (length == 0) return <E>[];
-    final list = new _GrowableList<E>(length);
-    for (int i = 0; i < length; i++) {
-      list[i] = this[start + i];
-    }
-    return list;
-  }
-
-  // Collection interface.
-
-  @pragma("vm:prefer-inline")
-  void forEach(f(E element)) {
-    final length = this.length;
-    for (int i = 0; i < length; i++) {
-      f(this[i]);
-    }
-  }
-
-  @pragma("vm:prefer-inline")
   Iterator<E> get iterator {
     return new _FixedSizeListIterator<E>(this);
   }
+}
 
-  E get first {
-    if (length > 0) return this[0];
-    throw IterableElementError.noElement();
+@pragma("wasm:entry-point")
+class _ImmutableList<E> extends _ListBase<E> with UnmodifiableListMixin<E> {
+  factory _ImmutableList._uninstantiable() {
+    throw new UnsupportedError(
+        "_ImmutableList can only be allocated by the runtime");
   }
 
-  E get last {
-    if (length > 0) return this[length - 1];
-    throw IterableElementError.noElement();
-  }
-
-  E get single {
-    if (length == 1) return this[0];
-    if (length == 0) throw IterableElementError.noElement();
-    throw IterableElementError.tooMany();
-  }
-
-  List<E> toList({bool growable: true}) {
-    return List.from(this, growable: growable);
+  Iterator<E> get iterator {
+    return new _FixedSizeListIterator<E>(this);
   }
 }
 
 // Iterator for lists with fixed size.
 class _FixedSizeListIterator<E> implements Iterator<E> {
-  final List<E> _list;
+  final _ListBase<E> _list;
   final int _length; // Cache list length for faster access.
   int _index;
   E? _current;
 
-  _FixedSizeListIterator(List<E> list)
+  _FixedSizeListIterator(_ListBase<E> list)
       : _list = list,
         _length = list.length,
         _index = 0 {
@@ -311,13 +211,12 @@ class _FixedSizeListIterator<E> implements Iterator<E> {
 
   E get current => _current as E;
 
-  @pragma("vm:prefer-inline")
   bool moveNext() {
     if (_index >= _length) {
       _current = null;
       return false;
     }
-    _current = _list[_index];
+    _current = unsafeCast(_list._data.read(_index));
     _index++;
     return true;
   }

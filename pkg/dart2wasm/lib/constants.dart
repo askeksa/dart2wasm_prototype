@@ -90,8 +90,7 @@ class Constants {
   }
 
   void initEmptyTypeList() {
-    // TODO: Use unmodifiable list
-    ClassInfo info = translator.classInfo[translator.fixedLengthListClass]!;
+    ClassInfo info = translator.classInfo[translator.immutableListClass]!;
     w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
     w.ArrayType arrayType =
         (refType.heapType as w.DefHeapType).def as w.ArrayType;
@@ -501,8 +500,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
       ensureConstant(subConstant);
     }
 
-    // TODO: Use unmodifiable list
-    ClassInfo info = translator.classInfo[translator.fixedLengthListClass]!;
+    ClassInfo info = translator.classInfo[translator.immutableListClass]!;
     w.RefType type = info.nonNullableType;
     return createConstant(constant, type, (function, b) {
       w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;

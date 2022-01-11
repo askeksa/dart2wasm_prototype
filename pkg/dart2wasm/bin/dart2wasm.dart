@@ -34,7 +34,7 @@ import 'package:dart2wasm/translator.dart';
 
 class WasmTarget extends Target {
   Class? _growableList;
-  Class? _list;
+  Class? _immutableList;
   Class? _immutableMap;
   Class? _unmodifiableSet;
   Class? _compactLinkedCustomHashMap;
@@ -162,7 +162,8 @@ class WasmTarget extends Target {
 
   @override
   Class concreteConstListLiteralClass(CoreTypes coreTypes) {
-    return _list ??= coreTypes.index.getClass('dart:core', '_List');
+    return _immutableList ??=
+        coreTypes.index.getClass('dart:core', '_ImmutableList');
   }
 
   @override

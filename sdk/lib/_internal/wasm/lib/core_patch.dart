@@ -19,7 +19,7 @@ import "dart:_internal"
         mix64,
         POWERS_OF_TEN,
         SubListIterable,
-        UnmodifiableListBase,
+        UnmodifiableListMixin,
         has63BitSmis,
         makeFixedListUnmodifiable,
         makeListFixedLength,
