@@ -300,7 +300,13 @@ class Translator {
     }
   }
 
-  Class classForType(DartType type) => type.accept(ClassForType(coreTypes));
+  Class classForType(DartType type) {
+    return type is InterfaceType
+        ? type.classNode
+        : type is TypeParameterType
+            ? classForType(type.bound)
+            : coreTypes.objectClass;
+  }
 
   Class upperBound(Class a, Class b) {
     if (hierarchy.isSubclassOf(b, a)) return a;
@@ -735,33 +741,6 @@ class NodeCounter extends Visitor<void> with VisitorVoidMixin {
     count++;
     node.visitChildren(this);
   }
-}
-
-class ClassForType extends DartTypeVisitor<Class> {
-  final CoreTypes coreTypes;
-
-  ClassForType(this.coreTypes);
-
-  @override
-  Class defaultDartType(DartType node) => throw "Unsupported type $node";
-
-  @override
-  Class visitDynamicType(DynamicType node) => coreTypes.objectClass;
-  @override
-  Class visitVoidType(VoidType node) => coreTypes.objectClass;
-  @override
-  Class visitInterfaceType(InterfaceType node) => node.classNode;
-  @override
-  Class visitFutureOrType(FutureOrType node) => coreTypes.objectClass;
-  @override
-  Class visitFunctionType(FunctionType node) => coreTypes.objectClass; // TODO
-  @override
-  Class visitTypeParameterType(TypeParameterType node) =>
-      node.bound.accept(this);
-  @override
-  Class visitNeverType(NeverType node) => coreTypes.objectClass;
-  @override
-  Class visitNullType(NullType node) => coreTypes.objectClass;
 }
 
 extension GetterSetterReference on Reference {

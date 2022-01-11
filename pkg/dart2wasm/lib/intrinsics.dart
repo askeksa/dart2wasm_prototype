@@ -424,7 +424,6 @@ class Intrinsifier {
       Expression length = node.arguments.positional[0];
       w.ArrayType arrayType = translator.arrayType(node.arguments.types.single);
       codeGen.wrap(length, w.NumType.i64);
-      // TODO: Support filling with other than default value
       b.i32_wrap_i64();
       translator.array_new_default(b, arrayType);
       return w.RefType.def(arrayType, nullable: false);
