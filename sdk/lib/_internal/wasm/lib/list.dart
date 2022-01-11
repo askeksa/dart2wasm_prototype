@@ -96,7 +96,7 @@ abstract class _ListBase<E> extends ListBase<E> {
 
   @pragma("vm:prefer-inline")
   Iterator<E> get iterator {
-    return new _FixedSizeArrayIterator<E>(this);
+    return new _FixedSizeListIterator<E>(this);
   }
 
   E get first {
@@ -222,8 +222,8 @@ class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
 }
 
 // This is essentially the same class as _List, but it does not
-// permit any modification of array elements from Dart code. We use
-// this class for arrays constructed from Dart array literals.
+// permit any modification of list elements from Dart code. We use
+// this class for lists constructed from Dart list literals.
 // TODO(hausner): We should consider the trade-offs between two
 // classes (and inline cache misses) versus a field in the native
 // implementation (checks when modifying). We should keep watching
@@ -232,7 +232,7 @@ class _List<E> extends _ListBase<E> with FixedLengthListMixin<E> {
 class _ImmutableList<E> extends UnmodifiableListBase<E> {
   factory _ImmutableList._uninstantiable() {
     throw new UnsupportedError(
-        "ImmutableArray can only be allocated by the VM");
+        "ImmutableList can only be allocated by the runtime");
   }
 
   @pragma("vm:external-name", "ImmutableList_from")
@@ -271,7 +271,7 @@ class _ImmutableList<E> extends UnmodifiableListBase<E> {
 
   @pragma("vm:prefer-inline")
   Iterator<E> get iterator {
-    return new _FixedSizeArrayIterator<E>(this);
+    return new _FixedSizeListIterator<E>(this);
   }
 
   E get first {
@@ -295,18 +295,18 @@ class _ImmutableList<E> extends UnmodifiableListBase<E> {
   }
 }
 
-// Iterator for arrays with fixed size.
-class _FixedSizeArrayIterator<E> implements Iterator<E> {
-  final List<E> _array;
-  final int _length; // Cache array length for faster access.
+// Iterator for lists with fixed size.
+class _FixedSizeListIterator<E> implements Iterator<E> {
+  final List<E> _list;
+  final int _length; // Cache list length for faster access.
   int _index;
   E? _current;
 
-  _FixedSizeArrayIterator(List<E> array)
-      : _array = array,
-        _length = array.length,
+  _FixedSizeListIterator(List<E> list)
+      : _list = list,
+        _length = list.length,
         _index = 0 {
-    assert(array is _List<E> || array is _ImmutableList<E>);
+    assert(list is _List<E> || list is _ImmutableList<E>);
   }
 
   E get current => _current as E;
@@ -317,7 +317,7 @@ class _FixedSizeArrayIterator<E> implements Iterator<E> {
       _current = null;
       return false;
     }
-    _current = _array[_index];
+    _current = _list[_index];
     _index++;
     return true;
   }

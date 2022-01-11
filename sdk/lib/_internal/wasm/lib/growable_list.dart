@@ -281,7 +281,7 @@ class _GrowableList<T> extends _ListBase<T> {
     throw IterableElementError.tooMany();
   }
 
-  // Shared array used as backing for new empty growable arrays.
+  // Shared array used as backing for new empty growable lists.
   static final WasmObjectArray<Object?> _emptyData =
       WasmObjectArray<Object?>(0);
 
@@ -364,7 +364,7 @@ class _GrowableList<T> extends _ListBase<T> {
         nextElement = this[i];
       }
 
-      // Not all elements are strings, so allocate a new backing array.
+      // Not all elements are strings, so allocate a new backing list.
       final list = new _List(length);
       for (int copyIndex = 0; copyIndex < i; copyIndex++) {
         list[copyIndex] = this[copyIndex];
