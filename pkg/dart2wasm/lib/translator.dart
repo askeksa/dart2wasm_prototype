@@ -317,7 +317,7 @@ class Translator {
   w.ValueType translateType(DartType type) {
     w.StorageType wasmType = translateStorageType(type);
     if (wasmType is w.ValueType) return wasmType;
-    throw "Non-value types only allowed in arrays and fields";
+    throw "Non-value types are only allowed in arrays and fields";
   }
 
   bool isWasmType(Class cls) {
@@ -349,7 +349,6 @@ class Translator {
   }
 
   w.StorageType translateStorageType(DartType type) {
-    assert(type is! VoidType);
     if (type is InterfaceType) {
       if (type.classNode.superclass == wasmArrayBaseClass) {
         DartType elementType = type.typeArguments.single;
