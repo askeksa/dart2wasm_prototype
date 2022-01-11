@@ -120,13 +120,6 @@ class _BoxedDouble implements double {
   double truncateToDouble() native "Double_truncate";
 
   num clamp(num lowerLimit, num upperLimit) {
-    // TODO: Remove these null checks once all code is opted into strong nonnullable mode.
-    if (lowerLimit == null) {
-      throw new ArgumentError.notNull("lowerLimit");
-    }
-    if (upperLimit == null) {
-      throw new ArgumentError.notNull("upperLimit");
-    }
     if (lowerLimit.compareTo(upperLimit) > 0) {
       throw new ArgumentError(lowerLimit);
     }
@@ -173,11 +166,6 @@ class _BoxedDouble implements double {
 
   String toStringAsFixed(int fractionDigits) {
     // See ECMAScript-262, 15.7.4.5 for details.
-
-    // TODO: Remove these null checks once all code is opted into strong nonnullable mode.
-    if (fractionDigits == null) {
-      throw new ArgumentError.notNull("fractionDigits");
-    }
 
     // Step 2.
     if (fractionDigits < 0 || fractionDigits > 20) {

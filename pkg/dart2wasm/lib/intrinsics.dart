@@ -16,34 +16,38 @@ class Intrinsifier {
   static const w.ValueType intType = w.NumType.i64;
   static const w.ValueType doubleType = w.NumType.f64;
 
-  static final Map<w.ValueType, Map<String, Map<w.ValueType, CodeGenCallback>>>
+  static final Map<w.ValueType, Map<w.ValueType, Map<String, CodeGenCallback>>>
       binaryOperatorMap = {
     intType: {
-      '+': {intType: (b) => b.i64_add()},
-      '-': {intType: (b) => b.i64_sub()},
-      '*': {intType: (b) => b.i64_mul()},
-      '~/': {intType: (b) => b.i64_div_s()},
-      '&': {intType: (b) => b.i64_and()},
-      '|': {intType: (b) => b.i64_or()},
-      '^': {intType: (b) => b.i64_xor()},
-      '<<': {intType: (b) => b.i64_shl()},
-      '>>': {intType: (b) => b.i64_shr_s()},
-      '>>>': {intType: (b) => b.i64_shr_u()},
-      '<': {intType: (b) => b.i64_lt_s()},
-      '<=': {intType: (b) => b.i64_le_s()},
-      '>': {intType: (b) => b.i64_gt_s()},
-      '>=': {intType: (b) => b.i64_ge_s()},
+      intType: {
+        '+': (b) => b.i64_add(),
+        '-': (b) => b.i64_sub(),
+        '*': (b) => b.i64_mul(),
+        '~/': (b) => b.i64_div_s(),
+        '&': (b) => b.i64_and(),
+        '|': (b) => b.i64_or(),
+        '^': (b) => b.i64_xor(),
+        '<<': (b) => b.i64_shl(),
+        '>>': (b) => b.i64_shr_s(),
+        '>>>': (b) => b.i64_shr_u(),
+        '<': (b) => b.i64_lt_s(),
+        '<=': (b) => b.i64_le_s(),
+        '>': (b) => b.i64_gt_s(),
+        '>=': (b) => b.i64_ge_s(),
+      }
     },
     doubleType: {
-      '+': {doubleType: (b) => b.f64_add()},
-      '-': {doubleType: (b) => b.f64_sub()},
-      '*': {doubleType: (b) => b.f64_mul()},
-      '/': {doubleType: (b) => b.f64_div()},
-      '<': {doubleType: (b) => b.f64_lt()},
-      '<=': {doubleType: (b) => b.f64_le()},
-      '>': {doubleType: (b) => b.f64_gt()},
-      '>=': {doubleType: (b) => b.f64_ge()},
-    }
+      doubleType: {
+        '+': (b) => b.f64_add(),
+        '-': (b) => b.f64_sub(),
+        '*': (b) => b.f64_mul(),
+        '/': (b) => b.f64_div(),
+        '<': (b) => b.f64_lt(),
+        '<=': (b) => b.f64_le(),
+        '>': (b) => b.f64_gt(),
+        '>=': (b) => b.f64_ge(),
+      }
+    },
   };
   static final Map<w.ValueType, Map<String, CodeGenCallback>> unaryOperatorMap =
       {
@@ -231,23 +235,22 @@ class Intrinsifier {
       if (argType is VoidType) return null;
       w.ValueType leftType = translator.translateType(receiverType);
       w.ValueType rightType = translator.translateType(argType);
-      var op = binaryOperatorMap[leftType]?[name]?[rightType];
-      if (op != null) {
-        // TODO: Support differing operand types
+      var code = binaryOperatorMap[leftType]?[rightType]?[name];
+      if (code != null) {
         w.ValueType outType = isComparison(name) ? w.NumType.i32 : leftType;
         codeGen.wrap(left, leftType);
         codeGen.wrap(right, rightType);
-        op(b);
+        code(b);
         return outType;
       }
     } else if (node.arguments.positional.length == 0) {
       // Unary operator
       Expression operand = node.receiver;
       w.ValueType opType = translator.translateType(receiverType);
-      var op = unaryOperatorMap[opType]?[name];
-      if (op != null) {
+      var code = unaryOperatorMap[opType]?[name];
+      if (code != null) {
         codeGen.wrap(operand, opType);
-        op(b);
+        code(b);
         return unaryResultMap[name] ?? opType;
       }
     }
@@ -636,7 +639,7 @@ class Intrinsifier {
           return true;
         }
       } else if (functionNode.requiredParameterCount == 1) {
-        CodeGenCallback? code = binaryOperatorMap[intType]![op]?[intType];
+        CodeGenCallback? code = binaryOperatorMap[intType]![intType]![op];
         if (code != null) {
           w.ValueType leftType = function.type.inputs[0];
           w.ValueType rightType = function.type.inputs[1];
@@ -666,7 +669,7 @@ class Intrinsifier {
           translator.convertType(function, rightType, doubleType);
           // Inline double op
           CodeGenCallback doubleCode =
-              binaryOperatorMap[doubleType]![op]![doubleType]!;
+              binaryOperatorMap[doubleType]![doubleType]![op]!;
           doubleCode(b);
           if (!isComparison(op)) {
             translator.convertType(function, doubleType, outputType);
