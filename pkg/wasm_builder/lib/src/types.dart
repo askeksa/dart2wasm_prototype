@@ -411,7 +411,7 @@ class FunctionType extends DefType {
     s.writeByte(hasSuperType ? 0x5D : 0x60);
     s.writeList(inputs);
     s.writeList(outputs);
-    if (hasSuperType) s.writeUnsigned(superType!.index);
+    if (hasSuperType) s.writeSigned(superType!.index);
   }
 
   @override
@@ -449,7 +449,7 @@ class StructType extends DataType {
   void serialize(Serializer s) {
     s.writeByte(hasSuperType ? 0x5C : 0x5F);
     s.writeList(fields);
-    if (hasSuperType) s.writeUnsigned(superType!.index);
+    if (hasSuperType) s.writeSigned(superType!.index);
   }
 }
 
@@ -471,7 +471,7 @@ class ArrayType extends DataType {
   void serialize(Serializer s) {
     s.writeByte(hasSuperType ? 0x5B : 0x5E);
     s.write(elementType);
-    if (hasSuperType) s.writeUnsigned(superType!.index);
+    if (hasSuperType) s.writeSigned(superType!.index);
   }
 }
 
