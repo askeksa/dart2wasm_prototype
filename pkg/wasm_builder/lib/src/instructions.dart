@@ -67,7 +67,7 @@ class Instructions with SerializerMixin {
   int byteOffsetWidth = 7;
   int instructionColumnWidth = 50;
   int _indent = 1;
-  List<String> _traceLines = [];
+  final List<String> _traceLines = [];
 
   int labelCount = 0;
   final List<Label> labelStack = [];
@@ -497,7 +497,7 @@ class Instructions with SerializerMixin {
   }
 
   void i32_load8_s(Memory memory, int offset, [int align = 0]) {
-    assert(align >= 0 && align <= 0);
+    assert(align == 0);
     assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
         trace: ['i32.load8_s', memory.index, offset, align]));
     writeByte(0x2C);
@@ -505,7 +505,7 @@ class Instructions with SerializerMixin {
   }
 
   void i32_load8_u(Memory memory, int offset, [int align = 0]) {
-    assert(align >= 0 && align <= 0);
+    assert(align == 0);
     assert(_verifyTypes(const [NumType.i32], const [NumType.i32],
         trace: ['i32.load8_u', memory.index, offset, align]));
     writeByte(0x2D);
@@ -529,7 +529,7 @@ class Instructions with SerializerMixin {
   }
 
   void i64_load8_s(Memory memory, int offset, [int align = 0]) {
-    assert(align >= 0 && align <= 0);
+    assert(align == 0);
     assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
         trace: ['i64.load8_s', memory.index, offset, align]));
     writeByte(0x30);
@@ -537,7 +537,7 @@ class Instructions with SerializerMixin {
   }
 
   void i64_load8_u(Memory memory, int offset, [int align = 0]) {
-    assert(align >= 0 && align <= 0);
+    assert(align == 0);
     assert(_verifyTypes(const [NumType.i32], const [NumType.i64],
         trace: ['i64.load8_u', memory.index, offset, align]));
     writeByte(0x31);
@@ -609,7 +609,7 @@ class Instructions with SerializerMixin {
   }
 
   void i32_store8(Memory memory, int offset, [int align = 0]) {
-    assert(align >= 0 && align <= 0);
+    assert(align == 0);
     assert(_verifyTypes(const [NumType.i32, NumType.i32], const [],
         trace: ['i32.store8', memory.index, offset, align]));
     writeByte(0x3A);
@@ -625,7 +625,7 @@ class Instructions with SerializerMixin {
   }
 
   void i64_store8(Memory memory, int offset, [int align = 0]) {
-    assert(align >= 0 && align <= 0);
+    assert(align == 0);
     assert(_verifyTypes(const [NumType.i32, NumType.i64], const [],
         trace: ['i64.store8', memory.index, offset, align]));
     writeByte(0x3C);

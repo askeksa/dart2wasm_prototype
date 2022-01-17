@@ -34,6 +34,9 @@ class Module with SerializerMixin {
   Iterable<Import> get imports =>
       functions.whereType<Import>().followedBy(globals.whereType<Import>());
 
+  Iterable<DefinedFunction> get definedFunctions =>
+      functions.whereType<DefinedFunction>();
+
   FunctionType addFunctionType(
       Iterable<ValueType> inputs, Iterable<ValueType> outputs) {
     final List<ValueType> inputList = List.unmodifiable(inputs);
@@ -48,17 +51,16 @@ class Module with SerializerMixin {
 
   StructType addStructType(String name,
       {Iterable<FieldType>? fields, StructType? superType}) {
-    final type = StructType(name, superType: superType)
+    final type = StructType(name, fields: fields, superType: superType)
       ..index = defTypes.length;
-    if (fields != null) type.fields.addAll(fields);
     defTypes.add(type);
     return type;
   }
 
   ArrayType addArrayType(String name,
       {FieldType? elementType, ArrayType? superType}) {
-    final type = ArrayType(name, superType: superType)..index = defTypes.length;
-    if (elementType != null) type.elementType = elementType;
+    final type = ArrayType(name, elementType: elementType, superType: superType)
+      ..index = defTypes.length;
     defTypes.add(type);
     return type;
   }
@@ -135,6 +137,7 @@ class Module with SerializerMixin {
   }
 
   Uint8List encode() {
+    // Wasm module preamble: magic number, version 1.
     writeBytes(const [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]);
     TypeSection(this).serialize(this);
     ImportSection(this).serialize(this);
@@ -153,8 +156,8 @@ class Module with SerializerMixin {
 }
 
 class _FunctionTypeKey {
-  List<ValueType> inputs;
-  List<ValueType> outputs;
+  final List<ValueType> inputs;
+  final List<ValueType> outputs;
 
   _FunctionTypeKey(this.inputs, this.outputs);
 
@@ -187,7 +190,7 @@ class _FunctionTypeKey {
 }
 
 abstract class BaseFunction {
-  int index;
+  final int index;
   final FunctionType type;
   String? exportedName;
 
@@ -254,10 +257,10 @@ class Local {
 }
 
 class Table implements Serializable {
-  int index;
-  int minSize;
-  int? maxSize;
-  List<BaseFunction?> elements;
+  final int index;
+  final int minSize;
+  final int? maxSize;
+  final List<BaseFunction?> elements;
 
   Table(this.index, this.minSize, this.maxSize)
       : elements = List.filled(minSize, null);
@@ -281,9 +284,9 @@ class Table implements Serializable {
 }
 
 class Memory implements Serializable {
-  int index;
-  int minSize;
-  int? maxSize;
+  final int index;
+  final int minSize;
+  final int? maxSize;
 
   Memory(this.index, this.minSize, [this.maxSize]);
 
@@ -392,8 +395,8 @@ class ImportedFunction extends BaseFunction implements Import {
 }
 
 class ImportedGlobal extends Global implements Import {
-  String module;
-  String name;
+  final String module;
+  final String name;
 
   ImportedGlobal(this.module, this.name, int index, GlobalType type)
       : super(index, type);
@@ -408,13 +411,13 @@ class ImportedGlobal extends Global implements Import {
 }
 
 abstract class Export implements Serializable {
-  String name;
+  final String name;
 
   Export(this.name);
 }
 
 class FunctionExport extends Export {
-  BaseFunction function;
+  final BaseFunction function;
 
   FunctionExport(String name, this.function) : super(name);
 
@@ -427,7 +430,7 @@ class FunctionExport extends Export {
 }
 
 class GlobalExport extends Export {
-  Global global;
+  final Global global;
 
   GlobalExport(String name, this.global) : super(name);
 
@@ -497,14 +500,13 @@ class FunctionSection extends Section {
   int get id => 3;
 
   @override
-  bool get isNotEmpty =>
-      module.functions.whereType<DefinedFunction>().isNotEmpty;
+  bool get isNotEmpty => module.definedFunctions.isNotEmpty;
 
   @override
   void serializeContents() {
-    writeUnsigned(module.functions.whereType<DefinedFunction>().length);
-    for (var function in module.functions) {
-      if (function is DefinedFunction) writeUnsigned(function.type.index);
+    writeUnsigned(module.definedFunctions.length);
+    for (var function in module.definedFunctions) {
+      writeUnsigned(function.type.index);
     }
   }
 }
@@ -585,9 +587,9 @@ class StartSection extends Section {
 }
 
 class _Element implements Serializable {
-  Table table;
-  int startIndex;
-  List<BaseFunction> entries = [];
+  final Table table;
+  final int startIndex;
+  final List<BaseFunction> entries = [];
 
   _Element(this.table, this.startIndex);
 
@@ -658,12 +660,11 @@ class CodeSection extends Section {
   int get id => 10;
 
   @override
-  bool get isNotEmpty =>
-      module.functions.whereType<DefinedFunction>().isNotEmpty;
+  bool get isNotEmpty => module.definedFunctions.isNotEmpty;
 
   @override
   void serializeContents() {
-    writeList(module.functions.whereType<DefinedFunction>().toList());
+    writeList(module.definedFunctions.toList());
   }
 }
 

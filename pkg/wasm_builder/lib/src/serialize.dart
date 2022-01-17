@@ -76,6 +76,7 @@ mixin SerializerMixin implements Serializer {
   }
 
   void writeF32(double value) {
+    // Get the binary representation of the F32.
     List<int> bytes = Float32List.fromList([value]).buffer.asUint8List();
     assert(bytes.length == 4);
     if (Endian.host == Endian.big) bytes = bytes.reversed.toList();
@@ -83,6 +84,7 @@ mixin SerializerMixin implements Serializer {
   }
 
   void writeF64(double value) {
+    // Get the binary representation of the F64.
     List<int> bytes = Float64List.fromList([value]).buffer.asUint8List();
     assert(bytes.length == 8);
     if (Endian.host == Endian.big) bytes = bytes.reversed.toList();

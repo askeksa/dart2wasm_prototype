@@ -344,7 +344,6 @@ class DefHeapType extends HeapType {
 
   @override
   bool isSubtypeOf(HeapType other) {
-    assert(def is FunctionType || def is DataType);
     if (other is! DefHeapType) {
       return other == HeapType.any ||
           (def is FunctionType
@@ -430,8 +429,10 @@ abstract class DataType extends DefType {
 class StructType extends DataType {
   final List<FieldType> fields = [];
 
-  StructType(String name, {StructType? superType})
-      : super(name, superType: superType);
+  StructType(String name, {Iterable<FieldType>? fields, StructType? superType})
+      : super(name, superType: superType) {
+    if (fields != null) this.fields.addAll(fields);
+  }
 
   @override
   bool isSubtypeOf(DefType other) {
@@ -456,8 +457,10 @@ class StructType extends DataType {
 class ArrayType extends DataType {
   late final FieldType elementType;
 
-  ArrayType(String name, {ArrayType? superType})
-      : super(name, superType: superType);
+  ArrayType(String name, {FieldType? elementType, ArrayType? superType})
+      : super(name, superType: superType) {
+    if (elementType != null) this.elementType = elementType;
+  }
 
   @override
   bool isSubtypeOf(DefType other) {
