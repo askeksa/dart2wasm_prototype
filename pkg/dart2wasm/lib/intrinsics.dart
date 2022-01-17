@@ -456,7 +456,7 @@ class Intrinsifier {
       b.local_get(receiver);
       b.struct_get(translator.topInfo.struct, FieldIndex.classId);
       b.i64_extend_i32_u();
-      // TODO: Type arguments
+      // TODO(askesc): Type arguments
       b.global_get(translator.constants.emptyTypeList);
       translator.convertType(function,
           translator.constants.emptyTypeList.type.type, typeListExpectedType);

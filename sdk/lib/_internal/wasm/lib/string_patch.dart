@@ -14,9 +14,6 @@ class String {
   @patch
   factory String.fromCharCodes(Iterable<int> charCodes,
       [int start = 0, int? end]) {
-    // TODO: Remove these null checks once all code is opted into strong nonnullable mode.
-    if (charCodes == null) throw new ArgumentError.notNull("charCodes");
-    if (start == null) throw new ArgumentError.notNull("start");
     return _StringBase.createFromCharCodes(charCodes, start, end, null);
   }
 
@@ -565,16 +562,6 @@ abstract class _StringBase implements String {
 
   String replaceFirst(Pattern pattern, String replacement,
       [int startIndex = 0]) {
-    // TODO: Remove these null checks once all code is opted into strong nonnullable mode.
-    if (pattern == null) {
-      throw new ArgumentError.notNull("pattern");
-    }
-    if (replacement == null) {
-      throw new ArgumentError.notNull("replacement");
-    }
-    if (startIndex == null) {
-      throw new ArgumentError.notNull("startIndex");
-    }
     RangeError.checkValueInInterval(startIndex, 0, this.length, "startIndex");
     Iterator iterator = startIndex == 0
         ? pattern.allMatches(this).iterator

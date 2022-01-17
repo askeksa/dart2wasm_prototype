@@ -4,7 +4,7 @@
 
 @pragma("wasm:entry-point")
 class _Function {
-  // TODO: Make non-nullable
+  // TODO(askesc): Make non-nullable
   @pragma("wasm:entry-point")
   WasmDataRef context;
 

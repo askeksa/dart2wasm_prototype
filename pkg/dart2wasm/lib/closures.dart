@@ -93,7 +93,6 @@ class Closures {
     // Build object layouts
     for (Context context in contexts.values) {
       if (!context.isEmpty) {
-        // TODO: Non-nullable, immutable parent/this when supported
         w.StructType struct = context.struct;
         if (context.parent != null) {
           assert(!context.containsThis);

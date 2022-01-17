@@ -521,7 +521,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   void visitTryCatch(TryCatch node) {
-    // TODO: Include catches
+    // TODO(joshualitt): Include catches
     node.body.accept(this);
   }
 
@@ -1570,7 +1570,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitNullCheck(NullCheck node, w.ValueType expectedType) {
-    // TODO: Check and throw exception
+    // TODO(joshualitt): Check and throw exception
     return wrap(node.operand, expectedType);
   }
 
@@ -1628,7 +1628,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   @override
   w.ValueType visitThrow(Throw node, w.ValueType expectedType) {
     wrap(node.expression, translator.topInfo.nullableType);
-    // TODO: Throw exception
+    // TODO(joshualitt): Throw exception
     b.comment(node.toStringInternal());
     b.drop();
     b.block(const [], [if (expectedType != voidMarker) expectedType]);
@@ -1795,7 +1795,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
     ClassInfo info = translator.classInfo[translator.typeClass]!;
     if (type is FutureOrType) {
-      // TODO: Have an actual representation of FutureOr types
+      // TODO(askesc): Have an actual representation of FutureOr types
       b.ref_null(info.nullableType.heapType);
       return info.nullableType;
     }
@@ -1850,7 +1850,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   /// (ref null #Top) and leaves the result on the stack as an i32.
   void emitTypeTest(DartType type, DartType operandType, TreeNode node) {
     if (type is! InterfaceType) {
-      // TODO: Implement type test for remaining types
+      // TODO(askesc): Implement type test for remaining types
       print("Not implemented: Type test with non-interface type $type"
           " at ${node.location}");
       b.drop();
@@ -1921,7 +1921,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitAsExpression(AsExpression node, w.ValueType expectedType) {
-    // TODO: Emit type test and throw exception on failure
+    // TODO(joshualitt): Emit type test and throw exception on failure
     return wrap(node.operand, expectedType);
   }
 }

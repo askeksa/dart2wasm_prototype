@@ -241,7 +241,7 @@ class ClassInfoCollector {
       for (Field field in info.cls!.fields) {
         if (field.isInstanceMember) {
           w.ValueType wasmType = translator.translateType(field.type);
-          // TODO: Generalize this check for finer control
+          // TODO(askesc): Generalize this check for finer nullability control
           if (wasmType != w.RefType.data()) {
             wasmType = wasmType.withNullability(true);
           }
