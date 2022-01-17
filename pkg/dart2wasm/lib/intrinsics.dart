@@ -416,6 +416,13 @@ class Intrinsifier {
           codeGen.wrap(node.arguments.positional.single, w.NumType.i64);
           b.f64_reinterpret_i64();
           return w.NumType.f64;
+        case "getID":
+          assert(node.target.enclosingClass?.name == "ClassID");
+          ClassInfo info = translator.topInfo;
+          codeGen.wrap(node.arguments.positional.single, info.nullableType);
+          b.struct_get(info.struct, FieldIndex.classId);
+          b.i64_extend_i32_u();
+          return w.NumType.i64;
       }
     }
 
