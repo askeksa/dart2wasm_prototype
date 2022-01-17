@@ -235,12 +235,8 @@ abstract class _StringBase implements String {
     var s = _OneByteString._allocate(len);
 
     // Special case for native Uint8 typed arrays.
-    final int cid = ClassID.getID(charCodes);
-    if (cid == ClassID.cidUint8ArrayView ||
-        cid == ClassID.cidUint8Array ||
-        cid == ClassID.cidExternalUint8Array) {
-      Uint8List bytes = unsafeCast<Uint8List>(charCodes);
-      copyRangeFromUint8ListToOneByteString(bytes, s, start, 0, len);
+    if (charCodes is Uint8List) {
+      copyRangeFromUint8ListToOneByteString(charCodes, s, start, 0, len);
       return s;
     }
 
