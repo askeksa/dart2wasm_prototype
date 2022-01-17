@@ -176,8 +176,9 @@
       "collection": {
         "uri": "collection/collection.dart",
         "patches": [
-          "_internal/wasm/lib/collection_patch.dart",
-          "_internal/wasm/lib/compact_hash.dart"
+          "_internal/vm/lib/collection_patch.dart",
+          "_internal/vm/lib/compact_hash.dart",
+          "_internal/wasm/lib/hash_factories.dart"
         ]
       },
       "convert": {
