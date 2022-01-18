@@ -218,6 +218,8 @@ abstract class HeapType implements Serializable {
   bool? get nullableByDefault;
 
   bool isSubtypeOf(HeapType other);
+
+  bool isStructuralSubtypeOf(HeapType other) => isSubtypeOf(other);
 }
 
 class AnyHeapType extends HeapType {
@@ -335,11 +337,11 @@ class ExternHeapType extends HeapType {
 
 abstract class DefType extends HeapType {
   int? _index;
-  final DefType? superType;
+  final HeapType? superType;
   final int depth;
 
   DefType({this.superType})
-      : depth = superType == null ? 0 : superType.depth + 1;
+      : depth = superType is DefType ? superType.depth + 1 : 0;
 
   int get index => _index ?? (throw "$runtimeType $this not added to module");
   set index(int i) => _index = i;
@@ -348,6 +350,15 @@ abstract class DefType extends HeapType {
 
   @override
   bool? get nullableByDefault => null;
+
+  @override
+  bool isSubtypeOf(HeapType other) {
+    if (this == other) return true;
+    if (hasSuperType) {
+      return superType!.isSubtypeOf(other);
+    }
+    return isStructuralSubtypeOf(other);
+  }
 
   @override
   void serialize(Serializer s) => s.writeSigned(index);
@@ -359,11 +370,11 @@ class FunctionType extends DefType {
   final List<ValueType> inputs;
   final List<ValueType> outputs;
 
-  FunctionType(this.inputs, this.outputs, {FunctionType? superType})
+  FunctionType(this.inputs, this.outputs, {HeapType? superType})
       : super(superType: superType);
 
   @override
-  bool isSubtypeOf(HeapType other) {
+  bool isStructuralSubtypeOf(HeapType other) {
     if (other == HeapType.any || other == HeapType.func) return true;
     if (other is! FunctionType) return false;
     if (inputs.length != other.inputs.length) return false;
@@ -384,7 +395,10 @@ class FunctionType extends DefType {
     s.writeByte(hasSuperType ? 0x5D : 0x60);
     s.writeList(inputs);
     s.writeList(outputs);
-    if (hasSuperType) s.writeSigned(superType!.index);
+    if (hasSuperType) {
+      assert(isStructuralSubtypeOf(superType!));
+      s.write(superType!);
+    }
   }
 
   @override
@@ -394,7 +408,7 @@ class FunctionType extends DefType {
 abstract class DataType extends DefType {
   final String name;
 
-  DataType(this.name, {DefType? superType}) : super(superType: superType);
+  DataType(this.name, {HeapType? superType}) : super(superType: superType);
 
   @override
   String toString() => name;
@@ -403,21 +417,19 @@ abstract class DataType extends DefType {
 class StructType extends DataType {
   final List<FieldType> fields = [];
 
-  StructType(String name, {Iterable<FieldType>? fields, StructType? superType})
+  StructType(String name, {Iterable<FieldType>? fields, HeapType? superType})
       : super(name, superType: superType) {
     if (fields != null) this.fields.addAll(fields);
   }
 
   @override
-  bool isSubtypeOf(HeapType other) {
+  bool isStructuralSubtypeOf(HeapType other) {
     if (other == HeapType.any ||
         other == HeapType.eq ||
         other == HeapType.data) {
       return true;
     }
     if (other is! StructType) return false;
-    if (hasSuperType) return this == other || superType!.isSubtypeOf(other);
-    if (other.hasSuperType) return false;
     if (fields.length < other.fields.length) return false;
     for (int i = 0; i < other.fields.length; i++) {
       if (!fields[i].isSubtypeOf(other.fields[i])) return false;
@@ -429,28 +441,29 @@ class StructType extends DataType {
   void serializeDefinition(Serializer s) {
     s.writeByte(hasSuperType ? 0x5C : 0x5F);
     s.writeList(fields);
-    if (hasSuperType) s.writeSigned(superType!.index);
+    if (hasSuperType) {
+      assert(isStructuralSubtypeOf(superType!));
+      s.write(superType!);
+    }
   }
 }
 
 class ArrayType extends DataType {
   late final FieldType elementType;
 
-  ArrayType(String name, {FieldType? elementType, ArrayType? superType})
+  ArrayType(String name, {FieldType? elementType, HeapType? superType})
       : super(name, superType: superType) {
     if (elementType != null) this.elementType = elementType;
   }
 
   @override
-  bool isSubtypeOf(HeapType other) {
+  bool isStructuralSubtypeOf(HeapType other) {
     if (other == HeapType.any ||
         other == HeapType.eq ||
         other == HeapType.data) {
       return true;
     }
     if (other is! ArrayType) return false;
-    if (hasSuperType) return this == other || superType!.isSubtypeOf(other);
-    if (other.hasSuperType) return false;
     return elementType.isSubtypeOf(other.elementType);
   }
 
@@ -458,7 +471,10 @@ class ArrayType extends DataType {
   void serializeDefinition(Serializer s) {
     s.writeByte(hasSuperType ? 0x5B : 0x5E);
     s.write(elementType);
-    if (hasSuperType) s.writeSigned(superType!.index);
+    if (hasSuperType) {
+      assert(isStructuralSubtypeOf(superType!));
+      s.write(superType!);
+    }
   }
 }
 

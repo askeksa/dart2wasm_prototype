@@ -38,19 +38,21 @@ class Module with SerializerMixin {
       functions.whereType<DefinedFunction>();
 
   FunctionType addFunctionType(
-      Iterable<ValueType> inputs, Iterable<ValueType> outputs) {
+      Iterable<ValueType> inputs, Iterable<ValueType> outputs,
+      {HeapType? superType}) {
     final List<ValueType> inputList = List.unmodifiable(inputs);
     final List<ValueType> outputList = List.unmodifiable(outputs);
     final _FunctionTypeKey key = _FunctionTypeKey(inputList, outputList);
     return functionTypeMap.putIfAbsent(key, () {
-      final type = FunctionType(inputList, outputList)..index = defTypes.length;
+      final type = FunctionType(inputList, outputList, superType: superType)
+        ..index = defTypes.length;
       defTypes.add(type);
       return type;
     });
   }
 
   StructType addStructType(String name,
-      {Iterable<FieldType>? fields, StructType? superType}) {
+      {Iterable<FieldType>? fields, HeapType? superType}) {
     final type = StructType(name, fields: fields, superType: superType)
       ..index = defTypes.length;
     defTypes.add(type);
@@ -58,7 +60,7 @@ class Module with SerializerMixin {
   }
 
   ArrayType addArrayType(String name,
-      {FieldType? elementType, ArrayType? superType}) {
+      {FieldType? elementType, HeapType? superType}) {
     final type = ArrayType(name, elementType: elementType, superType: superType)
       ..index = defTypes.length;
     defTypes.add(type);

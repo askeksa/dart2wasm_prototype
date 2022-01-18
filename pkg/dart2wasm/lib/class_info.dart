@@ -128,7 +128,7 @@ class ClassInfoCollector {
   }
 
   void initializeTop() {
-    final w.StructType struct = m.addStructType("#Top");
+    final w.StructType struct = translator.structType("#Top");
     topInfo = ClassInfo(null, nextClassId++, 0, struct, null, this);
     translator.classes.add(topInfo);
     translator.classForHeapType[struct] = topInfo;
@@ -140,9 +140,8 @@ class ClassInfoCollector {
       Class? superclass = cls.superclass;
       if (superclass == null) {
         ClassInfo superInfo = topInfo;
-        final w.StructType struct = options.nominalTypes
-            ? m.addStructType(cls.name, superType: superInfo.struct)
-            : m.addStructType(cls.name);
+        final w.StructType struct =
+            translator.structType(cls.name, superType: superInfo.struct);
         info = ClassInfo(
             cls, nextClassId++, superInfo.depth + 1, struct, superInfo, this);
         // Mark Top type as implementing Object to force the representation
@@ -186,9 +185,7 @@ class ClassInfoCollector {
                 cls.fields.where((f) => f.isInstanceMember).isEmpty;
         w.StructType struct = canReuseSuperStruct
             ? superInfo.struct
-            : options.nominalTypes
-                ? m.addStructType(cls.name, superType: superInfo.struct)
-                : m.addStructType(cls.name);
+            : translator.structType(cls.name, superType: superInfo.struct);
         info = ClassInfo(
             cls, nextClassId++, superInfo.depth + 1, struct, superInfo, this,
             typeParameterMatch: typeParameterMatch);

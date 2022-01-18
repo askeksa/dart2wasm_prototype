@@ -190,7 +190,7 @@ class Translator {
         libraries.first.procedures.firstWhere((p) => p.name.text == "main");
     functions.addExport(mainFunction.reference, "main");
 
-    initFunction = m.addFunction(m.addFunctionType(const [], const []));
+    initFunction = m.addFunction(functionType(const [], const []));
     m.startFunction = initFunction;
 
     globals = Globals(this);
@@ -358,7 +358,8 @@ class Translator {
     if (type is InterfaceType) {
       if (type.classNode.superclass == wasmArrayBaseClass) {
         DartType elementType = type.typeArguments.single;
-        return w.RefType.def(arrayType(elementType), nullable: false);
+        return w.RefType.def(arrayTypeForDartType(elementType),
+            nullable: false);
       }
       return typeForInfo(
           classInfo[type.classNode]!, type.isPotentiallyNullable);
@@ -388,33 +389,32 @@ class Translator {
           type.namedParameters.isNotEmpty) {
         throw "Function types with optional parameters not supported: $type";
       }
-      return w.RefType.def(functionStructType(type.requiredParameterCount),
+      return w.RefType.def(closureStructType(type.requiredParameterCount),
           nullable:
               !options.parameterNullability || type.isPotentiallyNullable);
     }
     throw "Unsupported type ${type.runtimeType}";
   }
 
-  w.ArrayType arrayType(DartType type) {
+  w.ArrayType arrayTypeForDartType(DartType type) {
     while (type is TypeParameterType) type = type.bound;
     return wasmArrayType(
         translateStorageType(type), type.toText(defaultAstTextStrategy));
   }
 
   w.ArrayType wasmArrayType(w.StorageType type, String name) {
-    return arrayTypeCache.putIfAbsent(type,
-        () => m.addArrayType("Array<$name>")..elementType = w.FieldType(type));
+    return arrayTypeCache.putIfAbsent(
+        type, () => arrayType("Array<$name>", elementType: w.FieldType(type)));
   }
 
-  w.StructType functionStructType(int parameterCount) {
+  w.StructType closureStructType(int parameterCount) {
     return functionTypeCache.putIfAbsent(parameterCount, () {
       ClassInfo info = classInfo[functionClass]!;
-      w.StructType struct = m.addStructType("Function$parameterCount",
-          fields: info.struct.fields,
-          superType: options.nominalTypes ? info.struct : null);
+      w.StructType struct = structType("Function$parameterCount",
+          fields: info.struct.fields, superType: info.struct);
       assert(struct.fields.length == FieldIndex.closureFunction);
       struct.fields.add(w.FieldType(
-          w.RefType.def(functionType(parameterCount), nullable: false),
+          w.RefType.def(closureFunctionType(parameterCount), nullable: false),
           mutable: false));
       if (options.useRttGlobals) {
         functionTypeRtt[parameterCount] =
@@ -425,8 +425,8 @@ class Translator {
     });
   }
 
-  w.FunctionType functionType(int parameterCount) {
-    return m.addFunctionType([
+  w.FunctionType closureFunctionType(int parameterCount) {
+    return functionType([
       w.RefType.data(),
       ...List<w.ValueType>.filled(parameterCount, topInfo.nullableType)
     ], [
@@ -463,7 +463,7 @@ class Translator {
             " at ${member.location}";
       }
       w.FunctionType memberSignature = signatureFor(member.reference);
-      w.FunctionType closureSignature = functionType(parameterCount);
+      w.FunctionType closureSignature = closureFunctionType(parameterCount);
       int signatureOffset = member.isInstanceMember ? 1 : 0;
       assert(memberSignature.inputs.length == signatureOffset + parameterCount);
       assert(closureSignature.inputs.length == 1 + parameterCount);
@@ -598,6 +598,31 @@ class Translator {
     return body != null && NodeCounter().countNodes(body) < 4;
   }
 
+  // Wrappers for type creation to abstract over equi-recursive versus nominal
+  // typing. The given supertype is ignored when nominal types are disabled,
+  // and a suitable default is inserted when nominal types are enabled.
+
+  w.FunctionType functionType(
+      Iterable<w.ValueType> inputs, Iterable<w.ValueType> outputs,
+      {w.HeapType? superType}) {
+    return m.addFunctionType(inputs, outputs,
+        superType: options.nominalTypes ? superType ?? w.HeapType.func : null);
+  }
+
+  w.StructType structType(String name,
+      {Iterable<w.FieldType>? fields, w.HeapType? superType}) {
+    return m.addStructType(name,
+        fields: fields,
+        superType: options.nominalTypes ? superType ?? w.HeapType.data : null);
+  }
+
+  w.ArrayType arrayType(String name,
+      {w.FieldType? elementType, w.HeapType? superType}) {
+    return m.addArrayType(name,
+        elementType: elementType,
+        superType: options.nominalTypes ? superType ?? w.HeapType.data : null);
+  }
+
   // Wrappers for object allocation and cast instructions to abstract over
   // RTT-based and static versions of the instructions.
   // The [type] parameter taken by the methods is either a [ClassInfo] (to use
@@ -706,7 +731,7 @@ class Translator {
       return type.struct;
     } else if (type is int) {
       int parameterCount = type;
-      w.StructType struct = functionStructType(parameterCount);
+      w.StructType struct = closureStructType(parameterCount);
       if (options.nominalTypes) {
         b.rtt_canon(struct);
       } else {
@@ -723,7 +748,7 @@ class Translator {
   w.DefType _targetType(Object type) => type is ClassInfo
       ? type.struct
       : type is int
-          ? functionStructType(type)
+          ? closureStructType(type)
           : type as w.DefType;
 }
 

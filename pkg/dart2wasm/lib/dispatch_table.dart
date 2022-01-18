@@ -127,7 +127,7 @@ class SelectorInfo {
         outputSets.length,
         (i) => translator.typeForInfo(
             upperBound(outputSets[i]), outputNullable[i]) as w.ValueType);
-    return translator.m.addFunctionType(
+    return translator.functionType(
         [inputs[0], ...typeParameters, ...inputs.sublist(1)], outputs);
   }
 }

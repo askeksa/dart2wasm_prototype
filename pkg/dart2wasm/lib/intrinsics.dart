@@ -115,7 +115,7 @@ class Intrinsifier {
       assert(name == 'length');
       DartType elementType =
           (receiverType as InterfaceType).typeArguments.single;
-      w.ArrayType arrayType = translator.arrayType(elementType);
+      w.ArrayType arrayType = translator.arrayTypeForDartType(elementType);
       Expression array = node.receiver;
       codeGen.wrap(array, w.RefType.def(arrayType, nullable: true));
       b.array_len(arrayType);
@@ -146,7 +146,7 @@ class Intrinsifier {
         translator.wasmArrayBaseClass) {
       DartType elementType =
           (receiverType as InterfaceType).typeArguments.single;
-      w.ArrayType arrayType = translator.arrayType(elementType);
+      w.ArrayType arrayType = translator.arrayTypeForDartType(elementType);
       w.StorageType wasmType = arrayType.elementType.type;
       bool innerExtend =
           wasmType == w.PackedType.i8 || wasmType == w.PackedType.i16;
@@ -428,7 +428,8 @@ class Intrinsifier {
     if (node.target.enclosingClass?.superclass ==
         translator.wasmArrayBaseClass) {
       Expression length = node.arguments.positional[0];
-      w.ArrayType arrayType = translator.arrayType(node.arguments.types.single);
+      w.ArrayType arrayType =
+          translator.arrayTypeForDartType(node.arguments.types.single);
       codeGen.wrap(length, w.NumType.i64);
       b.i32_wrap_i64();
       translator.array_new_default(b, arrayType);

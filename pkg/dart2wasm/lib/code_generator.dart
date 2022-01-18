@@ -1482,7 +1482,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.DefinedGlobal global = translator.makeFunctionRef(lambda.function);
 
     ClassInfo info = translator.classInfo[translator.functionClass]!;
-    w.StructType struct = translator.functionStructType(parameterCount);
+    w.StructType struct = translator.closureStructType(parameterCount);
 
     b.i32_const(info.classId);
     b.i32_const(initialIdentityHash);
@@ -1515,7 +1515,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   w.ValueType _functionCall(
       int parameterCount, Expression receiver, Arguments arguments) {
-    w.StructType struct = translator.functionStructType(parameterCount);
+    w.StructType struct = translator.closureStructType(parameterCount);
     w.Local temp = addLocal(w.RefType.def(struct, nullable: false));
     wrap(receiver, temp.type);
     b.local_tee(temp);

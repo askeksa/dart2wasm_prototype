@@ -23,7 +23,7 @@ class Globals {
 
   void _initDummyValues() {
     // Create dummy struct for anyref/eqref/dataref/context dummy values
-    w.StructType structType = translator.m.addStructType("#Dummy");
+    w.StructType structType = translator.structType("#Dummy");
     w.RefType type = w.RefType.def(structType, nullable: false);
     dummyGlobal = translator.m.addGlobal(w.GlobalType(type, mutable: false));
     w.Instructions ib = dummyGlobal.initializer;

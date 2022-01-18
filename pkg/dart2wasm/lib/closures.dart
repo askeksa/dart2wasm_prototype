@@ -86,7 +86,7 @@ class Closures {
     // Make struct definitions
     for (Context context in contexts.values) {
       if (!context.isEmpty) {
-        context.struct = translator.m.addStructType("<context>");
+        context.struct = translator.structType("<context>");
       }
     }
 
@@ -188,7 +188,7 @@ class FindCaptures extends RecursiveVisitor {
           "function expression or local function at ${node.location}";
     }
     int parameterCount = node.requiredParameterCount;
-    w.FunctionType type = translator.functionType(parameterCount);
+    w.FunctionType type = translator.closureFunctionType(parameterCount);
     w.DefinedFunction function = translator.m.addFunction(type);
     closures.lambdas[node] = Lambda(node, function);
 

@@ -177,7 +177,7 @@ class Constants {
 
   w.DefinedFunction makeStringFunction(Class cls) {
     ClassInfo info = translator.classInfo[cls]!;
-    w.FunctionType ftype = m.addFunctionType(
+    w.FunctionType ftype = translator.functionType(
         const [w.NumType.i32, w.NumType.i32], [info.nonNullableType]);
     return m.addFunction(ftype);
   }
@@ -359,7 +359,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
           m.addGlobal(w.GlobalType(type.withNullability(true)));
       global.initializer.ref_null(type.heapType);
       global.initializer.end();
-      w.FunctionType ftype = m.addFunctionType(const [], [type]);
+      w.FunctionType ftype = translator.functionType(const [], [type]);
       w.DefinedFunction function = m.addFunction(ftype);
       generator(function, function.body);
       w.Local temp = function.addLocal(translator.typeForLocal(type));
@@ -541,7 +541,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
     w.DefinedFunction closureFunction =
         translator.getTearOffFunction(constant.targetReference.asProcedure);
     int parameterCount = closureFunction.type.inputs.length - 1;
-    w.StructType struct = translator.functionStructType(parameterCount);
+    w.StructType struct = translator.closureStructType(parameterCount);
     w.RefType type = w.RefType.def(struct, nullable: false);
     return createConstant(constant, type, (function, b) {
       ClassInfo info = translator.classInfo[translator.functionClass]!;
