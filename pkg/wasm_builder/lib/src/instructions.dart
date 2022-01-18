@@ -376,12 +376,9 @@ class Instructions with SerializerMixin {
     ValueType fun = _topOfStack;
     if (fun is RefType) {
       var heapType = fun.heapType;
-      if (heapType is DefHeapType) {
-        var defType = heapType.def;
-        if (defType is FunctionType) {
-          return _verifyTypes([...defType.inputs, fun], defType.outputs,
-              trace: const ['call_ref']);
-        }
+      if (heapType is FunctionType) {
+        return _verifyTypes([...heapType.inputs, fun], heapType.outputs,
+            trace: const ['call_ref']);
       }
     }
     _reportError("Expected function type, got $fun");

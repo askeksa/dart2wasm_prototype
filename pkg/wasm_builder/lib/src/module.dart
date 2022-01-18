@@ -474,7 +474,10 @@ class TypeSection extends Section {
 
   @override
   void serializeContents() {
-    writeList(module.defTypes);
+    writeUnsigned(module.defTypes.length);
+    for (DefType defType in module.defTypes) {
+      defType.serializeDefinition(this);
+    }
   }
 }
 

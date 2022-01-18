@@ -216,9 +216,8 @@ class Intrinsifier {
           .firstWhere((f) => f.name.text == '_data');
       int arrayFieldIndex = translator.fieldIndex[arrayField]!;
       w.ArrayType arrayType =
-          ((info.struct.fields[arrayFieldIndex].type as w.RefType).heapType
-                  as w.DefHeapType)
-              .def as w.ArrayType;
+          (info.struct.fields[arrayFieldIndex].type as w.RefType).heapType
+              as w.ArrayType;
       codeGen.wrap(receiver, listType);
       b.struct_get(info.struct, arrayFieldIndex);
       codeGen.wrap(node.arguments.positional.single, w.NumType.i64);
@@ -577,10 +576,8 @@ class Intrinsifier {
               .struct.fields[FieldIndex.stringArray].type.unpacked as w.RefType;
           w.RefType twoByteType = twoByteInfo
               .struct.fields[FieldIndex.stringArray].type.unpacked as w.RefType;
-          w.ArrayType oneByteArrayType =
-              (oneByteType.heapType as w.DefHeapType).def as w.ArrayType;
-          w.ArrayType twoByteArrayType =
-              (twoByteType.heapType as w.DefHeapType).def as w.ArrayType;
+          w.ArrayType oneByteArrayType = oneByteType.heapType as w.ArrayType;
+          w.ArrayType twoByteArrayType = twoByteType.heapType as w.ArrayType;
           w.Local oneByteArray = codeGen.addLocal(oneByteType);
           w.Local twoByteArray = codeGen.addLocal(twoByteType);
           w.Local index = codeGen.addLocal(w.NumType.i32);

@@ -131,7 +131,7 @@ class ClassInfoCollector {
     final w.StructType struct = m.addStructType("#Top");
     topInfo = ClassInfo(null, nextClassId++, 0, struct, null, this);
     translator.classes.add(topInfo);
-    translator.classForHeapType[w.HeapType.def(struct)] = topInfo;
+    translator.classForHeapType[struct] = topInfo;
   }
 
   void initialize(Class cls) {
@@ -202,8 +202,7 @@ class ClassInfoCollector {
       }
       translator.classes.add(info);
       translator.classInfo[cls] = info;
-      translator.classForHeapType
-          .putIfAbsent(w.HeapType.def(info.struct), () => info!);
+      translator.classForHeapType.putIfAbsent(info.struct, () => info!);
     }
   }
 

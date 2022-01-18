@@ -435,7 +435,7 @@ class Translator {
   }
 
   int parameterCountForFunctionStruct(w.HeapType heapType) {
-    return functionTypeParameterCount[(heapType as w.DefHeapType).def]!;
+    return functionTypeParameterCount[heapType]!;
   }
 
   w.DefinedGlobal makeFunctionRef(w.DefinedFunction f) {
@@ -529,7 +529,7 @@ class Translator {
       if (from is! w.RefType && to is w.RefType) {
         // Boxing
         ClassInfo info = classInfo[boxedClasses[from]!]!;
-        assert(w.HeapType.def(info.struct).isSubtypeOf(to.heapType));
+        assert(info.struct.isSubtypeOf(to.heapType));
         w.Local temp = function.addLocal(from);
         b.local_set(temp);
         b.i32_const(info.classId);
@@ -538,7 +538,7 @@ class Translator {
       } else if (from is w.RefType && to is! w.RefType) {
         // Unboxing
         ClassInfo info = classInfo[boxedClasses[to]!]!;
-        if (!from.heapType.isSubtypeOf(w.HeapType.def(info.struct))) {
+        if (!from.heapType.isSubtypeOf(info.struct)) {
           // Cast to box type
           if (!from.heapType.isSubtypeOf(w.HeapType.data)) {
             b.ref_as_data();

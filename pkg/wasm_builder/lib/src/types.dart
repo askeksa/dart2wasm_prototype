@@ -165,7 +165,7 @@ class RefType extends ValueType {
   const RefType.extern({bool nullable = ExternHeapType.defaultNullability})
       : this._(HeapType.extern, nullable);
   RefType.def(DefType defType, {required bool nullable})
-      : this(HeapType.def(defType), nullable: nullable);
+      : this(defType, nullable: nullable);
 
   @override
   ValueType withNullability(bool nullable) =>
@@ -214,7 +214,6 @@ abstract class HeapType implements Serializable {
   static const data = DataHeapType._();
   static const i31 = I31HeapType._();
   static const extern = ExternHeapType._();
-  static DefHeapType def(DefType defType) => DefHeapType._(defType);
 
   bool? get nullableByDefault;
 
@@ -334,39 +333,7 @@ class ExternHeapType extends HeapType {
   String toString() => "extern";
 }
 
-class DefHeapType extends HeapType {
-  final DefType def;
-
-  DefHeapType._(this.def);
-
-  @override
-  bool? get nullableByDefault => null;
-
-  @override
-  bool isSubtypeOf(HeapType other) {
-    if (other is! DefHeapType) {
-      return other == HeapType.any ||
-          (def is FunctionType
-              ? other == HeapType.func
-              : other == HeapType.eq || other == HeapType.data);
-    }
-    return def.isSubtypeOf(other.def);
-  }
-
-  @override
-  void serialize(Serializer s) => s.writeSigned(def.index);
-
-  @override
-  bool operator ==(Object other) => other is DefHeapType && other.def == def;
-
-  @override
-  int get hashCode => def.hashCode;
-
-  @override
-  String toString() => def.toString();
-}
-
-abstract class DefType implements Serializable {
+abstract class DefType extends HeapType {
   int? _index;
   final DefType? superType;
   final int depth;
@@ -379,7 +346,13 @@ abstract class DefType implements Serializable {
 
   bool get hasSuperType => superType != null;
 
-  bool isSubtypeOf(DefType other);
+  @override
+  bool? get nullableByDefault => null;
+
+  @override
+  void serialize(Serializer s) => s.writeSigned(index);
+
+  void serializeDefinition(Serializer s);
 }
 
 class FunctionType extends DefType {
@@ -390,7 +363,8 @@ class FunctionType extends DefType {
       : super(superType: superType);
 
   @override
-  bool isSubtypeOf(DefType other) {
+  bool isSubtypeOf(HeapType other) {
+    if (other == HeapType.any || other == HeapType.func) return true;
     if (other is! FunctionType) return false;
     if (inputs.length != other.inputs.length) return false;
     if (outputs.length != other.outputs.length) return false;
@@ -406,7 +380,7 @@ class FunctionType extends DefType {
   }
 
   @override
-  void serialize(Serializer s) {
+  void serializeDefinition(Serializer s) {
     s.writeByte(hasSuperType ? 0x5D : 0x60);
     s.writeList(inputs);
     s.writeList(outputs);
@@ -435,7 +409,12 @@ class StructType extends DataType {
   }
 
   @override
-  bool isSubtypeOf(DefType other) {
+  bool isSubtypeOf(HeapType other) {
+    if (other == HeapType.any ||
+        other == HeapType.eq ||
+        other == HeapType.data) {
+      return true;
+    }
     if (other is! StructType) return false;
     if (hasSuperType) return this == other || superType!.isSubtypeOf(other);
     if (other.hasSuperType) return false;
@@ -447,7 +426,7 @@ class StructType extends DataType {
   }
 
   @override
-  void serialize(Serializer s) {
+  void serializeDefinition(Serializer s) {
     s.writeByte(hasSuperType ? 0x5C : 0x5F);
     s.writeList(fields);
     if (hasSuperType) s.writeSigned(superType!.index);
@@ -463,7 +442,12 @@ class ArrayType extends DataType {
   }
 
   @override
-  bool isSubtypeOf(DefType other) {
+  bool isSubtypeOf(HeapType other) {
+    if (other == HeapType.any ||
+        other == HeapType.eq ||
+        other == HeapType.data) {
+      return true;
+    }
     if (other is! ArrayType) return false;
     if (hasSuperType) return this == other || superType!.isSubtypeOf(other);
     if (other.hasSuperType) return false;
@@ -471,7 +455,7 @@ class ArrayType extends DataType {
   }
 
   @override
-  void serialize(Serializer s) {
+  void serializeDefinition(Serializer s) {
     s.writeByte(hasSuperType ? 0x5B : 0x5E);
     s.write(elementType);
     if (hasSuperType) s.writeSigned(superType!.index);

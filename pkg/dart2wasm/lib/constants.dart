@@ -57,8 +57,7 @@ class Constants {
   void initEmptyString() {
     ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
     w.ArrayType arrayType =
-        ((info.struct.fields.last.type as w.RefType).heapType as w.DefHeapType)
-            .def as w.ArrayType;
+        (info.struct.fields.last.type as w.RefType).heapType as w.ArrayType;
 
     if (lazyConstants) {
       w.RefType emptyStringType = info.nullableType;
@@ -92,8 +91,7 @@ class Constants {
   void initEmptyTypeList() {
     ClassInfo info = translator.classInfo[translator.immutableListClass]!;
     w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
-    w.ArrayType arrayType =
-        (refType.heapType as w.DefHeapType).def as w.ArrayType;
+    w.ArrayType arrayType = refType.heapType as w.ArrayType;
 
     // Create the empty type list with its type parameter uninitialized for now.
     if (lazyConstants) {
@@ -105,7 +103,7 @@ class Constants {
       w.Instructions b = translator.initFunction.body;
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
-      b.ref_null(w.HeapType.def(typeInfo.struct)); // Initialized later
+      b.ref_null(typeInfo.struct); // Initialized later
       b.i64_const(0);
       b.i32_const(0);
       translator.array_new_default(b, arrayType);
@@ -117,7 +115,7 @@ class Constants {
       w.Instructions ib = emptyTypeList.initializer;
       ib.i32_const(info.classId);
       ib.i32_const(initialIdentityHash);
-      ib.ref_null(w.HeapType.def(typeInfo.struct)); // Initialized later
+      ib.ref_null(typeInfo.struct); // Initialized later
       ib.i64_const(0);
       translator.array_init(ib, arrayType, 0);
       translator.struct_new(ib, info);
@@ -188,8 +186,7 @@ class Constants {
       void Function(w.Instructions) emitLoad) {
     ClassInfo info = translator.classInfo[cls]!;
     w.ArrayType arrayType =
-        ((info.struct.fields.last.type as w.RefType).heapType as w.DefHeapType)
-            .def as w.ArrayType;
+        (info.struct.fields.last.type as w.RefType).heapType as w.ArrayType;
 
     w.Local offset = function.locals[0];
     w.Local length = function.locals[1];
@@ -411,9 +408,8 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
             ? constants.oneByteStringFunction
             : constants.twoByteStringFunction);
       } else {
-        w.ArrayType arrayType = ((info.struct.fields.last.type as w.RefType)
-                .heapType as w.DefHeapType)
-            .def as w.ArrayType;
+        w.ArrayType arrayType =
+            (info.struct.fields.last.type as w.RefType).heapType as w.ArrayType;
 
         b.i32_const(info.classId);
         b.i32_const(initialIdentityHash);
@@ -504,8 +500,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
     w.RefType type = info.nonNullableType;
     return createConstant(constant, type, (function, b) {
       w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
-      w.ArrayType arrayType =
-          (refType.heapType as w.DefHeapType).def as w.ArrayType;
+      w.ArrayType arrayType = refType.heapType as w.ArrayType;
       w.ValueType elementType = arrayType.elementType.type.unpacked;
       int length = constant.entries.length;
       b.i32_const(info.classId);

@@ -1692,8 +1692,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       DartType typeArg, TreeNode node) {
     ClassInfo info = translator.classInfo[cls]!;
     w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
-    w.ArrayType arrayType =
-        (refType.heapType as w.DefHeapType).def as w.ArrayType;
+    w.ArrayType arrayType = refType.heapType as w.ArrayType;
     w.ValueType elementType = arrayType.elementType.type.unpacked;
     int length = expressions.length;
 

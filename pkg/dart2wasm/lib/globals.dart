@@ -39,26 +39,25 @@ class Globals {
       w.HeapType heapType = type.heapType;
       w.DefinedGlobal? global = dummyValues[heapType];
       if (global != null) return global;
-      if (heapType is w.DefHeapType) {
-        w.DefType defType = heapType.def;
-        if (defType is w.StructType) {
-          for (w.FieldType field in defType.fields) {
+      if (heapType is w.DefType) {
+        if (heapType is w.StructType) {
+          for (w.FieldType field in heapType.fields) {
             prepareDummyValue(field.type.unpacked);
           }
           global = translator.m.addGlobal(w.GlobalType(type, mutable: false));
           w.Instructions ib = global.initializer;
-          for (w.FieldType field in defType.fields) {
+          for (w.FieldType field in heapType.fields) {
             instantiateDummyValue(ib, field.type.unpacked);
           }
-          translator.struct_new(ib, defType);
+          translator.struct_new(ib, heapType);
           ib.end();
-        } else if (defType is w.ArrayType) {
+        } else if (heapType is w.ArrayType) {
           global = translator.m.addGlobal(w.GlobalType(type, mutable: false));
           w.Instructions ib = global.initializer;
-          translator.array_init(ib, defType, 0);
+          translator.array_init(ib, heapType, 0);
           ib.end();
-        } else if (defType is w.FunctionType) {
-          w.DefinedFunction function = translator.m.addFunction(defType);
+        } else if (heapType is w.FunctionType) {
+          w.DefinedFunction function = translator.m.addFunction(heapType);
           w.Instructions b = function.body;
           b.unreachable();
           b.end();
