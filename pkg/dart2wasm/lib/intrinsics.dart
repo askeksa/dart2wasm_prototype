@@ -619,7 +619,8 @@ class Intrinsifier {
 
           // Create TwoByteString object
           b.i32_const(twoByteInfo.classId);
-          b.i32_const(initialIdentityHash);
+          b.local_get(inString);
+          b.struct_get(translator.objectInfo.struct, FieldIndex.identityHash);
           b.local_get(twoByteArray);
           translator.struct_new(b, twoByteInfo.struct);
           return true;
