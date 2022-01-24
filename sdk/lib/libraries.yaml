@@ -206,19 +206,12 @@ wasm:
       - _internal/wasm/lib/timeline.dart
     ffi:
       uri: ffi/ffi.dart
-    html:
-      uri: html/wasm/html_wasm.dart
     _http:
       uri: _http/http.dart
     io:
       uri: io/io.dart
     isolate:
       uri: isolate/isolate.dart
-    js:
-      uri: js/js.dart
-      patches: _internal/wasm/lib/js_patch.dart
-    js_util:
-      uri: js_util/js_util_wasm.dart
     math:
       uri: math/math.dart
       patches: _internal/wasm/lib/math_patch.dart
