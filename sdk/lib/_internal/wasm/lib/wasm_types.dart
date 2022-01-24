@@ -21,7 +21,8 @@ class WasmEqRef extends WasmAnyRef {}
 class WasmDataRef extends WasmEqRef {}
 
 abstract class _WasmArray extends WasmDataRef {
-  int get length native "WasmArray_length";
+  @pragma("vm:external-name", "WasmArray_length")
+  external int get length;
 }
 
 @pragma("wasm:entry-point")
@@ -44,25 +45,35 @@ class WasmF64 extends _WasmFloat {}
 
 @pragma("wasm:entry-point")
 class WasmIntArray<T extends _WasmInt> extends _WasmArray {
-  factory WasmIntArray(int length) native "WasmIntArray";
+  @pragma("vm:external-name", "WasmIntArray")
+  external factory WasmIntArray(int length);
 
-  int readSigned(int index) native "WasmIntArray_readSigned";
-  int readUnsigned(int index) native "WasmIntArray_readUnsigned";
-  void write(int index, int value) native "WasmIntArray_write";
+  @pragma("vm:external-name", "WasmIntArray_readSigned")
+  external int readSigned(int index);
+  @pragma("vm:external-name", "WasmIntArray_readUnsigned")
+  external int readUnsigned(int index);
+  @pragma("vm:external-name", "WasmIntArray_write")
+  external void write(int index, int value);
 }
 
 @pragma("wasm:entry-point")
 class WasmFloatArray<T extends _WasmFloat> extends _WasmArray {
-  factory WasmFloatArray(int length) native "WasmFloatArray";
+  @pragma("vm:external-name", "WasmFloatArray")
+  external factory WasmFloatArray(int length);
 
-  double read(int index) native "WasmFloatArray_read";
-  void write(int index, double value) native "WasmFloatArray_write";
+  @pragma("vm:external-name", "WasmFloatArray_read")
+  external double read(int index);
+  @pragma("vm:external-name", "WasmFloatArray_write")
+  external void write(int index, double value);
 }
 
 @pragma("wasm:entry-point")
 class WasmObjectArray<T extends Object?> extends _WasmArray {
-  factory WasmObjectArray(int length) native "WasmObjectArray";
+  @pragma("vm:external-name", "WasmObjectArray")
+  external factory WasmObjectArray(int length);
 
-  T read(int index) native "WasmObjectArray_read";
-  void write(int index, T value) native "WasmObjectArray_write";
+  @pragma("vm:external-name", "WasmObjectArray_read")
+  external T read(int index);
+  @pragma("vm:external-name", "WasmObjectArray_write")
+  external void write(int index, T value);
 }

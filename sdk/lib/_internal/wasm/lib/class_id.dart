@@ -6,7 +6,8 @@
 
 @pragma("wasm:entry-point")
 class ClassID {
-  static int getID(Object value) native "ClassID_getID";
+  @pragma("vm:external-name", "ClassID_getID")
+  external static int getID(Object value);
 
   // TODO(askesc): Implement this as intrinsic when adding predefined cids.
   static final int numPredefinedCids = 1;

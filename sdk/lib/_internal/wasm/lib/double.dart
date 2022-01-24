@@ -60,7 +60,8 @@ class _BoxedDouble implements double {
     return a - (a / b).truncateToDouble() * b;
   }
 
-  double operator -() native "Double_flipSignBit";
+  @pragma("vm:external-name", "Double_flipSignBit")
+  external double operator -();
 
   bool operator ==(Object other) {
     return other is double
@@ -114,10 +115,14 @@ class _BoxedDouble implements double {
   int ceil() => ceilToDouble().toInt();
   int truncate() => truncateToDouble().toInt();
 
-  double roundToDouble() native "Double_round";
-  double floorToDouble() native "Double_floor";
-  double ceilToDouble() native "Double_ceil";
-  double truncateToDouble() native "Double_truncate";
+  @pragma("vm:external-name", "Double_round")
+  external double roundToDouble();
+  @pragma("vm:external-name", "Double_floor")
+  external double floorToDouble();
+  @pragma("vm:external-name", "Double_ceil")
+  external double ceilToDouble();
+  @pragma("vm:external-name", "Double_truncate")
+  external double truncateToDouble();
 
   num clamp(num lowerLimit, num upperLimit) {
     if (lowerLimit.compareTo(upperLimit) > 0) {
@@ -129,7 +134,8 @@ class _BoxedDouble implements double {
     return this;
   }
 
-  int toInt() native "Double_toInt";
+  @pragma("vm:external-name", "Double_toInt")
+  external int toInt();
 
   double toDouble() {
     return this;
@@ -142,7 +148,8 @@ class _BoxedDouble implements double {
   static final List _cache = new List.filled(CACHE_LENGTH, null);
   static int _cacheEvictIndex = 0;
 
-  String _toString() native "Double_toString";
+  @pragma("vm:external-name", "Double_toString")
+  external String _toString();
 
   String toString() {
     // TODO(koda): Consider starting at most recently inserted.
@@ -188,7 +195,8 @@ class _BoxedDouble implements double {
     return _toStringAsFixed(fractionDigits);
   }
 
-  String _toStringAsFixed(int fractionDigits) native "Double_toStringAsFixed";
+  @pragma("vm:external-name", "Double_toStringAsFixed")
+  external String _toStringAsFixed(int fractionDigits);
 
   String toStringAsExponential([int? fractionDigits]) {
     // See ECMAScript-262, 15.7.4.6 for details.
@@ -215,8 +223,8 @@ class _BoxedDouble implements double {
     return _toStringAsExponential(fractionDigits);
   }
 
-  String _toStringAsExponential(int fractionDigits)
-      native "Double_toStringAsExponential";
+  @pragma("vm:external-name", "Double_toStringAsExponential")
+  external String _toStringAsExponential(int fractionDigits);
 
   String toStringAsPrecision(int precision) {
     // See ECMAScript-262, 15.7.4.7 for details.
@@ -240,8 +248,8 @@ class _BoxedDouble implements double {
     return _toStringAsPrecision(precision);
   }
 
-  String _toStringAsPrecision(int fractionDigits)
-      native "Double_toStringAsPrecision";
+  @pragma("vm:external-name", "Double_toStringAsPrecision")
+  external String _toStringAsPrecision(int fractionDigits);
 
   // Order is: NaN > Infinity > ... > 0.0 > -0.0 > ... > -Infinity.
   int compareTo(num other) {

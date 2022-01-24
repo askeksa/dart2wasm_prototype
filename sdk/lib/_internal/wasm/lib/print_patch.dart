@@ -9,4 +9,5 @@ void printToConsole(String line) {
   printToConsoleJS(ensureTwoByteString(line));
 }
 
-void printToConsoleJS(String line) native "dart2wasm.printToConsole";
+@pragma("vm:external-name", "dart2wasm.printToConsole")
+external void printToConsoleJS(String line);

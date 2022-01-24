@@ -4,7 +4,8 @@
 
 // part of "core_patch.dart";
 
-double _jsDateNow() native "Date.now";
+@pragma("vm:external-name", "Date.now")
+external double _jsDateNow();
 
 // VM implementation of DateTime.
 @patch

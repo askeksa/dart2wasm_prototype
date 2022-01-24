@@ -5,11 +5,12 @@
 import "dart:typed_data" show Uint8List;
 
 /// The returned string is a [_OneByteString] with uninitialized content.
-String allocateOneByteString(int length) native "allocateOneByteString";
+@pragma("vm:external-name", "allocateOneByteString")
+external String allocateOneByteString(int length);
 
 /// The [string] must be a [_OneByteString]. The [index] must be valid.
-void writeIntoOneByteString(String string, int index, int codePoint)
-    native "writeIntoOneByteString";
+@pragma("vm:external-name", "writeIntoOneByteString")
+external void writeIntoOneByteString(String string, int index, int codePoint);
 
 /// It is assumed that [from] is a native [Uint8List] class and [to] is a
 /// [_OneByteString]. The [fromStart] and [toStart] indices together with the
@@ -22,13 +23,15 @@ void copyRangeFromUint8ListToOneByteString(
 }
 
 /// The returned string is a [_TwoByteString] with uninitialized content.
-String allocateTwoByteString(int length) native "allocateTwoByteString";
+@pragma("vm:external-name", "allocateTwoByteString")
+external String allocateTwoByteString(int length);
 
 /// The [string] must be a [_TwoByteString]. The [index] must be valid.
-void writeIntoTwoByteString(String string, int index, int codePoint)
-    native "writeIntoTwoByteString";
+@pragma("vm:external-name", "writeIntoTwoByteString")
+external void writeIntoTwoByteString(String string, int index, int codePoint);
 
-String ensureTwoByteString(String string) native "ensureTwoByteString";
+@pragma("vm:external-name", "ensureTwoByteString")
+external String ensureTwoByteString(String string);
 
 const bool has63BitSmis = false;
 
@@ -54,7 +57,8 @@ class Lists {
 // type of a value.
 //
 // Important: this is unsafe and must be used with care.
-T unsafeCast<T>(Object? v) native "Internal_unsafeCast";
+@pragma("vm:external-name", "Internal_unsafeCast")
+external T unsafeCast<T>(Object? v);
 
 // Thomas Wang 64-bit mix.
 // https://gist.github.com/badboy/6267743
@@ -69,10 +73,14 @@ int mix64(int n) {
   return n;
 }
 
-int floatToIntBits(double value) native "floatToIntBits";
-double intBitsToFloat(int value) native "intBitsToFloat";
-int doubleToIntBits(double value) native "doubleToIntBits";
-double intBitsToDouble(int value) native "intBitsToDouble";
+@pragma("vm:external-name", "floatToIntBits")
+external int floatToIntBits(double value);
+@pragma("vm:external-name", "intBitsToFloat")
+external double intBitsToFloat(int value);
+@pragma("vm:external-name", "doubleToIntBits")
+external int doubleToIntBits(double value);
+@pragma("vm:external-name", "intBitsToDouble")
+external double intBitsToDouble(int value);
 
 // Exported call stubs to enable JS to call Dart closures. Since all closure
 // parameters and returns are boxed (their Wasm type is #Top) the Wasm type of
@@ -96,5 +104,5 @@ dynamic _callClosure2(dynamic closure, dynamic arg1, dynamic arg2) {
 }
 
 // Schedule a callback from JS via setTimeout.
-void scheduleCallback(double millis, dynamic Function() callback)
-    native "dart2wasm.scheduleCallback";
+@pragma("vm:external-name", "dart2wasm.scheduleCallback")
+external void scheduleCallback(double millis, dynamic Function() callback);

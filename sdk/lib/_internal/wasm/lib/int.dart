@@ -10,9 +10,12 @@ class _BoxedInt implements int {
   @pragma("wasm:entry-point")
   int value = 0;
 
-  num operator +(num other) native "int+";
-  num operator -(num other) native "int-";
-  num operator *(num other) native "int*";
+  @pragma("vm:external-name", "int+")
+  external num operator +(num other);
+  @pragma("vm:external-name", "int-")
+  external num operator -(num other);
+  @pragma("vm:external-name", "int*")
+  external num operator *(num other);
 
   double operator /(num other) {
     return this.toDouble() / other.toDouble();
@@ -42,20 +45,31 @@ class _BoxedInt implements int {
       ? this - (this ~/ other) * other
       : _BoxedDouble._remainder(toDouble(), unsafeCast<double>(other));
 
-  int operator -() native "int_unary-";
+  @pragma("vm:external-name", "int_unary-")
+  external int operator -();
 
-  int operator &(int other) native "int&";
-  int operator |(int other) native "int|";
-  int operator ^(int other) native "int^";
+  @pragma("vm:external-name", "int&")
+  external int operator &(int other);
+  @pragma("vm:external-name", "int|")
+  external int operator |(int other);
+  @pragma("vm:external-name", "int^")
+  external int operator ^(int other);
 
-  int operator >>(int other) native "int>>";
-  int operator >>>(int other) native "int>>>";
-  int operator <<(int other) native "int<<";
+  @pragma("vm:external-name", "int>>")
+  external int operator >>(int other);
+  @pragma("vm:external-name", "int>>>")
+  external int operator >>>(int other);
+  @pragma("vm:external-name", "int<<")
+  external int operator <<(int other);
 
-  bool operator <(num other) native "int<";
-  bool operator >(num other) native "int>";
-  bool operator >=(num other) native "int>=";
-  bool operator <=(num other) native "int<=";
+  @pragma("vm:external-name", "int<")
+  external bool operator <(num other);
+  @pragma("vm:external-name", "int>")
+  external bool operator >(num other);
+  @pragma("vm:external-name", "int>=")
+  external bool operator >=(num other);
+  @pragma("vm:external-name", "int<=")
+  external bool operator <=(num other);
 
   bool operator ==(Object other) {
     return other is int
@@ -191,7 +205,8 @@ class _BoxedInt implements int {
     return this;
   }
 
-  double toDouble() native "int_toDouble";
+  @pragma("vm:external-name", "int_toDouble")
+  external double toDouble();
 
   String toStringAsFixed(int fractionDigits) {
     return this.toDouble().toStringAsFixed(fractionDigits);
@@ -413,8 +428,10 @@ class _BoxedInt implements int {
 
   int get hashCode => this;
   int get _identityHashCode => this;
-  int operator ~() native "int~";
-  int get bitLength native "int_bitlength";
+  @pragma("vm:external-name", "int~")
+  external int operator ~();
+  @pragma("vm:external-name", "int_bitlength")
+  external int get bitLength;
 
   /**
    * The digits of '00', '01', ... '99' as a single array.

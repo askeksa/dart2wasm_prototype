@@ -4,18 +4,20 @@
 
 // part of "core_patch.dart";
 
-int _getHash(Object obj) native "Object_getHash";
-void _setHash(Object obj, int hash) native "Object_setHash";
+// Access hidden identity hash code field
+@pragma("vm:external-name", "Object_getHash")
+external int _getHash(Object obj);
+@pragma("vm:external-name", "Object_setHash")
+external void _setHash(Object obj, int hash);
 
 @patch
 class Object {
   // The VM has its own implementation of equals.
   @patch
-  bool operator ==(Object other) native "Object_equals";
+  @pragma("vm:external-name", "Object_equals")
+  external bool operator ==(Object other);
 
-  // Helpers used to implement hashCode. If a hashCode is used, we remember it
-  // in a weak table in the VM (32 bit) or in the header of the object (64
-  // bit). A new hashCode value is calculated using a random number generator.
+  // Random number generator used to generate identity hash codes.
   static final _hashCodeRnd = new Random();
 
   static int _objectHashCode(Object obj) {
@@ -43,11 +45,10 @@ class Object {
 
   @patch
   dynamic noSuchMethod(Invocation invocation) {
-    // TODO(regis): Remove temp constructor identifier 'withInvocation'.
     throw new NoSuchMethodError.withInvocation(this, invocation);
   }
 
   @patch
-  // Result type is either "dart:core#_Type" or "dart:core#_FunctionType".
-  Type get runtimeType native "Object_runtimeType";
+  @pragma("vm:external-name", "Object_runtimeType")
+  external Type get runtimeType;
 }

@@ -76,7 +76,8 @@ num pow(num x, num exponent) {
   return _doublePow(x.toDouble(), exponent.toDouble());
 }
 
-double _doublePow(double base, double exponent) native "Math.pow";
+@pragma("vm:external-name", "Math.pow")
+external double _doublePow(double base, double exponent);
 
 @pragma("vm:recognized", "other")
 int _intPow(int base, int exponent) {
@@ -116,16 +117,26 @@ double exp(num x) => _exp(x.toDouble());
 @patch
 double log(num x) => _log(x.toDouble());
 
-double _atan2(double a, double b) native "Math.atan2";
-double _sin(double x) native "Math.sin";
-double _cos(double x) native "Math.cos";
-double _tan(double x) native "Math.tan";
-double _acos(double x) native "Math.acos";
-double _asin(double x) native "Math.asin";
-double _atan(double x) native "Math.atan";
-double _sqrt(double x) native "Math.sqrt";
-double _exp(double x) native "Math.exp";
-double _log(double x) native "Math.log";
+@pragma("vm:external-name", "Math.atan2")
+external double _atan2(double a, double b);
+@pragma("vm:external-name", "Math.sin")
+external double _sin(double x);
+@pragma("vm:external-name", "Math.cos")
+external double _cos(double x);
+@pragma("vm:external-name", "Math.tan")
+external double _tan(double x);
+@pragma("vm:external-name", "Math.acos")
+external double _acos(double x);
+@pragma("vm:external-name", "Math.asin")
+external double _asin(double x);
+@pragma("vm:external-name", "Math.atan")
+external double _atan(double x);
+@pragma("vm:external-name", "Math.sqrt")
+external double _sqrt(double x);
+@pragma("vm:external-name", "Math.exp")
+external double _exp(double x);
+@pragma("vm:external-name", "Math.log")
+external double _log(double x);
 
 // TODO(iposva): Handle patch methods within a patch class correctly.
 @patch
