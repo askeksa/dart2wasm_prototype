@@ -205,7 +205,11 @@ class DispatchTable {
 
       SelectorInfo addMember(Reference reference) {
         SelectorInfo selector = selectorForTarget(reference);
-        selector.targets[info.classId] = reference;
+        if (reference.asMember.isAbstract) {
+          selector.targets[info.classId] ??= reference;
+        } else {
+          selector.targets[info.classId] = reference;
+        }
         selectorIds.add(selector.id);
         return selector;
       }
