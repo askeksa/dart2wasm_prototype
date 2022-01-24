@@ -20,6 +20,10 @@ class LinkedHashMap<K, V> {
     return new _CompactLinkedCustomHashMap<K, V>(equals, hashCode, isValidKey);
   }
 
+  @pragma("wasm:entry-point")
+  factory LinkedHashMap._default() =>
+      _CompactLinkedCustomHashMap<K, V>(_defaultEquals, _defaultHashCode, null);
+
   @patch
   factory LinkedHashMap.identity() => new _CompactLinkedIdentityHashMap<K, V>();
 }

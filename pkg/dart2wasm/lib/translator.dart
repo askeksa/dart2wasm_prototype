@@ -118,6 +118,12 @@ class Translator {
       return coreLibrary.classes.firstWhere((c) => c.name == name);
     }
 
+    Library collectionLibrary =
+        component.libraries.firstWhere((l) => l.name == "dart.collection");
+    Class lookupCollection(String name) {
+      return collectionLibrary.classes.firstWhere((c) => c.name == name);
+    }
+
     Library wasmLibrary =
         component.libraries.firstWhere((l) => l.name == "dart.wasm");
     Class lookupWasm(String name) {
@@ -145,12 +151,9 @@ class Translator {
         stringBaseClass.procedures.firstWhere((p) => p.name.text == "==");
     stringInterpolate = stringBaseClass.procedures
         .firstWhere((p) => p.name.text == "_interpolate");
-    mapFactory = lookupCore("Map").procedures.firstWhere(
-        (p) => p.kind == ProcedureKind.Factory && p.name.text == "");
-    mapPut = component.libraries
-        .firstWhere((l) => l.name == "dart.collection")
-        .classes
-        .firstWhere((c) => c.name == "_CompactLinkedCustomHashMap")
+    mapFactory = lookupCollection("LinkedHashMap").procedures.firstWhere(
+        (p) => p.kind == ProcedureKind.Factory && p.name.text == "_default");
+    mapPut = lookupCollection("_CompactLinkedCustomHashMap")
         .superclass! // _HashBase
         .superclass! // _LinkedHashMapMixin<K, V>
         .procedures
