@@ -297,7 +297,7 @@ class Intrinsifier {
             b.i64_eq();
             return w.NumType.i32;
           }
-          if (types.every((t) =>
+          if (types.any((t) =>
               t is InterfaceType &&
               t != boolType &&
               t != doubleType &&
