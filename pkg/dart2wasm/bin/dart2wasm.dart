@@ -46,6 +46,7 @@ Never usage(String message) {
 }
 
 Future<int> main(List<String> args) async {
+  Uri sdkPath = Platform.script.resolve("../../../sdk");
   TranslatorOptions options = TranslatorOptions();
   List<String> nonOptions = [];
   void Function(TranslatorOptions, int)? intOptionFun = null;
@@ -53,7 +54,9 @@ Future<int> main(List<String> args) async {
     if (intOptionFun != null) {
       intOptionFun(options, int.parse(arg));
       intOptionFun = null;
-    } else if (arg.startsWith("--dart-sdk")) {
+    } else if (arg.startsWith("--dart-sdk=")) {
+      String path = arg.substring("--dart-sdk=".length);
+      sdkPath = Uri.file(Directory(path).absolute.path);
     } else if (arg.startsWith("--no-")) {
       var optionFun = boolOptionMap[arg.substring(5)];
       if (optionFun == null) usage("Unknown option $arg");
@@ -79,10 +82,7 @@ Future<int> main(List<String> args) async {
   String output = nonOptions[1];
   Uri mainUri = resolveInputUri(input);
 
-  Uint8List? module = await compileToModule(
-      mainUri,
-      Uri.file(Directory("sdk").absolute.path),
-      options,
+  Uint8List? module = await compileToModule(mainUri, sdkPath, options,
       (message) => printDiagnosticMessage(message, print));
 
   if (module == null) {

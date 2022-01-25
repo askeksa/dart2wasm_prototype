@@ -24,6 +24,7 @@ where *options* include:
 
 | Option                                  | Default | Description |
 | --------------------------------------- | ------- | ----------- |
+| `--dart-sdk=`*path*                     | relative to script | The location of the `sdk` directory inside the Dart SDK, containing the core library sources.
 | `--`[`no-`]`export-all`                 | no      | Export all functions; otherwise, just export `main`.
 | `--`[`no-`]`inlining`                   | no      | Inline small functions.
 | `--`[`no-`]`lazy-constants`             | no      | Instantiate constants lazily.
