@@ -105,11 +105,12 @@ class Globals {
   Constant? _getConstantInitializer(Field variable) {
     Expression? init = variable.initializer;
     if (init == null || init is NullLiteral) return NullConstant();
-    if (init is ConstantExpression) return init.constant;
     if (init is IntLiteral) return IntConstant(init.value);
     if (init is DoubleLiteral) return DoubleConstant(init.value);
     if (init is BoolLiteral) return BoolConstant(init.value);
+    if (translator.options.lazyConstants) return null;
     if (init is StringLiteral) return StringConstant(init.value);
+    if (init is ConstantExpression) return init.constant;
     return null;
   }
 
@@ -118,7 +119,7 @@ class Globals {
     return globals.putIfAbsent(variable, () {
       w.ValueType type = translator.translateType(variable.type);
       Constant? init = _getConstantInitializer(variable);
-      if (init != null && !translator.options.lazyConstants) {
+      if (init != null) {
         // Initialized to a constant
         translator.constants.ensureConstant(init);
         w.DefinedGlobal global = translator.m
