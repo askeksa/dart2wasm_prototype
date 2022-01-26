@@ -61,6 +61,7 @@ class If extends Label {
 class Instructions with SerializerMixin {
   final Module module;
   final List<Local> locals;
+  final bool isGlobalInitializer;
 
   bool traceEnabled = true;
   bool byteOffsetEnabled = false;
@@ -74,7 +75,8 @@ class Instructions with SerializerMixin {
   final List<ValueType> _stackTypes = [];
   bool reachable = true;
 
-  Instructions(this.module, List<ValueType> outputs, [this.locals = const []]) {
+  Instructions(this.module, List<ValueType> outputs,
+      {this.locals = const [], this.isGlobalInitializer = false}) {
     labelStack.add(Expression(const [], outputs));
   }
 
@@ -886,24 +888,26 @@ class Instructions with SerializerMixin {
     writeUnsigned(arrayType.index);
   }
 
+  void array_init_from_data_static(ArrayType arrayType, DataSegment data) {
+    assert(arrayType.elementType.type.isPrimitive);
+    assert(_verifyTypes(
+        [NumType.i32, NumType.i32], [RefType.def(arrayType, nullable: false)],
+        trace: ['array.init_from_data_static', arrayType, data.index]));
+    writeBytes(const [0xFB, 0x1d]);
+    writeUnsigned(arrayType.index);
+    writeUnsigned(data.index);
+    if (isGlobalInitializer) module.dataReferencedFromGlobalInitializer = true;
+  }
+
   void array_init_from_data(ArrayType arrayType, DataSegment data) {
     assert(arrayType.elementType.type.isPrimitive);
     assert(_verifyTypes([NumType.i32, NumType.i32, Rtt(arrayType)],
         [RefType.def(arrayType, nullable: false)],
         trace: ['array.init_from_data', arrayType, data.index]));
-    writeBytes(const [0xFB, 0x1d]);
-    writeUnsigned(arrayType.index);
-    writeUnsigned(data.index);
-  }
-
-  void array_init_from_data_static(ArrayType arrayType, DataSegment data) {
-    assert(arrayType.elementType.type.isPrimitive);
-    assert(_verifyTypes(const [],
-        [NumType.i32, NumType.i32, RefType.def(arrayType, nullable: false)],
-        trace: ['array.init_from_data_static', arrayType, data.index]));
     writeBytes(const [0xFB, 0x1e]);
     writeUnsigned(arrayType.index);
     writeUnsigned(data.index);
+    if (isGlobalInitializer) module.dataReferencedFromGlobalInitializer = true;
   }
 
   void i31_new() {

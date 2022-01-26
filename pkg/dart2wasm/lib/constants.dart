@@ -428,8 +428,8 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
           }
           int offset = segment.length;
           segment.append(bytes);
-          b.i32_const(constant.value.length);
           b.i32_const(offset);
+          b.i32_const(constant.value.length);
           translator.array_init_from_data(b, arrayType, segment);
         } else {
           for (int charCode in constant.value.codeUnits) {

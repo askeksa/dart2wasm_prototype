@@ -24,6 +24,7 @@ class Module with SerializerMixin {
 
   bool anyFunctionsDefined = false;
   bool anyGlobalsDefined = false;
+  bool dataReferencedFromGlobalInitializer = false;
 
   Module({this.watchPoints}) {
     if (watchPoints != null) {
@@ -146,11 +147,16 @@ class Module with SerializerMixin {
     FunctionSection(this).serialize(this);
     TableSection(this).serialize(this);
     MemorySection(this).serialize(this);
+    if (dataReferencedFromGlobalInitializer) {
+      DataCountSection(this).serialize(this);
+    }
     GlobalSection(this).serialize(this);
     ExportSection(this).serialize(this);
     StartSection(this).serialize(this);
     ElementSection(this).serialize(this);
-    DataCountSection(this).serialize(this);
+    if (!dataReferencedFromGlobalInitializer) {
+      DataCountSection(this).serialize(this);
+    }
     CodeSection(this).serialize(this);
     DataSection(this).serialize(this);
     return data;
@@ -210,7 +216,7 @@ class DefinedFunction extends BaseFunction
     for (ValueType paramType in type.inputs) {
       addLocal(paramType);
     }
-    body = Instructions(module, type.outputs, locals);
+    body = Instructions(module, type.outputs, locals: locals);
   }
 
   Local addLocal(ValueType type) {
@@ -361,7 +367,8 @@ class DefinedGlobal extends Global implements Serializable {
   final Instructions initializer;
 
   DefinedGlobal(Module module, int index, GlobalType type)
-      : initializer = Instructions(module, [type.type]),
+      : initializer =
+            Instructions(module, [type.type], isGlobalInitializer: true),
         super(index, type);
 
   @override
@@ -650,7 +657,7 @@ class DataCountSection extends Section {
   int get id => 12;
 
   @override
-  bool get isNotEmpty => false;
+  bool get isNotEmpty => module.dataSegments.isNotEmpty;
 
   @override
   void serializeContents() {
