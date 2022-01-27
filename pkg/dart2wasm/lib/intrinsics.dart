@@ -142,6 +142,139 @@ class Intrinsifier {
     Expression receiver = node.receiver;
     DartType receiverType = dartTypeOf(receiver);
     String name = node.name.text;
+    Procedure target = node.interfaceTarget;
+
+    if (target.enclosingClass == translator.typedListBaseClass &&
+        name == "_setRange") {
+      // Always fall back to alternative implementation.
+      b.i32_const(0);
+      return w.NumType.i32;
+    }
+
+    if (node.interfaceTarget.enclosingClass == translator.typedListClass) {
+      Match? match = RegExp("^_(get|set)(Int|Uint|Float)(8|16|32|64)\$")
+          .matchAsPrefix(name);
+      if (match != null) {
+        bool setter = match.group(1) == "set";
+        bool signed = match.group(2) == "Int";
+        bool float = match.group(2) == "Float";
+        int bytes = int.parse(match.group(3)!) ~/ 8;
+        bool wide = bytes == 8;
+
+        ClassInfo typedListInfo =
+            translator.classInfo[translator.typedListClass]!;
+        w.RefType arrayType = typedListInfo.struct
+            .fields[FieldIndex.typedListArray].type.unpacked as w.RefType;
+        w.ArrayType arrayHeapType = arrayType.heapType as w.ArrayType;
+        w.ValueType valueType = float ? w.NumType.f64 : w.NumType.i64;
+        w.ValueType intType = wide ? w.NumType.i64 : w.NumType.i32;
+
+        // Prepare array and offset
+        w.Local array = codeGen.addLocal(arrayType);
+        w.Local offset = codeGen.addLocal(w.NumType.i32);
+        codeGen.wrap(receiver, typedListInfo.nullableType);
+        b.struct_get(typedListInfo.struct, FieldIndex.typedListArray);
+        b.local_set(array);
+        codeGen.wrap(node.arguments.positional[0], w.NumType.i64);
+        b.i32_wrap_i64();
+        b.local_set(offset);
+
+        if (setter) {
+          // Setter
+          w.Local value = codeGen.addLocal(intType);
+          codeGen.wrap(node.arguments.positional[1], valueType);
+          if (wide) {
+            if (float) {
+              b.i64_reinterpret_f64();
+            }
+          } else {
+            if (float) {
+              b.f32_demote_f64();
+              b.i32_reinterpret_f32();
+            } else {
+              b.i32_wrap_i64();
+            }
+          }
+          b.local_set(value);
+
+          for (int i = 0; i < bytes; i++) {
+            b.local_get(array);
+            b.local_get(offset);
+            if (i > 0) {
+              b.i32_const(i);
+              b.i32_add();
+            }
+            b.local_get(value);
+            if (i > 0) {
+              if (wide) {
+                b.i64_const(i * 8);
+                b.i64_shr_u();
+              } else {
+                b.i32_const(i * 8);
+                b.i32_shr_u();
+              }
+            }
+            if (wide) {
+              b.i32_wrap_i64();
+            }
+            b.array_set(arrayHeapType);
+          }
+          return translator.voidMarker;
+        } else {
+          // Getter
+          for (int i = 0; i < bytes; i++) {
+            b.local_get(array);
+            b.local_get(offset);
+            if (i > 0) {
+              b.i32_const(i);
+              b.i32_add();
+            }
+            if (signed && i == bytes - 1) {
+              b.array_get_s(arrayHeapType);
+            } else {
+              b.array_get_u(arrayHeapType);
+            }
+            if (wide) {
+              if (signed) {
+                b.i64_extend_i32_s();
+              } else {
+                b.i64_extend_i32_u();
+              }
+            }
+            if (i > 0) {
+              if (wide) {
+                b.i64_const(i * 8);
+                b.i64_shl();
+                b.i64_or();
+              } else {
+                b.i32_const(i * 8);
+                b.i32_shl();
+                b.i32_or();
+              }
+            }
+          }
+
+          if (wide) {
+            if (float) {
+              b.f64_reinterpret_i64();
+            }
+          } else {
+            if (float) {
+              b.f32_reinterpret_i32();
+              b.f64_promote_f32();
+            } else {
+              if (signed) {
+                b.i64_extend_i32_s();
+              } else {
+                b.i64_extend_i32_u();
+              }
+            }
+          }
+          return valueType;
+        }
+      }
+    }
+
     if (node.interfaceTarget.enclosingClass?.superclass ==
         translator.wasmArrayBaseClass) {
       DartType elementType =
@@ -282,8 +415,10 @@ class Intrinsifier {
   }
 
   w.ValueType? generateStaticIntrinsic(StaticInvocation node) {
+    String name = node.name.text;
+
     if (node.target.enclosingLibrary == translator.coreTypes.coreLibrary) {
-      switch (node.name.text) {
+      switch (name) {
         case "identical":
           Expression first = node.arguments.positional[0];
           Expression second = node.arguments.positional[1];
@@ -329,7 +464,7 @@ class Intrinsifier {
     }
 
     if (node.target.enclosingLibrary.name == "dart._internal") {
-      switch (node.name.text) {
+      switch (name) {
         case "unsafeCast":
           w.ValueType targetType =
               translator.translateType(node.arguments.types.single);
@@ -441,6 +576,7 @@ class Intrinsifier {
       List<w.Local> paramLocals, w.Label? returnLabel) {
     Member member = target.asMember;
     if (member is! Procedure) return false;
+    String name = member.name.text;
     FunctionNode functionNode = member.function;
 
     // Object.==
@@ -453,7 +589,7 @@ class Intrinsifier {
 
     // Object.runtimeType
     if (member.enclosingClass == translator.coreTypes.objectClass &&
-        member.name.text == "runtimeType") {
+        name == "runtimeType") {
       w.Local receiver = paramLocals[0];
       ClassInfo info = translator.classInfo[translator.typeClass]!;
       w.ValueType typeListExpectedType = info.struct.fields[3].type.unpacked;
@@ -554,7 +690,7 @@ class Intrinsifier {
     }
 
     if (member.enclosingLibrary.name == "dart._internal") {
-      switch (member.name.text) {
+      switch (name) {
         case "ensureTwoByteString":
           ClassInfo oneByteInfo =
               translator.classInfo[translator.oneByteStringClass]!;
@@ -624,6 +760,98 @@ class Intrinsifier {
           b.local_get(twoByteArray);
           translator.struct_new(b, twoByteInfo.struct);
           return true;
+      }
+    }
+
+    if (member.isExternal &&
+        member.enclosingLibrary.name == "dart.typed_data") {
+      if (member.isFactory) {
+        String className = member.enclosingClass!.name;
+
+        Match? match = RegExp("^(Int|Uint|Float)(8|16|32|64)(Clamped)?List\$")
+            .matchAsPrefix(className);
+        if (match != null) {
+          int shift = int.parse(match.group(2)!).bitLength - 4;
+          Class cls = member.enclosingLibrary.classes
+              .firstWhere((c) => c.name == "_$className");
+          ClassInfo info = translator.classInfo[cls]!;
+          w.ArrayType arrayType =
+              translator.wasmArrayType(w.PackedType.i8, "i8");
+
+          w.Local length = paramLocals[0];
+          b.i32_const(info.classId);
+          b.i32_const(initialIdentityHash);
+          b.local_get(length);
+          b.i32_wrap_i64();
+          b.local_get(length);
+          if (shift > 0) {
+            b.i64_const(shift);
+            b.i64_shl();
+          }
+          b.i32_wrap_i64();
+          translator.array_new_default(b, arrayType);
+          translator.struct_new(b, info);
+          return true;
+        }
+
+        match = RegExp("^_(Int|Uint|Float)(8|16|32|64)(Clamped)?ArrayView\$")
+            .matchAsPrefix(className);
+        if (match != null ||
+            member.enclosingClass == translator.byteDataViewClass) {
+          ClassInfo info = translator.classInfo[member.enclosingClass]!;
+
+          w.Local buffer = paramLocals[0];
+          w.Local offsetInBytes = paramLocals[1];
+          w.Local length = paramLocals[2];
+          b.i32_const(info.classId);
+          b.i32_const(initialIdentityHash);
+          b.local_get(length);
+          b.i32_wrap_i64();
+          b.local_get(buffer);
+          b.local_get(offsetInBytes);
+          b.i32_wrap_i64();
+          translator.struct_new(b, info);
+          return true;
+        }
+      }
+
+      if (member.isGetter) {
+        Class cls = member.enclosingClass!;
+        ClassInfo info = translator.classInfo[cls]!;
+        b.local_get(paramLocals[0]);
+        translator.ref_cast(b, info);
+        switch (name) {
+          case "length":
+            assert(cls == translator.typedListBaseClass ||
+                cls == translator.byteDataViewClass);
+            if (cls == translator.typedListBaseClass) {
+              b.struct_get(info.struct, FieldIndex.typedListBaseLength);
+            } else {
+              b.struct_get(info.struct, FieldIndex.byteDataViewLength);
+            }
+            b.i64_extend_i32_u();
+            return true;
+          case "offsetInBytes":
+            assert(cls == translator.typedListViewClass ||
+                cls == translator.byteDataViewClass);
+            if (cls == translator.typedListViewClass) {
+              b.struct_get(info.struct, FieldIndex.typedListViewOffsetInBytes);
+            } else {
+              b.struct_get(info.struct, FieldIndex.byteDataViewOffsetInBytes);
+            }
+            b.i64_extend_i32_u();
+            return true;
+          case "_typedData":
+            assert(cls == translator.typedListViewClass ||
+                cls == translator.byteDataViewClass);
+            if (cls == translator.typedListViewClass) {
+              b.struct_get(info.struct, FieldIndex.typedListViewTypedData);
+            } else {
+              b.struct_get(info.struct, FieldIndex.byteDataViewTypedData);
+            }
+            return true;
+        }
+        throw "Unrecognized typed data getter: ${cls.name}.$name";
       }
     }
 

@@ -250,7 +250,8 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
 
   void instantiate(Constant constant) {
     w.ValueType resultType = constant.accept(this);
-    assert(!translator.needsConversion(resultType, expectedType));
+    assert(!translator.needsConversion(resultType, expectedType),
+        "For $constant: expected $expectedType, got $resultType");
   }
 
   @override

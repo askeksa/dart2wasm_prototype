@@ -23,6 +23,13 @@ class FieldIndex {
   static const stringArray = 2;
   static const closureContext = 2;
   static const closureFunction = 3;
+  static const typedListBaseLength = 2;
+  static const typedListArray = 3;
+  static const typedListViewTypedData = 3;
+  static const typedListViewOffsetInBytes = 4;
+  static const byteDataViewLength = 2;
+  static const byteDataViewTypedData = 3;
+  static const byteDataViewOffsetInBytes = 4;
 
   static void validate(Translator translator) {
     void check(Class cls, String name, int expectedIndex) {
@@ -182,7 +189,11 @@ class ClassInfoCollector {
         }
         bool canReuseSuperStruct =
             typeParameterMatch.length == cls.typeParameters.length &&
-                cls.fields.where((f) => f.isInstanceMember).isEmpty;
+                cls.fields.where((f) => f.isInstanceMember).isEmpty &&
+                cls != translator.typedListBaseClass &&
+                cls != translator.typedListClass &&
+                cls != translator.typedListViewClass &&
+                cls != translator.byteDataViewClass;
         w.StructType struct = canReuseSuperStruct
             ? superInfo.struct
             : translator.structType(cls.name, superType: superInfo.struct);
@@ -277,7 +288,46 @@ class ClassInfoCollector {
       generateFields(info);
     }
 
+    addTypedDataFields();
+
     // Validate that all internally used fields have the expected indices.
     FieldIndex.validate(translator);
+  }
+
+  void addTypedDataFields() {
+    ClassInfo typedListBaseInfo =
+        translator.classInfo[translator.typedListBaseClass]!;
+    typedListBaseInfo.addField(w.FieldType(w.NumType.i32, mutable: false),
+        FieldIndex.typedListBaseLength);
+
+    ClassInfo typedListInfo = translator.classInfo[translator.typedListClass]!;
+    typedListInfo.addField(w.FieldType(w.NumType.i32, mutable: false),
+        FieldIndex.typedListBaseLength);
+    w.RefType bytesArrayType = w.RefType.def(
+        translator.wasmArrayType(w.PackedType.i8, "i8"),
+        nullable: false);
+    typedListInfo.addField(
+        w.FieldType(bytesArrayType, mutable: false), FieldIndex.typedListArray);
+
+    w.RefType typedListType =
+        w.RefType.def(typedListInfo.struct, nullable: false);
+
+    ClassInfo typedListViewInfo =
+        translator.classInfo[translator.typedListViewClass]!;
+    typedListViewInfo.addField(w.FieldType(w.NumType.i32, mutable: false),
+        FieldIndex.typedListBaseLength);
+    typedListViewInfo.addField(w.FieldType(typedListType, mutable: false),
+        FieldIndex.typedListViewTypedData);
+    typedListViewInfo.addField(w.FieldType(w.NumType.i32, mutable: false),
+        FieldIndex.typedListViewOffsetInBytes);
+
+    ClassInfo byteDataViewInfo =
+        translator.classInfo[translator.byteDataViewClass]!;
+    byteDataViewInfo.addField(w.FieldType(w.NumType.i32, mutable: false),
+        FieldIndex.byteDataViewLength);
+    byteDataViewInfo.addField(w.FieldType(typedListType, mutable: false),
+        FieldIndex.byteDataViewTypedData);
+    byteDataViewInfo.addField(w.FieldType(w.NumType.i32, mutable: false),
+        FieldIndex.byteDataViewOffsetInBytes);
   }
 }

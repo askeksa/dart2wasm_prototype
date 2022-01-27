@@ -69,6 +69,10 @@ class Translator {
   late final Class oneByteStringClass;
   late final Class twoByteStringClass;
   late final Class typeClass;
+  late final Class typedListBaseClass;
+  late final Class typedListClass;
+  late final Class typedListViewClass;
+  late final Class byteDataViewClass;
   late final Procedure stringEquals;
   late final Procedure stringInterpolate;
   late final Procedure mapFactory;
@@ -124,6 +128,12 @@ class Translator {
       return collectionLibrary.classes.firstWhere((c) => c.name == name);
     }
 
+    Library typedDataLibrary =
+        component.libraries.firstWhere((l) => l.name == "dart.typed_data");
+    Class lookupTypedData(String name) {
+      return typedDataLibrary.classes.firstWhere((c) => c.name == name);
+    }
+
     Library wasmLibrary =
         component.libraries.firstWhere((l) => l.name == "dart.wasm");
     Class lookupWasm(String name) {
@@ -147,6 +157,10 @@ class Translator {
     oneByteStringClass = lookupCore("_OneByteString");
     twoByteStringClass = lookupCore("_TwoByteString");
     typeClass = lookupCore("_Type");
+    typedListBaseClass = lookupTypedData("_TypedListBase");
+    typedListClass = lookupTypedData("_TypedList");
+    typedListViewClass = lookupTypedData("_TypedListView");
+    byteDataViewClass = lookupTypedData("_ByteDataView");
     stringEquals =
         stringBaseClass.procedures.firstWhere((p) => p.name.text == "==");
     stringInterpolate = stringBaseClass.procedures
