@@ -12,11 +12,23 @@ import 'package:kernel/external_name.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+/// This class is responsible for collecting import and export annotations.
+/// It also creates Wasm functions for Dart members and manages the worklist
+/// used to achieve tree shaking.
 class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   final Translator translator;
+
+  // Wasm function for each Dart function
   final Map<Reference, w.BaseFunction> _functions = {};
+  // Names of exported functions
   final Map<Reference, String> exports = {};
-  final List<Reference> pending = [];
+  // Functions for which code has not yet been generated
+  final List<Reference> worklist = [];
+  // Class IDs for classes that are allocated somewhere in the program
+  final Set<int> _allocatedClasses = {};
+  // For each class ID, which functions should be added to the worklist if an
+  // allocation of that class is encountered
+  final Map<int, List<Reference>> _pendingAllocation = {};
 
   FunctionCollector(this.translator);
 
@@ -83,9 +95,10 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
     exports[target] = exportName;
   }
 
-  void initExports() {
+  void initialize() {
+    // Add all exports to the worklist
     for (Reference target in exports.keys) {
-      pending.add(target);
+      worklist.add(target);
       Procedure node = target.asProcedure;
       assert(!node.isInstanceMember);
       assert(!node.isGetter);
@@ -94,6 +107,11 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
           isImportOrExport: true);
       _functions[target] = m.addFunction(ftype);
     }
+
+    // Value classes are always implicitly allocated.
+    allocateClass(translator.classInfo[translator.boxedBoolClass]!.classId);
+    allocateClass(translator.classInfo[translator.boxedIntClass]!.classId);
+    allocateClass(translator.classInfo[translator.boxedDoubleClass]!.classId);
   }
 
   w.BaseFunction? getExistingFunction(Reference target) {
@@ -102,7 +120,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
 
   w.BaseFunction getFunction(Reference target) {
     return _functions.putIfAbsent(target, () {
-      pending.add(target);
+      worklist.add(target);
       w.FunctionType ftype = target.isTearOffReference
           ? translator.dispatchTable.selectorForTarget(target).signature
           : target.asMember.accept1(this, target);
@@ -111,8 +129,23 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   }
 
   void activateSelector(SelectorInfo selector) {
-    for (Reference target in selector.targets.values) {
+    selector.targets.forEach((classId, target) {
       if (!target.asMember.isAbstract) {
+        if (_allocatedClasses.contains(classId)) {
+          // Class declaring or inheriting member is allocated somewhere.
+          getFunction(target);
+        } else {
+          // Remember the member in case an allocation is encountered later.
+          _pendingAllocation.putIfAbsent(classId, () => []).add(target);
+        }
+      }
+    });
+  }
+
+  void allocateClass(int classId) {
+    if (_allocatedClasses.add(classId)) {
+      // Schedule all members that were pending allocation of this class.
+      for (Reference target in _pendingAllocation[classId] ?? const []) {
         getFunction(target);
       }
     }

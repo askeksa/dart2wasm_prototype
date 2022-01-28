@@ -56,6 +56,7 @@ class Constants {
 
   void initEmptyString() {
     ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
+    translator.functions.allocateClass(info.classId);
     w.ArrayType arrayType =
         (info.struct.fields.last.type as w.RefType).heapType as w.ArrayType;
 
@@ -90,6 +91,7 @@ class Constants {
 
   void initEmptyTypeList() {
     ClassInfo info = translator.classInfo[translator.immutableListClass]!;
+    translator.functions.allocateClass(info.classId);
     w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
     w.ArrayType arrayType = refType.heapType as w.ArrayType;
 
@@ -394,6 +396,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
     ClassInfo info = translator.classInfo[isOneByte
         ? translator.oneByteStringClass
         : translator.twoByteStringClass]!;
+    translator.functions.allocateClass(info.classId);
     w.RefType type = info.nonNullableType;
     return createConstant(constant, type, (function, b) {
       if (lazyConstants) {
@@ -447,6 +450,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
   ConstantInfo? visitInstanceConstant(InstanceConstant constant) {
     Class cls = constant.classNode;
     ClassInfo info = translator.classInfo[cls]!;
+    translator.functions.allocateClass(info.classId);
     w.RefType type = info.nonNullableType;
 
     const int baseFieldCount = 2;
@@ -498,6 +502,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
     }
 
     ClassInfo info = translator.classInfo[translator.immutableListClass]!;
+    translator.functions.allocateClass(info.classId);
     w.RefType type = info.nonNullableType;
     return createConstant(constant, type, (function, b) {
       w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
@@ -546,6 +551,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
     w.RefType type = w.RefType.def(struct, nullable: false);
     return createConstant(constant, type, (function, b) {
       ClassInfo info = translator.classInfo[translator.functionClass]!;
+      translator.functions.allocateClass(info.classId);
 
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
@@ -580,6 +586,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
     ensureConstant(typeArgs);
 
     ClassInfo info = constants.typeInfo;
+    translator.functions.allocateClass(info.classId);
     return createConstant(constant, info.nonNullableType, (function, b) {
       ClassInfo typeInfo = translator.classInfo[type.classNode]!;
       w.ValueType typeListExpectedType = info.struct.fields[3].type.unpacked;

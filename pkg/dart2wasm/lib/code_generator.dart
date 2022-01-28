@@ -104,6 +104,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       w.DefinedGlobal global = translator.makeFunctionRef(closureFunction);
 
       ClassInfo info = translator.classInfo[translator.functionClass]!;
+      translator.functions.allocateClass(info.classId);
 
       b.i32_const(info.classId);
       b.i32_const(initialIdentityHash);
@@ -843,6 +844,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitConstructorInvocation(
       ConstructorInvocation node, w.ValueType expectedType) {
     ClassInfo info = translator.classInfo[node.target.enclosingClass]!;
+    translator.functions.allocateClass(info.classId);
     w.Local temp = addLocal(info.nonNullableType);
     translator.struct_new_default(b, info);
     b.local_tee(temp);
@@ -1482,6 +1484,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     w.DefinedGlobal global = translator.makeFunctionRef(lambda.function);
 
     ClassInfo info = translator.classInfo[translator.functionClass]!;
+    translator.functions.allocateClass(info.classId);
     w.StructType struct = translator.closureStructType(parameterCount);
 
     b.i32_const(info.classId);
@@ -1691,6 +1694,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType _makeList(List<Expression> expressions, Class cls,
       DartType typeArg, TreeNode node) {
     ClassInfo info = translator.classInfo[cls]!;
+    translator.functions.allocateClass(info.classId);
     w.RefType refType = info.struct.fields.last.type.unpacked as w.RefType;
     w.ArrayType arrayType = refType.heapType as w.ArrayType;
     w.ValueType elementType = arrayType.elementType.type.unpacked;
@@ -1793,6 +1797,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       return typeType;
     }
     ClassInfo info = translator.classInfo[translator.typeClass]!;
+    translator.functions.allocateClass(info.classId);
     if (type is FutureOrType) {
       // TODO(askesc): Have an actual representation of FutureOr types
       b.ref_null(info.nullableType.heapType);

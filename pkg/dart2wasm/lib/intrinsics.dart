@@ -472,6 +472,7 @@ class Intrinsifier {
           return codeGen.wrap(operand, targetType);
         case "allocateOneByteString":
           ClassInfo info = translator.classInfo[translator.oneByteStringClass]!;
+          translator.functions.allocateClass(info.classId);
           w.ArrayType arrayType =
               translator.wasmArrayType(w.PackedType.i8, "WasmI8");
           Expression length = node.arguments.positional[0];
@@ -502,6 +503,7 @@ class Intrinsifier {
           return codeGen.voidMarker;
         case "allocateTwoByteString":
           ClassInfo info = translator.classInfo[translator.twoByteStringClass]!;
+          translator.functions.allocateClass(info.classId);
           w.ArrayType arrayType =
               translator.wasmArrayType(w.PackedType.i16, "WasmI16");
           Expression length = node.arguments.positional[0];
@@ -592,6 +594,7 @@ class Intrinsifier {
         name == "runtimeType") {
       w.Local receiver = paramLocals[0];
       ClassInfo info = translator.classInfo[translator.typeClass]!;
+      translator.functions.allocateClass(info.classId);
       w.ValueType typeListExpectedType = info.struct.fields[3].type.unpacked;
 
       b.i32_const(info.classId);
@@ -696,6 +699,7 @@ class Intrinsifier {
               translator.classInfo[translator.oneByteStringClass]!;
           ClassInfo twoByteInfo =
               translator.classInfo[translator.twoByteStringClass]!;
+          translator.functions.allocateClass(twoByteInfo.classId);
           w.Local inString = paramLocals[0];
 
           // If the string is already a TwoByteString, just return it.
@@ -775,6 +779,7 @@ class Intrinsifier {
           Class cls = member.enclosingLibrary.classes
               .firstWhere((c) => c.name == "_$className");
           ClassInfo info = translator.classInfo[cls]!;
+          translator.functions.allocateClass(info.classId);
           w.ArrayType arrayType =
               translator.wasmArrayType(w.PackedType.i8, "i8");
 
@@ -799,6 +804,7 @@ class Intrinsifier {
         if (match != null ||
             member.enclosingClass == translator.byteDataViewClass) {
           ClassInfo info = translator.classInfo[member.enclosingClass]!;
+          translator.functions.allocateClass(info.classId);
 
           w.Local buffer = paramLocals[0];
           w.Local offsetInBytes = paramLocals[1];

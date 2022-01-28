@@ -215,9 +215,9 @@ class Translator {
 
     dispatchTable.build();
 
-    functions.initExports();
-    while (functions.pending.isNotEmpty) {
-      Reference reference = functions.pending.removeLast();
+    functions.initialize();
+    while (functions.worklist.isNotEmpty) {
+      Reference reference = functions.worklist.removeLast();
       Member member = reference.asMember;
       var function =
           functions.getExistingFunction(reference) as w.DefinedFunction;
