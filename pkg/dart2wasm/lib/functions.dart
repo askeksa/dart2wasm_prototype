@@ -7,7 +7,6 @@ import 'package:dart2wasm/tearoff_reference.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
-import 'package:kernel/core_types.dart';
 import 'package:kernel/external_name.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
@@ -33,30 +32,6 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   FunctionCollector(this.translator);
 
   w.Module get m => translator.m;
-  CoreTypes get coreTypes => translator.coreTypes;
-
-  String? _findExportName(Member member) {
-    for (Expression annotation in member.annotations) {
-      if (annotation is ConstantExpression) {
-        Constant constant = annotation.constant;
-        if (constant is InstanceConstant) {
-          if (constant.classNode == coreTypes.pragmaClass) {
-            Constant? name =
-                constant.fieldValues[coreTypes.pragmaName.fieldReference];
-            if (name is StringConstant && name.value == "wasm:export") {
-              Constant? options =
-                  constant.fieldValues[coreTypes.pragmaOptions.fieldReference];
-              if (options is StringConstant) {
-                return options.value;
-              }
-              return member.name.text;
-            }
-          }
-        }
-      }
-    }
-    return null;
-  }
 
   void collectImportsAndExports() {
     for (Library library in translator.libraries) {
@@ -85,7 +60,8 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
         _functions[procedure.reference] = m.importFunction(module, name, ftype);
       }
     }
-    String? exportName = _findExportName(procedure);
+    String? exportName =
+        translator.getPragma(procedure, "wasm:export", procedure.name.text);
     if (exportName != null) {
       addExport(procedure.reference, exportName);
     }

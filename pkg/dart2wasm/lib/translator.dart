@@ -615,6 +615,29 @@ class Translator {
     return body != null && NodeCounter().countNodes(body) < 4;
   }
 
+  T? getPragma<T>(Annotatable node, String name, [T? defaultvalue]) {
+    for (Expression annotation in node.annotations) {
+      if (annotation is ConstantExpression) {
+        Constant constant = annotation.constant;
+        if (constant is InstanceConstant) {
+          if (constant.classNode == coreTypes.pragmaClass) {
+            Constant? nameConstant =
+                constant.fieldValues[coreTypes.pragmaName.fieldReference];
+            if (nameConstant is StringConstant && nameConstant.value == name) {
+              Object? value =
+                  constant.fieldValues[coreTypes.pragmaOptions.fieldReference];
+              if (value is PrimitiveConstant<T>) {
+                return value.value;
+              }
+              return value as T? ?? defaultvalue;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   // Wrappers for type creation to abstract over equi-recursive versus nominal
   // typing. The given supertype is ignored when nominal types are disabled,
   // and a suitable default is inserted when nominal types are enabled.
