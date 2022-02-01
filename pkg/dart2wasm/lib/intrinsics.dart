@@ -414,6 +414,21 @@ class Intrinsifier {
     }
   }
 
+  w.ValueType? generateStaticGetterIntrinsic(StaticGet node) {
+    Member target = node.target;
+    String? className = translator.getPragma(target, "wasm:class-id");
+    if (className != null) {
+      List<String> libAndClass = className.split("#");
+      Class cls = translator.libraries
+          .firstWhere((l) => l.name == libAndClass[0])
+          .classes
+          .firstWhere((c) => c.name == libAndClass[1]);
+      int classId = translator.classInfo[cls]!.classId;
+      b.i64_const(classId);
+      return w.NumType.i64;
+    }
+  }
+
   w.ValueType? generateStaticIntrinsic(StaticInvocation node) {
     String name = node.name.text;
 

@@ -9,6 +9,13 @@ class ClassID {
   @pragma("vm:external-name", "ClassID_getID")
   external static int getID(Object value);
 
-  // TODO(askesc): Implement this as intrinsic when adding predefined cids.
+  @pragma("wasm:class-id", "dart.typed_data#_ExternalUint8Array")
+  external static int get cidExternalUint8Array;
+  @pragma("wasm:class-id", "dart.typed_data#_Uint8List")
+  external static int get cidUint8Array;
+  @pragma("wasm:class-id", "dart.typed_data#_Uint8ArrayView")
+  external static int get cidUint8ArrayView;
+
+  // Dummy, only used by VM-specific hash table code.
   static final int numPredefinedCids = 1;
 }

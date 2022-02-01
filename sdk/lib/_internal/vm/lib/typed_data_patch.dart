@@ -3050,6 +3050,7 @@ class _ExternalInt8Array extends _TypedList
 }
 
 @pragma("vm:entry-point")
+@pragma("wasm:entry-point")
 class _ExternalUint8Array extends _TypedList
     with _IntListMixin, _TypedIntListMixin<Uint8List>
     implements Uint8List {

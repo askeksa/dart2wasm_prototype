@@ -1202,6 +1202,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
 
   @override
   w.ValueType visitStaticGet(StaticGet node, w.ValueType expectedType) {
+    w.ValueType? intrinsicResult =
+        intrinsifier.generateStaticGetterIntrinsic(node);
+    if (intrinsicResult != null) return intrinsicResult;
     Member target = node.target;
     if (target is Field) {
       return translator.globals.readGlobal(b, target);
