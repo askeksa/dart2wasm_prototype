@@ -4,7 +4,7 @@
 
 // part of "core_patch.dart";
 
-@pragma("vm:external-name", "Date.now")
+@pragma("wasm:import", "Date.now")
 external double _jsDateNow();
 
 // VM implementation of DateTime.

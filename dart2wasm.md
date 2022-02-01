@@ -43,19 +43,20 @@ The resulting `.wasm` file can be run with:
 
 `d8 --experimental-wasm-gc --wasm-gc-js-interop pkg/dart2wasm/bin/run_wasm.js -- `*outfile*`.wasm`
 
-## Calling to and from JS
+## Imports and exports
 
-To call a JS function from Dart, declare a global, native function with a native name that is two identifiers separated by a dot:
+To import a function, declare it as a global, external function and mark it with a `wasm:import` pragma indicating the imported name (which must be two identifiers separated by a dot):
 ```dart
-void fooBar(Object object) native "foo.bar";
+@pragma("wasm:import", "foo.bar")
+external void fooBar(Object object);
 ```
-which will call `foo.bar` on the JS side:
+which will call `foo.bar` on the host side:
 ```javascript
 var foo = {
     bar: function(object) { /* implementation here */ }
 };
 ```
-To call a Dart function from JS, export the function with `@pragma("wasm:export")`:
+To export a function, mark it with a `wasm:export` pragma:
 ```dart
 @pragma("wasm:export")
 void foo(double x) { /* implementation here */  }

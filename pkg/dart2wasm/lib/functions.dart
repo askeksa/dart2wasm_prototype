@@ -7,7 +7,6 @@ import 'package:dart2wasm/tearoff_reference.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
-import 'package:kernel/external_name.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
@@ -47,13 +46,13 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
   }
 
   void _importOrExport(Procedure procedure) {
-    String? externalName = getExternalName(translator.coreTypes, procedure);
-    if (externalName != null) {
-      int dot = externalName.indexOf('.');
+    String? importName = translator.getPragma(procedure, "wasm:import");
+    if (importName != null) {
+      int dot = importName.indexOf('.');
       if (dot != -1) {
         assert(!procedure.isInstanceMember);
-        String module = externalName.substring(0, dot);
-        String name = externalName.substring(dot + 1);
+        String module = importName.substring(0, dot);
+        String name = importName.substring(dot + 1);
         w.FunctionType ftype = _makeFunctionType(
             procedure.reference, procedure.function.returnType, null,
             isImportOrExport: true);
