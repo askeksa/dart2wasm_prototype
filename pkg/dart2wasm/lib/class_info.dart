@@ -52,14 +52,39 @@ class FieldIndex {
 const int initialIdentityHash = 0;
 
 class ClassInfo {
+  /// The Dart class that this info corresponds to. The top type does not have
+  /// an associated Dart class.
   final Class? cls;
+
+  /// The Class ID of this class, stored in every instance of the class.
   final int classId;
+
+  /// Depth of this class in the Wasm type hierarchy.
   final int depth;
+
+  /// The Wasm struct used to represent instances of this class. A class will
+  /// sometimes use the same struct as its superclass.
   final w.StructType struct;
+
+  /// Wasm global containing the RTT for this class.
   late final w.DefinedGlobal rtt;
+
+  /// The superclass for this class. This will usually be the Dart superclass,
+  /// but there are a few exceptions, where the Wasm type hierarchy does not
+  /// follow the Dart class hierarchy.
   final ClassInfo? superInfo;
+
+  /// For every type parameter which is directly mapped to a type parameter in
+  /// the superclass, this contains the corresponding superclass type
+  /// parameter. These will reuse the corresponding type parameter field of
+  /// the superclass.
   final Map<TypeParameter, TypeParameter> typeParameterMatch;
+
+  /// The class whose struct is used as the type for variables of this type.
+  /// This is a type which is a superclass of all subtypes of this type.
   late ClassInfo repr;
+
+  /// All classes which implement this class. This is used to compute `repr`.
   final List<ClassInfo> implementedBy = [];
 
   late final w.RefType nullableType = w.RefType.def(struct, nullable: true);
@@ -288,6 +313,7 @@ class ClassInfoCollector {
       generateFields(info);
     }
 
+    // Add hidden fields of typed_data classes.
     addTypedDataFields();
 
     // Validate that all internally used fields have the expected indices.
