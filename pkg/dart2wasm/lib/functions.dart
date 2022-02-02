@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:dart2wasm/dispatch_table.dart';
-import 'package:dart2wasm/tearoff_reference.dart';
+import 'package:dart2wasm/reference_extensions.dart';
 import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';

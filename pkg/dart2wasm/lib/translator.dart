@@ -10,7 +10,7 @@ import 'package:dart2wasm/dispatch_table.dart';
 import 'package:dart2wasm/functions.dart';
 import 'package:dart2wasm/globals.dart';
 import 'package:dart2wasm/param_info.dart';
-import 'package:dart2wasm/tearoff_reference.dart';
+import 'package:dart2wasm/reference_extensions.dart';
 
 import 'package:kernel/ast.dart';
 import 'package:kernel/class_hierarchy.dart'
@@ -325,22 +325,10 @@ class Translator {
             : coreTypes.objectClass;
   }
 
-  Class upperBound(Class a, Class b) {
-    if (hierarchy.isSubclassOf(b, a)) return a;
-    if (hierarchy.isSubclassOf(a, b)) return b;
-    Set<Class> supers(Class cls) =>
-        {for (Class? c = cls.superclass; c != null; c = c.superclass) c};
-    Set<Class> aSupers = supers(a);
-    assert(!aSupers.contains(b));
-    Class c;
-    for (c = b.superclass!; !aSupers.contains(c); c = c.superclass!);
-    return c;
-  }
-
   w.ValueType translateType(DartType type) {
     w.StorageType wasmType = translateStorageType(type);
     if (wasmType is w.ValueType) return wasmType;
-    throw "Non-value types are only allowed in arrays and fields";
+    throw "Packed types are only allowed in arrays and fields";
   }
 
   bool isWasmType(Class cls) {
@@ -805,27 +793,5 @@ class NodeCounter extends Visitor<void> with VisitorVoidMixin {
   void defaultNode(Node node) {
     count++;
     node.visitChildren(this);
-  }
-}
-
-extension GetterSetterReference on Reference {
-  bool get isImplicitGetter {
-    Member member = asMember;
-    return member is Field && member.getterReference == this;
-  }
-
-  bool get isImplicitSetter {
-    Member member = asMember;
-    return member is Field && member.setterReference == this;
-  }
-
-  bool get isGetter {
-    Member member = asMember;
-    return member is Procedure && member.isGetter || isImplicitGetter;
-  }
-
-  bool get isSetter {
-    Member member = asMember;
-    return member is Procedure && member.isSetter || isImplicitSetter;
   }
 }

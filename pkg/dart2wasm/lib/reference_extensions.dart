@@ -4,6 +4,30 @@
 
 import 'package:kernel/ast.dart';
 
+// Extend references with flags to more easily identify getters and setters.
+
+extension GetterSetterReference on Reference {
+  bool get isImplicitGetter {
+    Member member = asMember;
+    return member is Field && member.getterReference == this;
+  }
+
+  bool get isImplicitSetter {
+    Member member = asMember;
+    return member is Field && member.setterReference == this;
+  }
+
+  bool get isGetter {
+    Member member = asMember;
+    return member is Procedure && member.isGetter || isImplicitGetter;
+  }
+
+  bool get isSetter {
+    Member member = asMember;
+    return member is Procedure && member.isSetter || isImplicitSetter;
+  }
+}
+
 // Extend procedures with a tearOffReference that refers to the tear-off
 // implementation for that procedure. This enables a Reference to refer to any
 // implementation relating to a member, including its tear-off, which it can't
