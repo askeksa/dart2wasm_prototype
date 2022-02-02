@@ -1,4 +1,4 @@
-// Copyright (c) 2012, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2022, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -10,11 +10,8 @@ class _BoxedInt implements int {
   @pragma("wasm:entry-point")
   int value = 0;
 
-  @pragma("vm:external-name", "int+")
   external num operator +(num other);
-  @pragma("vm:external-name", "int-")
   external num operator -(num other);
-  @pragma("vm:external-name", "int*")
   external num operator *(num other);
 
   double operator /(num other) {
@@ -45,30 +42,19 @@ class _BoxedInt implements int {
       ? this - (this ~/ other) * other
       : _BoxedDouble._remainder(toDouble(), unsafeCast<double>(other));
 
-  @pragma("vm:external-name", "int_unary-")
   external int operator -();
 
-  @pragma("vm:external-name", "int&")
   external int operator &(int other);
-  @pragma("vm:external-name", "int|")
   external int operator |(int other);
-  @pragma("vm:external-name", "int^")
   external int operator ^(int other);
 
-  @pragma("vm:external-name", "int>>")
   external int operator >>(int other);
-  @pragma("vm:external-name", "int>>>")
   external int operator >>>(int other);
-  @pragma("vm:external-name", "int<<")
   external int operator <<(int other);
 
-  @pragma("vm:external-name", "int<")
   external bool operator <(num other);
-  @pragma("vm:external-name", "int>")
   external bool operator >(num other);
-  @pragma("vm:external-name", "int>=")
   external bool operator >=(num other);
-  @pragma("vm:external-name", "int<=")
   external bool operator <=(num other);
 
   bool operator ==(Object other) {
@@ -205,7 +191,6 @@ class _BoxedInt implements int {
     return this;
   }
 
-  @pragma("vm:external-name", "int_toDouble")
   external double toDouble();
 
   String toStringAsFixed(int fractionDigits) {
@@ -428,9 +413,8 @@ class _BoxedInt implements int {
 
   int get hashCode => this;
   int get _identityHashCode => this;
-  @pragma("vm:external-name", "int~")
+
   external int operator ~();
-  @pragma("vm:external-name", "int_bitlength")
   external int get bitLength;
 
   /**

@@ -1,4 +1,4 @@
-// Copyright (c) 2012, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2022, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -60,7 +60,6 @@ class _BoxedDouble implements double {
     return a - (a / b).truncateToDouble() * b;
   }
 
-  @pragma("vm:external-name", "Double_flipSignBit")
   external double operator -();
 
   bool operator ==(Object other) {
@@ -115,13 +114,9 @@ class _BoxedDouble implements double {
   int ceil() => ceilToDouble().toInt();
   int truncate() => truncateToDouble().toInt();
 
-  @pragma("vm:external-name", "Double_round")
   external double roundToDouble();
-  @pragma("vm:external-name", "Double_floor")
   external double floorToDouble();
-  @pragma("vm:external-name", "Double_ceil")
   external double ceilToDouble();
-  @pragma("vm:external-name", "Double_truncate")
   external double truncateToDouble();
 
   num clamp(num lowerLimit, num upperLimit) {
@@ -134,7 +129,6 @@ class _BoxedDouble implements double {
     return this;
   }
 
-  @pragma("vm:external-name", "Double_toInt")
   external int toInt();
 
   double toDouble() {
@@ -148,7 +142,6 @@ class _BoxedDouble implements double {
   static final List _cache = new List.filled(CACHE_LENGTH, null);
   static int _cacheEvictIndex = 0;
 
-  @pragma("vm:external-name", "Double_toString")
   external String _toString();
 
   String toString() {
@@ -195,7 +188,6 @@ class _BoxedDouble implements double {
     return _toStringAsFixed(fractionDigits);
   }
 
-  @pragma("vm:external-name", "Double_toStringAsFixed")
   external String _toStringAsFixed(int fractionDigits);
 
   String toStringAsExponential([int? fractionDigits]) {
@@ -223,7 +215,6 @@ class _BoxedDouble implements double {
     return _toStringAsExponential(fractionDigits);
   }
 
-  @pragma("vm:external-name", "Double_toStringAsExponential")
   external String _toStringAsExponential(int fractionDigits);
 
   String toStringAsPrecision(int precision) {
@@ -248,7 +239,6 @@ class _BoxedDouble implements double {
     return _toStringAsPrecision(precision);
   }
 
-  @pragma("vm:external-name", "Double_toStringAsPrecision")
   external String _toStringAsPrecision(int fractionDigits);
 
   // Order is: NaN > Infinity > ... > 0.0 > -0.0 > ... > -Infinity.

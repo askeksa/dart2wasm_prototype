@@ -4,6 +4,8 @@
 
 import "dart:_internal" show patch;
 
+// Stub Expando implementation to make the Expando class compile.
+
 @patch
 class Expando<T> {
   @patch

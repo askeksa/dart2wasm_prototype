@@ -1,20 +1,16 @@
-// Copyright (c) 2012, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2022, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 // part of "core_patch.dart";
 
 // Access hidden identity hash code field
-@pragma("vm:external-name", "Object_getHash")
 external int _getHash(Object obj);
-@pragma("vm:external-name", "Object_setHash")
 external void _setHash(Object obj, int hash);
 
 @patch
 class Object {
-  // The VM has its own implementation of equals.
   @patch
-  @pragma("vm:external-name", "Object_equals")
   external bool operator ==(Object other);
 
   // Random number generator used to generate identity hash codes.
@@ -49,6 +45,5 @@ class Object {
   }
 
   @patch
-  @pragma("vm:external-name", "Object_runtimeType")
   external Type get runtimeType;
 }

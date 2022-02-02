@@ -5,11 +5,9 @@
 import "dart:typed_data" show Uint8List;
 
 /// The returned string is a [_OneByteString] with uninitialized content.
-@pragma("vm:external-name", "allocateOneByteString")
 external String allocateOneByteString(int length);
 
 /// The [string] must be a [_OneByteString]. The [index] must be valid.
-@pragma("vm:external-name", "writeIntoOneByteString")
 external void writeIntoOneByteString(String string, int index, int codePoint);
 
 /// It is assumed that [from] is a native [Uint8List] class and [to] is a
@@ -23,14 +21,11 @@ void copyRangeFromUint8ListToOneByteString(
 }
 
 /// The returned string is a [_TwoByteString] with uninitialized content.
-@pragma("vm:external-name", "allocateTwoByteString")
 external String allocateTwoByteString(int length);
 
 /// The [string] must be a [_TwoByteString]. The [index] must be valid.
-@pragma("vm:external-name", "writeIntoTwoByteString")
 external void writeIntoTwoByteString(String string, int index, int codePoint);
 
-@pragma("vm:external-name", "ensureTwoByteString")
 external String ensureTwoByteString(String string);
 
 const bool has63BitSmis = false;
@@ -57,7 +52,6 @@ class Lists {
 // type of a value.
 //
 // Important: this is unsafe and must be used with care.
-@pragma("vm:external-name", "Internal_unsafeCast")
 external T unsafeCast<T>(Object? v);
 
 // Thomas Wang 64-bit mix.
@@ -73,13 +67,9 @@ int mix64(int n) {
   return n;
 }
 
-@pragma("vm:external-name", "floatToIntBits")
 external int floatToIntBits(double value);
-@pragma("vm:external-name", "intBitsToFloat")
 external double intBitsToFloat(int value);
-@pragma("vm:external-name", "doubleToIntBits")
 external int doubleToIntBits(double value);
-@pragma("vm:external-name", "intBitsToDouble")
 external double intBitsToDouble(int value);
 
 // Exported call stubs to enable JS to call Dart closures. Since all closure

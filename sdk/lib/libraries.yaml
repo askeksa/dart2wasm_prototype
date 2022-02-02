@@ -203,7 +203,6 @@ wasm:
       uri: developer/developer.dart
       patches:
       - _internal/wasm/lib/developer.dart
-      - _internal/wasm/lib/timeline.dart
     ffi:
       uri: ffi/ffi.dart
     _http:

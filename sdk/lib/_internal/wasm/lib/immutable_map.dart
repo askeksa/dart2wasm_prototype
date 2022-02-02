@@ -1,4 +1,4 @@
-// Copyright (c) 2012, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2022, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -16,6 +16,7 @@ class _ImmutableMap<K, V> implements Map<K, V> {
       : _kvPairs = keyValuePairs;
 
   Map<K2, V2> cast<K2, V2>() => Map.castFrom<K, V, K2, V2>(this);
+
   V? operator [](Object? key) {
     // To preserve the key-value order of the map literal, the keys are
     // not sorted. Need to do linear search or implement an additional

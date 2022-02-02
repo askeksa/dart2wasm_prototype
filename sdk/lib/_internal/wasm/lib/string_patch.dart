@@ -1,8 +1,12 @@
-// Copyright (c) 2012, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2022, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 // part of "core_patch.dart";
+
+// Much of this patch file is similar to the VM `string_patch.dart`. It may make
+// sense to share some of the code when the patching mechanism supports patching
+// the same class in multiple patch files.
 
 const int _maxAscii = 0x7f;
 const int _maxLatin1 = 0xff;
@@ -42,7 +46,6 @@ class String {
   }
 
   @patch
-  @pragma("vm:external-name", "String_fromEnvironment")
   external const factory String.fromEnvironment(String name,
       {String defaultValue = ""});
 
@@ -218,7 +221,7 @@ abstract class _StringBase implements String {
   }
 
   // Inlining is disabled as a workaround to http://dartbug.com/37800.
-  @pragma("vm:never-inline")
+
   static String _createOneByteString(List<int> charCodes, int start, int len) {
     // It's always faster to do this in Dart than to call into the runtime.
     var s = _OneByteString._allocate(len);
@@ -236,7 +239,6 @@ abstract class _StringBase implements String {
     return s;
   }
 
-  @pragma("vm:external-name", "StringBase_createFromCodePoints")
   external static String _createFromCodePoints(
       List<int> codePoints, int start, int end);
 
@@ -244,14 +246,8 @@ abstract class _StringBase implements String {
 
   int codeUnitAt(int index); // Implemented in the subclasses.
 
-  @pragma("vm:recognized", "graph-intrinsic")
-  @pragma("vm:exact-result-type", "dart:core#_Smi")
-  @pragma("vm:prefer-inline")
-  @pragma("vm:external-name", "String_getLength")
   int get length; // Implemented in the subclasses.
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  @pragma("vm:exact-result-type", bool)
   bool get isEmpty {
     return this.length == 0;
   }
@@ -264,7 +260,6 @@ abstract class _StringBase implements String {
     return this;
   }
 
-  @pragma("vm:exact-result-type", bool)
   bool operator ==(Object other) {
     if (identical(this, other)) {
       return true;
@@ -300,8 +295,6 @@ abstract class _StringBase implements String {
     return 0;
   }
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  @pragma("vm:exact-result-type", bool)
   bool _substringMatches(int start, String other) {
     if (other.isEmpty) return true;
     final len = other.length;
@@ -401,7 +394,6 @@ abstract class _StringBase implements String {
     return _substringUncheckedNative(startIndex, endIndex);
   }
 
-  @pragma("vm:external-name", "StringBase_substringUnchecked")
   external String _substringUncheckedNative(int startIndex, int endIndex);
 
   // Checks for one-byte whitespaces only.
@@ -695,7 +687,7 @@ abstract class _StringBase implements String {
    * If they are, then we have to check the base string slices to know
    * whether the result must be a one-byte string.
    */
-  @pragma("vm:external-name", "StringBase_joinReplaceAllResult")
+
   external static String _joinReplaceAllResult(
       String base, List matches, int length, bool replacementStringsAreOneByte);
 
@@ -797,7 +789,7 @@ abstract class _StringBase implements String {
   }
 
   // Convert single object to string.
-  @pragma("vm:entry-point", "call")
+
   static String _interpolateSingle(Object? o) {
     if (o is String) return o;
     final s = o.toString();
@@ -906,10 +898,8 @@ abstract class _StringBase implements String {
 
   Runes get runes => new Runes(this);
 
-  @pragma("vm:external-name", "String_toUpperCase")
   external String toUpperCase();
 
-  @pragma("vm:external-name", "String_toLowerCase")
   external String toLowerCase();
 
   // Concatenate ['start', 'end'[ elements of 'strings'.
@@ -982,14 +972,10 @@ class _OneByteString extends _StringBase {
     return _StringBase._isOneByteWhitespace(codeUnit);
   }
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  @pragma("vm:exact-result-type", bool)
   bool operator ==(Object other) {
     return super == other;
   }
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  @pragma("vm:exact-result-type", _OneByteString)
   String _substringUncheckedNative(int startIndex, int endIndex) {
     int length = endIndex - startIndex;
     var result = _OneByteString._withLength(length);
@@ -1252,19 +1238,17 @@ class _OneByteString extends _StringBase {
 
   // Allocates a string of given length, expecting its content to be
   // set using _setAt.
-  @pragma("vm:exact-result-type", _OneByteString)
-  @pragma("vm:prefer-inline")
+
   static _OneByteString _allocate(int length) {
     return unsafeCast<_OneByteString>(allocateOneByteString(length));
   }
 
-  @pragma("vm:external-name", "OneByteString_allocateFromOneByteList")
   external static _OneByteString _allocateFromOneByteList(
       List<int> list, int start, int end);
 
   // This is internal helper method. Code point value must be a valid
   // Latin1 value (0..0xFF), index must be valid.
-  @pragma("vm:prefer-inline")
+
   void _setAt(int index, int codePoint) {
     writeIntoOneByteString(this, index, codePoint);
   }
@@ -1309,8 +1293,7 @@ class _TwoByteString extends _StringBase {
 
   // Allocates a string of given length, expecting its content to be
   // set using _setAt.
-  @pragma("vm:exact-result-type", _TwoByteString)
-  @pragma("vm:prefer-inline")
+
   static _TwoByteString _allocate(int length) {
     return unsafeCast<_TwoByteString>(allocateTwoByteString(length));
   }
@@ -1327,7 +1310,7 @@ class _TwoByteString extends _StringBase {
 
   // This is internal helper method. Code point value must be a valid
   // UTF-16 value (0..0xFFFF), index must be valid.
-  @pragma("vm:prefer-inline")
+
   void _setAt(int index, int codePoint) {
     writeIntoTwoByteString(this, index, codePoint);
   }
@@ -1340,8 +1323,6 @@ class _TwoByteString extends _StringBase {
 
   int get length => _array.length;
 
-  @pragma("vm:recognized", "asm-intrinsic")
-  @pragma("vm:exact-result-type", bool)
   bool operator ==(Object other) {
     return super == other;
   }

@@ -5,7 +5,6 @@
 // part of "core_patch.dart";
 
 @patch
-@pragma("vm:external-name", "Identical_comparison")
 external bool identical(Object? a, Object? b);
 
 @patch

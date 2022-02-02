@@ -1,11 +1,6 @@
-// Copyright (c) 2012, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2022, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
-/// Note: the VM concatenates all patch files into a single patch file. This
-/// file is the first patch in "dart:math" which contains all the imports used
-/// by patches of that library. We plan to change this when we have a shared
-/// front end and simply use parts.
 
 import "dart:_internal" show mix64, patch;
 
@@ -14,8 +9,6 @@ import "dart:typed_data" show Uint32List;
 /// There are no parts of this patch library.
 
 @patch
-@pragma("vm:recognized", "other")
-@pragma("vm:prefer-inline")
 T min<T extends num>(T a, T b) {
   if (a > b) return b;
   if (a < b) return a;
@@ -39,8 +32,6 @@ T min<T extends num>(T a, T b) {
 }
 
 @patch
-@pragma("vm:recognized", "other")
-@pragma("vm:prefer-inline")
 T max<T extends num>(T a, T b) {
   if (a > b) return a;
   if (a < b) return b;
@@ -68,7 +59,6 @@ T max<T extends num>(T a, T b) {
 // If [x] is an [int] and [exponent] is a non-negative [int], the result is
 // an [int], otherwise the result is a [double].
 @patch
-@pragma("vm:prefer-inline")
 num pow(num x, num exponent) {
   if ((x is int) && (exponent is int) && (exponent >= 0)) {
     return _intPow(x, exponent);
@@ -79,7 +69,6 @@ num pow(num x, num exponent) {
 @pragma("wasm:import", "Math.pow")
 external double _doublePow(double base, double exponent);
 
-@pragma("vm:recognized", "other")
 int _intPow(int base, int exponent) {
   // Exponentiation by squaring.
   int result = 1;
@@ -241,7 +230,6 @@ class _SecureRandom implements Random {
   }
 
   // Return count bytes of entropy as a positive integer; count <= 8.
-  @pragma("vm:external-name", "SecureRandom_getBytes")
   external static int _getBytes(int count);
 
   int nextInt(int max) {
