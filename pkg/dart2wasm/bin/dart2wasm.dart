@@ -34,9 +34,12 @@ Never usage(String message) {
   print("Usage: dart2wasm [<options>] <infile.dart> <outfile.wasm>");
   print("");
   print("Options:");
+  print("  --dart-sdk=<path>");
+  print("");
   for (String option in boolOptionMap.keys) {
     print("  --[no-]$option");
   }
+  print("");
   for (String option in intOptionMap.keys) {
     print("  --$option <value>");
   }
