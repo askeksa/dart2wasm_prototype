@@ -70,6 +70,8 @@ class Globals {
       }
       return global;
     }
+
+    return null;
   }
 
   void instantiateDummyValue(w.Instructions b, w.ValueType type) {

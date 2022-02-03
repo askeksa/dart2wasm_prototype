@@ -3,7 +3,6 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:dart2wasm/reference_extensions.dart';
-import 'package:dart2wasm/translator.dart';
 
 import 'package:kernel/ast.dart';
 

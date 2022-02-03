@@ -5,7 +5,6 @@
 /// Base class for closure objects.
 @pragma("wasm:entry-point")
 class _Function {
-  // TODO(askesc): Make non-nullable
   @pragma("wasm:entry-point")
   WasmDataRef context;
 

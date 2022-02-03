@@ -158,7 +158,6 @@ abstract class _StringBase implements String {
     int bits = 0;
     for (int i = start; i < end; i++) {
       int code = charCodes[i];
-      if (code is! _Smi) throw new ArgumentError(charCodes);
       bits |= code;
     }
     return bits;
@@ -377,7 +376,6 @@ abstract class _StringBase implements String {
   }
 
   String _substringUnchecked(int startIndex, int endIndex) {
-    assert(endIndex != null);
     assert((startIndex >= 0) && (startIndex <= this.length));
     assert((endIndex >= 0) && (endIndex <= this.length));
     assert(startIndex <= endIndex);
@@ -600,9 +598,6 @@ abstract class _StringBase implements String {
   }
 
   String replaceAll(Pattern pattern, String replacement) {
-    if (pattern == null) throw new ArgumentError.notNull("pattern");
-    if (replacement == null) throw new ArgumentError.notNull("replacement");
-
     int startIndex = 0;
     // String fragments that replace the prefix [this] up to [startIndex].
     List matches = [];
@@ -692,8 +687,6 @@ abstract class _StringBase implements String {
       String base, List matches, int length, bool replacementStringsAreOneByte);
 
   String replaceAllMapped(Pattern pattern, String replace(Match match)) {
-    if (pattern == null) throw new ArgumentError.notNull("pattern");
-    if (replace == null) throw new ArgumentError.notNull("replace");
     List matches = [];
     int length = 0;
     int startIndex = 0;
@@ -720,9 +713,6 @@ abstract class _StringBase implements String {
 
   String replaceFirstMapped(Pattern pattern, String replace(Match match),
       [int startIndex = 0]) {
-    if (pattern == null) throw new ArgumentError.notNull("pattern");
-    if (replace == null) throw new ArgumentError.notNull("replace");
-    if (startIndex == null) throw new ArgumentError.notNull("startIndex");
     RangeError.checkValueInInterval(startIndex, 0, this.length, "startIndex");
 
     var matches = pattern.allMatches(this, startIndex).iterator;
@@ -766,9 +756,6 @@ abstract class _StringBase implements String {
 
   String splitMapJoin(Pattern pattern,
       {String onMatch(Match match)?, String onNonMatch(String nonMatch)?}) {
-    if (pattern == null) {
-      throw new ArgumentError.notNull("pattern");
-    }
     onMatch ??= _matchString;
     onNonMatch ??= _stringIdentity;
     if (pattern is String) {
@@ -786,18 +773,6 @@ abstract class _StringBase implements String {
     }
     buffer.write(onNonMatch(this.substring(startIndex)));
     return buffer.toString();
-  }
-
-  // Convert single object to string.
-
-  static String _interpolateSingle(Object? o) {
-    if (o is String) return o;
-    final s = o.toString();
-    // TODO(40614): Remove once non-nullability is sound.
-    if (s is! String) {
-      throw _interpolationError(o, s);
-    }
-    return s;
   }
 
   /**

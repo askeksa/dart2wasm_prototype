@@ -227,7 +227,8 @@ class DefinedFunction extends BaseFunction
 
   @override
   void serialize(Serializer s) {
-    // Serialize locals internally
+    // Serialize locals internally first in order to compute the total size of
+    // the serialized data.
     int paramCount = type.inputs.length;
     int entries = 0;
     for (int i = paramCount + 1; i <= locals.length; i++) {
@@ -630,6 +631,8 @@ class ElementSection extends Section {
 
   @override
   void serializeContents() {
+    // Group nonempty element entries into contiguous stretches and serialize
+    // each stretch as an element.
     List<_Element> elements = [];
     for (Table table in module.tables) {
       _Element? current = null;

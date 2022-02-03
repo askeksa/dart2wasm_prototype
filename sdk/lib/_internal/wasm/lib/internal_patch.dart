@@ -30,7 +30,6 @@ external String ensureTwoByteString(String string);
 
 const bool has63BitSmis = false;
 
-// Utility class now only used by the VM.
 class Lists {
   static void copy(List src, int srcStart, List dst, int dstStart, int count) {
     if (srcStart < dstStart) {
@@ -48,8 +47,8 @@ class Lists {
 }
 
 // This function can be used to skip implicit or explicit checked down casts in
-// the parts of the core library implementation where we know by construction the
-// type of a value.
+// the parts of the core library implementation where we know by construction
+// the type of a value.
 //
 // Important: this is unsafe and must be used with care.
 external T unsafeCast<T>(Object? v);

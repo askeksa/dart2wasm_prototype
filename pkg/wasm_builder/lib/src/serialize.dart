@@ -28,12 +28,15 @@ abstract class Serializable {
 mixin SerializerMixin implements Serializer {
   static bool traceEnabled = false;
 
-  Uint8List _data = Uint8List(100);
+  // The prefix of `_data` up to `_index` contains the data serialized so far.
+  Uint8List _data = Uint8List(24);
   int _index = 0;
 
+  // Stack traces or other serializers attached to byte positions within this.
   late final SplayTreeMap<int, Object> _traces = SplayTreeMap();
 
   void _ensure(int size) {
+    // Ensure space for at least `size` additional bytes.
     if (_data.length < _index + size) {
       int newLength = _data.length * 2;
       while (newLength < _index + size) newLength *= 2;

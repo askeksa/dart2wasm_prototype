@@ -25,6 +25,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 class TranslatorOptions {
   bool exportAll = false;
   bool inlining = false;
+  int inliningLimit = 3;
   bool lazyConstants = false;
   bool localNullability = false;
   bool nominalTypes = false;
@@ -600,7 +601,8 @@ class Translator {
     Member member = target.asMember;
     if (member is Field) return true;
     Statement? body = member.function!.body;
-    return body != null && NodeCounter().countNodes(body) < 4;
+    return body != null &&
+        NodeCounter().countNodes(body) <= options.inliningLimit;
   }
 
   T? getPragma<T>(Annotatable node, String name, [T? defaultvalue]) {

@@ -136,6 +136,8 @@ class Intrinsifier {
       b.i64_sub();
       return w.NumType.i64;
     }
+
+    return null;
   }
 
   w.ValueType? generateInstanceIntrinsic(InstanceInvocation node) {
@@ -386,6 +388,8 @@ class Intrinsifier {
         return unaryResultMap[name] ?? opType;
       }
     }
+
+    return null;
   }
 
   w.ValueType? generateEqualsIntrinsic(EqualsCall node) {
@@ -412,6 +416,8 @@ class Intrinsifier {
       b.f64_eq();
       return w.NumType.i32;
     }
+
+    return null;
   }
 
   w.ValueType? generateStaticGetterIntrinsic(StaticGet node) {
@@ -427,6 +433,8 @@ class Intrinsifier {
       b.i64_const(classId);
       return w.NumType.i64;
     }
+
+    return null;
   }
 
   w.ValueType? generateStaticIntrinsic(StaticInvocation node) {
@@ -587,6 +595,8 @@ class Intrinsifier {
       translator.array_new_default(b, arrayType);
       return w.RefType.def(arrayType, nullable: false);
     }
+
+    return null;
   }
 
   bool generateMemberIntrinsic(Reference target, w.DefinedFunction function,
