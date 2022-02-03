@@ -1275,42 +1275,29 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitInstanceGet(InstanceGet node, w.ValueType expectedType) {
     Member target = node.interfaceTarget;
     if (node.kind == InstanceAccessKind.Object) {
+      late w.Label doneLabel;
+      w.ValueType resultType = _virtualCall(node, target, (signature) {
+        doneLabel = b.block(const [], signature.outputs);
+        w.Label nullLabel = b.block();
+        wrap(node.receiver, translator.topInfo.nullableType);
+        b.br_on_null(nullLabel);
+      }, (_) {}, getter: true, setter: false);
+      b.br(doneLabel);
+      b.end(); // nullLabel
       switch (target.name.text) {
         case "hashCode":
-          late w.Label hashDone;
-          w.ValueType resultType = _virtualCall(node, target, (signature) {
-            hashDone = b.block(const [], signature.outputs);
-            w.Label nullHash = b.block();
-            wrap(node.receiver, translator.topInfo.nullableType);
-            b.br_on_null(nullHash);
-          }, (_) {}, getter: true, setter: false);
-          b.br(hashDone);
-          b.end(); // nullHash
           b.i64_const(2011);
-          b.end(); // hashDone
-          return resultType;
+          break;
         case "runtimeType":
-          Member? singleTarget = target;
-          if (singleTarget == null ||
-              singleTarget.enclosingClass != translator.coreTypes.objectClass) {
-            throw "Not supported: Virtual runtimeType at ${node.location}";
-          }
-          w.ValueType resultType = translator.objectInfo.nonNullableType;
-          w.Label typeDone = b.block(const [], [resultType]);
-          w.Label nullType = b.block();
-          wrap(node.receiver, translator.topInfo.nullableType);
-          b.br_on_null(nullType);
-          _call(singleTarget.reference);
-          b.br(typeDone);
-          b.end(); // nullType
           wrap(ConstantExpression(TypeLiteralConstant(NullType())), resultType);
-          b.end(); // typeDone
-          return resultType;
+          break;
         default:
-          _unimplemented(node, "Nullable get of ${target.name.text}",
-              [if (expectedType != voidMarker) expectedType]);
-          return expectedType;
+          _unimplemented(
+              node, "Nullable get of ${target.name.text}", [resultType]);
+          break;
       }
+      b.end(); // doneLabel
+      return resultType;
     }
     Member? singleTarget = translator.singleTarget(node);
     if (singleTarget != null) {
