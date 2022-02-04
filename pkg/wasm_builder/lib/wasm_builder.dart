@@ -31,4 +31,4 @@ export 'src/types.dart'
         StorageType,
         StructType,
         ValueType;
-export 'src/instructions.dart' show Instructions, Label;
+export 'src/instructions.dart' show Instructions, Label, ValidationError;
