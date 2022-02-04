@@ -8,6 +8,9 @@ import 'instructions.dart';
 import 'serialize.dart';
 import 'types.dart';
 
+/// A Wasm module.
+///
+/// Serves as a builder for building new modules.
 class Module with SerializerMixin {
   final List<int>? watchPoints;
 
@@ -26,18 +29,35 @@ class Module with SerializerMixin {
   bool anyGlobalsDefined = false;
   bool dataReferencedFromGlobalInitializer = false;
 
+  /// Create a new, initially empty, module.
+  ///
+  /// The [watchPoints] is a list of byte offsets within the final module of
+  /// bytes to watch. When the module is serialized, the stack traces leading to
+  /// the production of all watched bytes are printed. This can be used to debug
+  /// runtime errors happening at specific offsets within the module.
   Module({this.watchPoints}) {
     if (watchPoints != null) {
       SerializerMixin.traceEnabled = true;
     }
   }
 
+  /// All module imports (functions and globals).
   Iterable<Import> get imports =>
       functions.whereType<Import>().followedBy(globals.whereType<Import>());
 
+  /// All functions defined in the module.
   Iterable<DefinedFunction> get definedFunctions =>
       functions.whereType<DefinedFunction>();
 
+  /// Add a new function type to the module.
+  ///
+  /// All function types are canonicalized, such that identical types become
+  /// the same type definition in the module, assuming nominal type identity
+  /// of all inputs and outputs.
+  ///
+  /// Inputs and outputs can't be changed after the function type is created.
+  /// This means that recursive function types (without any non-function types
+  /// on the recursion path) are not supported.
   FunctionType addFunctionType(
       Iterable<ValueType> inputs, Iterable<ValueType> outputs,
       {HeapType? superType}) {
@@ -52,6 +72,10 @@ class Module with SerializerMixin {
     });
   }
 
+  /// Add a new struct type to the module.
+  ///
+  /// Fields can be added later, by adding to the [fields] list. This enables
+  /// struct types to be recursive.
   StructType addStructType(String name,
       {Iterable<FieldType>? fields, HeapType? superType}) {
     final type = StructType(name, fields: fields, superType: superType)
@@ -60,6 +84,10 @@ class Module with SerializerMixin {
     return type;
   }
 
+  /// Add a new array type to the module.
+  ///
+  /// The element type can be specified later. This enables array types to be
+  /// recursive.
   ArrayType addArrayType(String name,
       {FieldType? elementType, HeapType? superType}) {
     final type = ArrayType(name, elementType: elementType, superType: superType)
@@ -68,6 +96,10 @@ class Module with SerializerMixin {
     return type;
   }
 
+  /// Add a new function to the module with the given function type.
+  ///
+  /// The [DefinedFunction.body] must be completed (including the terminating
+  /// `end`) before the module can be serialized.
   DefinedFunction addFunction(FunctionType type) {
     anyFunctionsDefined = true;
     final function = DefinedFunction(this, functions.length, type);
@@ -75,18 +107,28 @@ class Module with SerializerMixin {
     return function;
   }
 
+  /// Add a new table to the module.
   Table addTable(int minSize, [int? maxSize]) {
     final table = Table(tables.length, minSize, maxSize);
     tables.add(table);
     return table;
   }
 
+  /// Add a new memory to the module.
   Memory addMemory(int minSize, [int? maxSize]) {
     final memory = Memory(memories.length, minSize, maxSize);
     memories.add(memory);
     return memory;
   }
 
+  /// Add a new data segment to the module.
+  ///
+  /// Either [memory] and [offset] must be both specified or both omitted. If
+  /// they are specified, the segment becomes an *active* segment, otherwise it
+  /// becomes a *passive* segment.
+  ///
+  /// If [initialContent] is specified, it defines the initial content of the
+  /// segment. The content can be extended later.
   DataSegment addDataSegment(
       [Uint8List? initialContent, Memory? memory, int? offset]) {
     initialContent ??= Uint8List(0);
@@ -99,6 +141,10 @@ class Module with SerializerMixin {
     return data;
   }
 
+  /// Add a global variable to the module.
+  ///
+  /// The [DefinedGlobal.initializer] must be completed (including the
+  /// terminating `end`) before the module can be serialized.
   DefinedGlobal addGlobal(GlobalType type) {
     anyGlobalsDefined = true;
     final global = DefinedGlobal(this, globals.length, type);
@@ -106,6 +152,10 @@ class Module with SerializerMixin {
     return global;
   }
 
+  /// Import a function into the module.
+  ///
+  /// All imported functions must be specified before any functions are declared
+  /// using [Module.addFunction].
   ImportedFunction importFunction(
       String module, String name, FunctionType type) {
     if (anyFunctionsDefined) {
@@ -116,6 +166,10 @@ class Module with SerializerMixin {
     return function;
   }
 
+  /// Import a global variable into the module.
+  ///
+  /// All imported globals must be specified before any globals are declared
+  /// using [Module.addGlobal].
   ImportedGlobal importGlobal(String module, String name, GlobalType type) {
     if (anyGlobalsDefined) {
       throw "All global imports must be specified before any definitions.";
@@ -130,15 +184,22 @@ class Module with SerializerMixin {
     exports.add(export);
   }
 
+  /// Export a function from the module.
+  ///
+  /// All exports must have unique names.
   void exportFunction(String name, BaseFunction function) {
     function.exportedName = name;
     _addExport(FunctionExport(name, function));
   }
 
+  /// Export a global variable from the module.
+  ///
+  /// All exports must have unique names.
   void exportGlobal(String name, Global global) {
     exports.add(GlobalExport(name, global));
   }
 
+  /// Serialize the module to its binary representation.
   Uint8List encode() {
     // Wasm module preamble: magic number, version 1.
     writeBytes(const [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]);
@@ -197,6 +258,7 @@ class _FunctionTypeKey {
   }
 }
 
+/// An (imported or defined) Wasm function.
 abstract class BaseFunction {
   final int index;
   final FunctionType type;
@@ -205,10 +267,14 @@ abstract class BaseFunction {
   BaseFunction(this.index, this.type);
 }
 
+/// A function defined in the module.
 class DefinedFunction extends BaseFunction
     with SerializerMixin
     implements Serializable {
+  /// All local variables defined in the function, including its inputs.
   final List<Local> locals = [];
+
+  /// The body of the function.
   late final Instructions body;
 
   DefinedFunction(Module module, int index, FunctionType type)
@@ -219,6 +285,7 @@ class DefinedFunction extends BaseFunction
     body = Instructions(module, type.outputs, locals: locals);
   }
 
+  /// Add a local variable to the function.
   Local addLocal(ValueType type) {
     Local local = Local(locals.length, type);
     locals.add(local);
@@ -255,6 +322,7 @@ class DefinedFunction extends BaseFunction
   String toString() => exportedName ?? "#$index";
 }
 
+/// A local variable defined in a function.
 class Local {
   final int index;
   final ValueType type;
@@ -265,6 +333,7 @@ class Local {
   String toString() => "$index";
 }
 
+/// A table in a module.
 class Table implements Serializable {
   final int index;
   final int minSize;
@@ -292,6 +361,7 @@ class Table implements Serializable {
   }
 }
 
+/// A memory in a module.
 class Memory implements Serializable {
   final int index;
   final int minSize;
@@ -312,6 +382,7 @@ class Memory implements Serializable {
   }
 }
 
+/// A data segment in a module.
 class DataSegment implements Serializable {
   final int index;
   final BytesBuilder content;
@@ -326,6 +397,7 @@ class DataSegment implements Serializable {
 
   int get length => content.length;
 
+  /// Append content to the data segment.
   void append(Uint8List data) {
     content.add(data);
     assert(isPassive ||
@@ -354,6 +426,7 @@ class DataSegment implements Serializable {
   }
 }
 
+/// An (imported or defined) global variable in a module.
 abstract class Global {
   final int index;
   final GlobalType type;
@@ -364,6 +437,7 @@ abstract class Global {
   String toString() => "$index";
 }
 
+/// A global variable defined in the module.
 class DefinedGlobal extends Global implements Serializable {
   final Instructions initializer;
 
@@ -380,14 +454,16 @@ class DefinedGlobal extends Global implements Serializable {
   }
 }
 
+/// Any import (function or global).
 abstract class Import implements Serializable {
   String get module;
   String get name;
 }
 
+/// An imported function.
 class ImportedFunction extends BaseFunction implements Import {
-  String module;
-  String name;
+  final String module;
+  final String name;
 
   ImportedFunction(this.module, this.name, int index, FunctionType type)
       : super(index, type);
@@ -404,6 +480,7 @@ class ImportedFunction extends BaseFunction implements Import {
   String toString() => "$module.$name";
 }
 
+/// An imported global variable.
 class ImportedGlobal extends Global implements Import {
   final String module;
   final String name;
