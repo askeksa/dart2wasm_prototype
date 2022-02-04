@@ -565,7 +565,12 @@ class Translator {
         if (!(from as w.RefType).heapType.isSubtypeOf(w.HeapType.data)) {
           b.ref_as_data();
         }
-        ref_cast(b, info ?? parameterCountForFunctionStruct(heapType));
+        ref_cast(
+            b,
+            info ??
+                (heapType.isSubtypeOf(classInfo[functionClass]!.struct)
+                    ? parameterCountForFunctionStruct(heapType)
+                    : heapType));
       }
     }
   }
