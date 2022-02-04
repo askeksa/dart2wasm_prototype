@@ -4,16 +4,26 @@
 
 import 'serialize.dart';
 
+// Representations of all Wasm types.
+
+/// A *storage type*.
 abstract class StorageType implements Serializable {
+  /// Is this type a subtype of the [other] type, i.e. can this type be used
+  /// as input where [other] is expected.
   bool isSubtypeOf(StorageType other);
 
+  /// What is the *unpacked* form of this storage type, i.e. the *value type*
+  /// to use when reading/writing this storage type from/to memory.
   ValueType get unpacked;
 
+  /// Is this a primitive (i.e. not reference) type?
   bool get isPrimitive;
 
+  /// For primitive types: what is the size in bytes of a value of this type?
   int get byteSize;
 }
 
+/// A *value type*.
 abstract class ValueType implements StorageType {
   const ValueType();
 
@@ -26,24 +36,38 @@ abstract class ValueType implements StorageType {
   @override
   int get byteSize => throw "Size of non-primitive type $runtimeType";
 
+  /// Is this type nullable? Primitive types are never nullable.
   bool get nullable => false;
 
+  /// If this exists in both a nullable and non-nullable version, return the
+  /// version with the given nullability.
   ValueType withNullability(bool nullable) => this;
 
+  /// Is this type defaultable? Primitive types are always defaultable.
   bool get defaultable => true;
 }
 
 enum NumTypeKind { i32, i64, f32, f64, v128 }
 
+/// A *number type* or *vector type*.
 class NumType extends ValueType {
   final NumTypeKind kind;
 
   const NumType._(this.kind);
 
+  /// The `i32` type.
   static const i32 = NumType._(NumTypeKind.i32);
+
+  /// The `i64` type.
   static const i64 = NumType._(NumTypeKind.i64);
+
+  /// The `f32` type.
   static const f32 = NumType._(NumTypeKind.f32);
+
+  /// The `f64` type.
   static const f64 = NumType._(NumTypeKind.f64);
+
+  /// The `v128` type.
   static const v128 = NumType._(NumTypeKind.v128);
 
   @override
@@ -104,6 +128,7 @@ class NumType extends ValueType {
   }
 }
 
+/// An RTT (runtime type) type.
 class Rtt extends ValueType {
   final DefType defType;
   final int? depth;
@@ -141,8 +166,12 @@ class Rtt extends ValueType {
   int get hashCode => defType.hashCode * (3 + (depth ?? -3) * 2);
 }
 
+/// A *reference type*.
 class RefType extends ValueType {
+  /// The *heap type* of this reference type.
   final HeapType heapType;
+
+  /// The nullability of this reference type.
   final bool nullable;
 
   RefType(this.heapType, {bool? nullable})
@@ -152,18 +181,31 @@ class RefType extends ValueType {
 
   const RefType._(this.heapType, this.nullable);
 
+  /// A (possibly nullable) reference to the `any` heap type.
   const RefType.any({bool nullable = AnyHeapType.defaultNullability})
       : this._(HeapType.any, nullable);
+
+  /// A (possibly nullable) reference to the `eq` heap type.
   const RefType.eq({bool nullable = EqHeapType.defaultNullability})
       : this._(HeapType.eq, nullable);
+
+  /// A (possibly nullable) reference to the `func` heap type.
   const RefType.func({bool nullable = FuncHeapType.defaultNullability})
       : this._(HeapType.func, nullable);
+
+  /// A (possibly nullable) reference to the `data` heap type.
   const RefType.data({bool nullable = DataHeapType.defaultNullability})
       : this._(HeapType.data, nullable);
+
+  /// A (possibly nullable) reference to the `i31` heap type.
   const RefType.i31({bool nullable = I31HeapType.defaultNullability})
       : this._(HeapType.i31, nullable);
+
+  /// A (possibly nullable) reference to the `extern` heap type.
   const RefType.extern({bool nullable = ExternHeapType.defaultNullability})
       : this._(HeapType.extern, nullable);
+
+  /// A (possibly nullable) reference to a custom heap type.
   RefType.def(DefType defType, {required bool nullable})
       : this(defType, nullable: nullable);
 
@@ -205,23 +247,42 @@ class RefType extends ValueType {
   int get hashCode => heapType.hashCode * (nullable ? -1 : 1);
 }
 
+/// A *heap type*.
 abstract class HeapType implements Serializable {
   const HeapType();
 
+  /// The `any` heap type.
   static const any = AnyHeapType._();
+
+  /// The `eq` heap type.
   static const eq = EqHeapType._();
+
+  /// The `func` heap type.
   static const func = FuncHeapType._();
+
+  /// The `data` heap type.
   static const data = DataHeapType._();
+
+  /// The `i31` heap type.
   static const i31 = I31HeapType._();
+
+  /// The `extern` heap type.
   static const extern = ExternHeapType._();
 
+  /// Is this heap type nullable by default, i.e. when written with the -`ref`
+  /// shorthand? A `null` value here means the heap type has no default
+  /// nullability, so the nullability of a reference has to be specified
+  /// explicitly.
   bool? get nullableByDefault;
 
+  /// Is this heap type a declared subtype of the other heap type?
   bool isSubtypeOf(HeapType other);
 
+  /// Is this heap type a structural subtype of the other heap type?
   bool isStructuralSubtypeOf(HeapType other) => isSubtypeOf(other);
 }
 
+/// The `any` heap type.
 class AnyHeapType extends HeapType {
   const AnyHeapType._();
 
@@ -240,6 +301,7 @@ class AnyHeapType extends HeapType {
   String toString() => "any";
 }
 
+/// The `eq` heap type.
 class EqHeapType extends HeapType {
   const EqHeapType._();
 
@@ -259,6 +321,7 @@ class EqHeapType extends HeapType {
   String toString() => "eq";
 }
 
+/// The `func` heap type.
 class FuncHeapType extends HeapType {
   const FuncHeapType._();
 
@@ -278,6 +341,7 @@ class FuncHeapType extends HeapType {
   String toString() => "func";
 }
 
+/// The `data` heap type.
 class DataHeapType extends HeapType {
   const DataHeapType._();
 
@@ -297,6 +361,7 @@ class DataHeapType extends HeapType {
   String toString() => "data";
 }
 
+/// The `i31` heap type.
 class I31HeapType extends HeapType {
   const I31HeapType._();
 
@@ -316,6 +381,7 @@ class I31HeapType extends HeapType {
   String toString() => "i31";
 }
 
+/// The `extern` heap type.
 class ExternHeapType extends HeapType {
   const ExternHeapType._();
 
@@ -335,9 +401,14 @@ class ExternHeapType extends HeapType {
   String toString() => "extern";
 }
 
+/// A custom heap type.
 abstract class DefType extends HeapType {
   int? _index;
+
+  /// For nominal types: the declared supertype of this heap type.
   final HeapType? superType;
+
+  /// The length of the supertype chain of this heap type.
   final int depth;
 
   DefType({this.superType})
@@ -366,6 +437,7 @@ abstract class DefType extends HeapType {
   void serializeDefinition(Serializer s);
 }
 
+/// A custom function type.
 class FunctionType extends DefType {
   final List<ValueType> inputs;
   final List<ValueType> outputs;
@@ -405,6 +477,7 @@ class FunctionType extends DefType {
   String toString() => "(${inputs.join(", ")}) -> (${outputs.join(", ")})";
 }
 
+/// A subtype of the `data` heap type, i.e. `struct` or `array`.
 abstract class DataType extends DefType {
   final String name;
 
@@ -414,6 +487,7 @@ abstract class DataType extends DefType {
   String toString() => name;
 }
 
+/// A custom `struct` type.
 class StructType extends DataType {
   final List<FieldType> fields = [];
 
@@ -448,6 +522,7 @@ class StructType extends DataType {
   }
 }
 
+/// A custom `array` type.
 class ArrayType extends DataType {
   late final FieldType elementType;
 
@@ -494,14 +569,23 @@ class _WithMutability<T extends StorageType> implements Serializable {
   String toString() => "${mutable ? "var " : "const "}$type";
 }
 
+/// A type for a global.
+///
+/// It consists of a type and a mutability.
 class GlobalType extends _WithMutability<ValueType> {
   GlobalType(ValueType type, {bool mutable = true}) : super(type, mutable);
 }
 
+/// A type for a struct field or an array element.
+///
+/// It consists of a type and a mutability.
 class FieldType extends _WithMutability<StorageType> {
   FieldType(StorageType type, {bool mutable = true}) : super(type, mutable);
 
+  /// The `i8` storage type as a field type.
   FieldType.i8({bool mutable: true}) : this(PackedType.i8, mutable: mutable);
+
+  /// The `i16` storage type as a field type.
   FieldType.i16({bool mutable: true}) : this(PackedType.i16, mutable: mutable);
 
   bool isSubtypeOf(FieldType other) {
@@ -518,12 +602,16 @@ class FieldType extends _WithMutability<StorageType> {
 
 enum PackedTypeKind { i8, i16 }
 
+/// A *packed type*, i.e. a storage type that only exists in memory.
 class PackedType implements StorageType {
   final PackedTypeKind kind;
 
   const PackedType._(this.kind);
 
+  /// The `i8` storage type.
   static const i8 = PackedType._(PackedTypeKind.i8);
+
+  /// The `i16` storage type.
   static const i16 = PackedType._(PackedTypeKind.i16);
 
   @override
