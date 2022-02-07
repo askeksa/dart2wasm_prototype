@@ -8,7 +8,33 @@
 // $> d8 --experimental-wasm-gc --wasm-gc-js-interop run_wasm.js -- <file_name>.wasm
 
 function stringFromDartString(string) {
-    return String.fromCharCode(...Array.from(string.$field2));
+    var length = inst.exports.$stringLength(string);
+    var array = new Array(length);
+    for (var i = 0; i < length; i++) {
+        array[i] = inst.exports.$stringRead(string, i);
+    }
+    return String.fromCharCode(...array);
+}
+
+function stringToDartString(string) {
+    var length = string.length;
+    var range = 0;
+    for (var i = 0; i < length; i++) {
+        range |= string.codePointAt(i);
+    }
+    if (range < 256) {
+        var dartString = inst.exports.$stringAllocate1(length);
+        for (var i = 0; i < length; i++) {
+            inst.exports.$stringWrite1(dartString, i, string.codePointAt(i));
+        }
+        return dartString;
+    } else {
+        var dartString = inst.exports.$stringAllocate2(length);
+        for (var i = 0; i < length; i++) {
+            inst.exports.$stringWrite2(dartString, i, string.codePointAt(i));
+        }
+        return dartString;
+    }
 }
 
 // Imports for printing and event loop

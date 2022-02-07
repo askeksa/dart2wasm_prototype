@@ -5,9 +5,5 @@
 // part of "internal_patch.dart";
 
 @patch
-void printToConsole(String line) {
-  printToConsoleJS(ensureTwoByteString(line));
-}
-
 @pragma("wasm:import", "dart2wasm.printToConsole")
-external void printToConsoleJS(String line);
+external void printToConsole(String line);
