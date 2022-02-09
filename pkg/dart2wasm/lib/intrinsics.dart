@@ -10,6 +10,10 @@ import 'package:kernel/ast.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+/// Specialized code generation for external members.
+///
+/// The code is generated either inlined at the call site, or as the body of the
+/// member in [generateMemberIntrinsic].
 class Intrinsifier {
   final CodeGenerator codeGen;
   static const w.ValueType boolType = w.NumType.i32;
@@ -111,6 +115,8 @@ class Intrinsifier {
   w.ValueType? generateInstanceGetterIntrinsic(InstanceGet node) {
     DartType receiverType = dartTypeOf(node.receiver);
     String name = node.name.text;
+
+    // _WasmArray.length
     if (node.interfaceTarget.enclosingClass == translator.wasmArrayBaseClass) {
       assert(name == 'length');
       DartType elementType =
@@ -122,6 +128,8 @@ class Intrinsifier {
       b.i64_extend_i32_u();
       return w.NumType.i64;
     }
+
+    // int.bitlength
     if (node.interfaceTarget.enclosingClass == translator.coreTypes.intClass &&
         name == 'bitLength') {
       w.Local temp = codeGen.function.addLocal(w.NumType.i64);
@@ -146,6 +154,7 @@ class Intrinsifier {
     String name = node.name.text;
     Procedure target = node.interfaceTarget;
 
+    // _TypedListBase._setRange
     if (target.enclosingClass == translator.typedListBaseClass &&
         name == "_setRange") {
       // Always fall back to alternative implementation.
@@ -153,6 +162,7 @@ class Intrinsifier {
       return w.NumType.i32;
     }
 
+    // _TypedList._(get|set)(Int|Uint|Float)(8|16|32|64)
     if (node.interfaceTarget.enclosingClass == translator.typedListClass) {
       Match? match = RegExp("^_(get|set)(Int|Uint|Float)(8|16|32|64)\$")
           .matchAsPrefix(name);
@@ -277,6 +287,9 @@ class Intrinsifier {
       }
     }
 
+    // WasmIntArray.(readSigned|readUnsigned|write)
+    // WasmFloatArray.(read|write)
+    // WasmObjectArray.(read|write)
     if (node.interfaceTarget.enclosingClass?.superclass ==
         translator.wasmArrayBaseClass) {
       DartType elementType =
@@ -342,6 +355,7 @@ class Intrinsifier {
       }
     }
 
+    // List.[] on list constants
     if (receiver is ConstantExpression &&
         receiver.constant is ListConstant &&
         name == '[]') {
@@ -422,6 +436,8 @@ class Intrinsifier {
 
   w.ValueType? generateStaticGetterIntrinsic(StaticGet node) {
     Member target = node.target;
+
+    // ClassID getters
     String? className = translator.getPragma(target, "wasm:class-id");
     if (className != null) {
       List<String> libAndClass = className.split("#");
@@ -440,6 +456,7 @@ class Intrinsifier {
   w.ValueType? generateStaticIntrinsic(StaticInvocation node) {
     String name = node.name.text;
 
+    // dart:core static functions
     if (node.target.enclosingLibrary == translator.coreTypes.coreLibrary) {
       switch (name) {
         case "identical":
@@ -486,6 +503,7 @@ class Intrinsifier {
       }
     }
 
+    // dart:_internal static functions
     if (node.target.enclosingLibrary.name == "dart._internal") {
       switch (name) {
         case "unsafeCast":
@@ -585,6 +603,7 @@ class Intrinsifier {
       }
     }
 
+    // Wasm(Int|Float|Object)Array constructors
     if (node.target.enclosingClass?.superclass ==
         translator.wasmArrayBaseClass) {
       Expression length = node.arguments.positional[0];
@@ -717,6 +736,7 @@ class Intrinsifier {
       return true;
     }
 
+    // (Int|Uint|Float)(8|16|32|64)(Clamped)?(List|ArrayView) constructors
     if (member.isExternal &&
         member.enclosingLibrary.name == "dart.typed_data") {
       if (member.isFactory) {
@@ -771,6 +791,12 @@ class Intrinsifier {
         }
       }
 
+      // _TypedListBase.length
+      // _TypedListView.offsetInBytes
+      // _TypedListView._typedData
+      // _ByteDataView.length
+      // _ByteDataView.offsetInBytes
+      // _ByteDataView._typedData
       if (member.isGetter) {
         Class cls = member.enclosingClass!;
         ClassInfo info = translator.classInfo[cls]!;

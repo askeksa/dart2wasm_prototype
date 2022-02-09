@@ -22,6 +22,7 @@ import 'package:vm/metadata/direct_call.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+/// Options controlling the translation.
 class TranslatorOptions {
   bool exportAll = false;
   bool inlining = false;
@@ -43,9 +44,15 @@ class TranslatorOptions {
 
 typedef CodeGenCallback = void Function(w.Instructions);
 
+/// The main entry point for the translation from kernel to Wasm and the hub for
+/// all global state in the compiler.
+///
+///
 class Translator {
+  // Options for the translation.
   final TranslatorOptions options;
 
+  // Kernel input and context.
   final Component component;
   final List<Library> libraries;
   final CoreTypes coreTypes;
@@ -53,6 +60,7 @@ class Translator {
   final ClosedWorldClassHierarchy hierarchy;
   late final ClassHierarchySubtypes subtypes;
 
+  // Classes and members referenced specifically by the compiler.
   late final Class wasmTypesBaseClass;
   late final Class wasmArrayBaseClass;
   late final Class wasmAnyRefClass;
@@ -81,12 +89,14 @@ class Translator {
   late final Map<Class, w.StorageType> builtinTypes;
   late final Map<w.ValueType, Class> boxedClasses;
 
+  // Other parts of the global compiler state.
   late final ClassInfoCollector classInfoCollector;
   late final DispatchTable dispatchTable;
   late final Globals globals;
   late final Constants constants;
   late final FunctionCollector functions;
 
+  // Information about the program used and updated by the various phases.
   final List<ClassInfo> classes = [];
   final Map<Class, ClassInfo> classInfo = {};
   final Map<w.HeapType, ClassInfo> classForHeapType = {};
@@ -98,6 +108,7 @@ class Translator {
   late final w.DefinedFunction initFunction;
   late final w.ValueType voidMarker;
 
+  // Caches for when identical source constructs need a common representation.
   final Map<w.StorageType, w.ArrayType> arrayTypeCache = {};
   final Map<int, w.StructType> functionTypeCache = {};
   final Map<w.StructType, int> functionTypeParameterCount = {};

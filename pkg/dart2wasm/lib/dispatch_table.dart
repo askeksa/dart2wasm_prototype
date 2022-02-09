@@ -16,6 +16,7 @@ import 'package:vm/metadata/table_selector.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+/// Information for a dispatch table selector.
 class SelectorInfo {
   final Translator translator;
 
@@ -43,6 +44,13 @@ class SelectorInfo {
   SelectorInfo(this.translator, this.id, this.callCount, this.tornOff,
       this.paramInfo, this.returnCount);
 
+  /// Compute the signature for the functions implementing members targeted by
+  /// this selector.
+  ///
+  /// When the selector has multiple targets, the type of each parameter/return
+  /// is the upper bound across all targets, such that all targets have the
+  /// same signature, and the actual representation types of the parameters and
+  /// returns are subtypes (resp. supertypes) of the types in the signature.
   w.FunctionType computeSignature() {
     var nameIndex = paramInfo.nameIndex;
     List<Set<ClassInfo>> inputSets =
@@ -132,6 +140,7 @@ class SelectorInfo {
   }
 }
 
+// Build dispatch table for member calls.
 class DispatchTable {
   final Translator translator;
   final List<TableSelectorInfo> selectorMetadata;

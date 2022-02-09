@@ -51,6 +51,7 @@ class FieldIndex {
 
 const int initialIdentityHash = 0;
 
+/// Information about the Wasm representation for a class.
 class ClassInfo {
   /// The Dart class that this info corresponds to. The top type does not have
   /// an associated Dart class.
@@ -129,6 +130,7 @@ ClassInfo upperBound(Iterable<ClassInfo> classes) {
   return classes.single;
 }
 
+/// Constructs the Wasm type hierarchy.
 class ClassInfoCollector {
   final Translator translator;
   int nextClassId = 0;
@@ -180,10 +182,12 @@ class ClassInfoCollector {
         // type of Object to be Top.
         info.implementedBy.add(topInfo);
       } else {
+        // Recursively initialize all supertypes before initializing this class.
         initialize(superclass);
         for (Supertype interface in cls.implementedTypes) {
           initialize(interface.classNode);
         }
+
         // In the Wasm type hierarchy, Object, bool and num sit directly below
         // the Top type. The implementation classes (_StringBase, _Type and the
         // box classes) sit directly below the public classes they implement.
@@ -196,6 +200,9 @@ class ClassInfoCollector {
                     translator.boxedClasses.values.contains(cls)
                 ? translator.classInfo[cls.implementedTypes.single.classNode]!
                 : translator.classInfo[superclass]!;
+
+        // Figure out which type parameters can reuse a type parameter field of
+        // the superclass.
         Map<TypeParameter, TypeParameter> typeParameterMatch = {};
         if (cls.typeParameters.isNotEmpty) {
           Supertype supertype = cls.superclass == superInfo.cls
@@ -212,6 +219,14 @@ class ClassInfoCollector {
             }
           }
         }
+
+        // A class can reuse the Wasm struct of the superclass if it doesn't
+        // declare any Wasm fields of its own. This is the case when three
+        // conditions are met:
+        //   1. All type parameters can reuse a type parameter field of the
+        //      superclass.
+        //   2. The class declares no Dart fields of its own.
+        //   3. The class is not a special class that contains hidden fields.
         bool canReuseSuperStruct =
             typeParameterMatch.length == cls.typeParameters.length &&
                 cls.fields.where((f) => f.isInstanceMember).isEmpty &&
@@ -225,6 +240,9 @@ class ClassInfoCollector {
         info = ClassInfo(
             cls, nextClassId++, superInfo.depth + 1, struct, superInfo, this,
             typeParameterMatch: typeParameterMatch);
+
+        // Mark all interfaces as being implemented by this class. This is
+        // needed to calculate represetations types.
         for (Supertype interface in cls.implementedTypes) {
           ClassInfo? interfaceInfo = translator.classInfo[interface.classNode];
           while (interfaceInfo != null) {
