@@ -6,6 +6,8 @@ import 'package:dart2wasm/reference_extensions.dart';
 
 import 'package:kernel/ast.dart';
 
+/// Information about optional parameters and their default values for a
+/// member or a set of members belonging to the same override group.
 class ParameterInfo {
   final Member member;
   int typeParamCount = 0;
@@ -13,7 +15,7 @@ class ParameterInfo {
   late final Map<String, Constant?> named;
 
   // Do not access these until the info is complete.
-  late final names = named.keys.toList()..sort();
+  late final List<String> names = named.keys.toList()..sort();
   late final Map<String, int> nameIndex = {
     for (int i = 0; i < names.length; i++) names[i]: positional.length + i
   };

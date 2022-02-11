@@ -9,6 +9,7 @@ import 'package:kernel/ast.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+/// A local function or function expression.
 class Lambda {
   final FunctionNode functionNode;
   final w.DefinedFunction function;
@@ -16,13 +17,44 @@ class Lambda {
   Lambda(this.functionNode, this.function);
 }
 
+/// The context for one or more closures, containing their captured variables.
+///
+/// Contexts can be nested, corresponding to the scopes covered by the contexts.
+/// Each local function, function expression or loop (`while`, `do`/`while` or
+/// `for`) gives rise to its own context nested inside the context of its
+/// surrounding scope. At runtime, each context has a reference to its parent
+/// context.
+///
+/// Closures corresponding to local functions or function expressions in the
+/// same scope share the same context. Thus, a closure can potentially keep more
+/// values alive than the ones captured by the closure itself.
+///
+/// A context may be empty (containing no captured variables), in which case it
+/// is skipped in the context parent chain and never allocated. A context can
+/// also be skipped if it only contains variables that are not in scope for the
+/// child context (and its descendents).
 class Context {
+  /// The node containing the scope covered by the context. This is either a
+  /// [FunctionNode] (for members, local functions and function expressions),
+  /// a [ForStatement], a [DoStatement] or a [WhileStatement].
   final TreeNode owner;
+
+  /// The parent of this context, corresponding to the lexically enclosing
+  /// owner. This is null if the context is a member context, or if all contexts
+  /// in the parent chain are skipped.
   final Context? parent;
+
+  /// The variables captured by this context.
   final List<VariableDeclaration> variables = [];
+
+  /// Does this context capture `this`? Only member contexts can.
   bool containsThis = false;
+
+  /// The Wasm struct representing this context at runtime.
   late final w.StructType struct;
 
+  /// The local variable currently pointing to this context. Used during code
+  /// generation.
   late w.Local currentLocal;
 
   bool get isEmpty => variables.isEmpty && !containsThis;
@@ -40,6 +72,7 @@ class Context {
   Context(this.owner, this.parent);
 }
 
+/// A captured variable.
 class Capture {
   final VariableDeclaration variable;
   late final Context context;
@@ -51,6 +84,8 @@ class Capture {
   w.ValueType get type => context.struct.fields[fieldIndex].type.unpacked;
 }
 
+/// Compiler passes to find all captured variables and construct the context
+/// tree for a member.
 class Closures {
   final CodeGenerator codeGen;
   final Map<VariableDeclaration, Capture> captures = {};
@@ -78,7 +113,7 @@ class Closures {
 
   void collectContexts(TreeNode node, {TreeNode? container}) {
     if (captures.isNotEmpty || isThisCaptured) {
-      node.accept(BuildContexts(this, container));
+      node.accept(CollectContexts(this, container));
     }
   }
 
@@ -210,11 +245,11 @@ class FindCaptures extends RecursiveVisitor {
   }
 }
 
-class BuildContexts extends RecursiveVisitor {
+class CollectContexts extends RecursiveVisitor {
   final Closures closures;
   Context? currentContext;
 
-  BuildContexts(this.closures, TreeNode? container) {
+  CollectContexts(this.closures, TreeNode? container) {
     if (container != null) {
       currentContext = closures.contexts[container]!;
     }

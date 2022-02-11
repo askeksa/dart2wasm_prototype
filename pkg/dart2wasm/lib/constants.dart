@@ -23,6 +23,17 @@ class ConstantInfo {
 typedef ConstantCodeGenerator = void Function(
     w.DefinedFunction?, w.Instructions);
 
+/// Handles the creation of Dart constants. Can operate in two modes - eager and
+/// lazy - controlled by [TranslatorOptions.lazyConstants].
+///
+/// Each (non-trivial) constant is assigned to a Wasm global. Multiple
+/// occurrences of the same constant use the same global.
+///
+/// In eager mode, the constant is contained within the global initializer,
+/// meaning all constants are initialized eagerly during module initialization.
+/// In lazy mode, the global starts out uninitialized, and every use of the
+/// constant checks the global to see if it has been initialized and calls an
+/// initialization function otherwise.
 class Constants {
   final Translator translator;
   final Map<Constant, ConstantInfo> constantInfo = {};
@@ -177,6 +188,13 @@ class Constants {
     });
   }
 
+  /// Create one of the two Wasm functions (one for each string type) called
+  /// from every lazily initialized string constant (of that type) to create and
+  /// initialize the string.
+  ///
+  /// The function signature is (i32 offset, i32 length) -> (ref stringClass)
+  /// where offset and length are measured in characters and indicate the place
+  /// in the corresponding string data segment from which to copy this string.
   w.DefinedFunction makeStringFunction(Class cls) {
     ClassInfo info = translator.classInfo[cls]!;
     w.FunctionType ftype = translator.functionType(
@@ -227,10 +245,16 @@ class Constants {
     b.end();
   }
 
+  /// Ensure that the constant has a Wasm global assigned.
+  ///
+  /// In eager mode, all sub-constants must be ensured before the global for
+  /// the composite constant is assigned, since global initializers can only
+  /// refer to earlier constants.
   void ensureConstant(Constant constant) {
     ConstantCreator(this).ensureConstant(constant);
   }
 
+  /// Emit code to push a constant onto the stack.
   void instantiateConstant(w.DefinedFunction? function, w.Instructions b,
       Constant constant, w.ValueType expectedType) {
     if (expectedType == translator.voidMarker) return;
@@ -262,17 +286,20 @@ class ConstantInstantiator extends ConstantVisitor<w.ValueType> {
     w.ValueType globalType = info.global.type.type;
     if (globalType.nullable) {
       if (info.function != null) {
+        // Lazily initialized constant.
         w.Label done = b.block(const [], [globalType.withNullability(false)]);
         b.global_get(info.global);
         b.br_on_non_null(done);
         b.call(info.function!);
         b.end();
       } else {
+        // Constant initialized in the module init function.
         b.global_get(info.global);
         b.ref_as_non_null();
       }
       return globalType.withNullability(false);
     } else {
+      // Constant initialized eagerly in a global initializer.
       b.global_get(info.global);
       return globalType;
     }
@@ -400,6 +427,8 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
     w.RefType type = info.nonNullableType;
     return createConstant(constant, type, (function, b) {
       if (lazyConstants) {
+        // Copy string contents from linear memory on initialization. The memory
+        // is initialized by an active data segment for each string type.
         StringBuffer buffer =
             isOneByte ? constants.oneByteStrings : constants.twoByteStrings;
         int offset = buffer.length;
@@ -418,6 +447,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
         b.i32_const(info.classId);
         b.i32_const(initialIdentityHash);
         if (constants.stringDataSegments) {
+          // Initialize string contents from passive data segment.
           w.DataSegment segment;
           Uint8List bytes;
           if (isOneByte) {
@@ -436,6 +466,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
           b.i32_const(constant.value.length);
           translator.array_init_from_data(b, arrayType, segment);
         } else {
+          // Initialize string contents from i32 constants on the stack.
           for (int charCode in constant.value.codeUnits) {
             b.i32_const(charCode);
           }
@@ -453,6 +484,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
     translator.functions.allocateClass(info.classId);
     w.RefType type = info.nonNullableType;
 
+    // Collect sub-constants for field values.
     const int baseFieldCount = 2;
     int fieldCount = info.struct.fields.length;
     List<Constant?> subConstants = List.filled(fieldCount, null);
@@ -463,6 +495,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
       ensureConstant(subConstant);
     });
 
+    // Collect sub-constants for type arguments.
     Map<TypeParameter, DartType> substitution = {};
     List<DartType> args = constant.typeArguments;
     while (true) {
@@ -515,6 +548,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
           function, b, typeArgConstant, constants.typeInfo.nullableType);
       b.i64_const(length);
       if (lazyConstants) {
+        // Allocate array and set each entry to the corresponding sub-constant.
         w.Local arrayLocal = function!.addLocal(
             refType.withNullability(!translator.options.localNullability));
         b.i32_const(length);
@@ -532,6 +566,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
           b.ref_as_non_null();
         }
       } else {
+        // Push all sub-constants on the stack and initialize array from them.
         for (int i = 0; i < length; i++) {
           constants.instantiateConstant(
               function, b, constant.entries[i], elementType);

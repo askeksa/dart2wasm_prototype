@@ -8,6 +8,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 
 import 'package:dart2wasm/translator.dart';
 
+/// Handles lazy initialization of static fields.
 class Globals {
   final Translator translator;
 
@@ -116,6 +117,8 @@ class Globals {
     return null;
   }
 
+  /// Return (and if needed create) the Wasm global corresponding to a static
+  /// field.
   w.Global getGlobal(Field variable) {
     assert(!variable.isLate);
     return globals.putIfAbsent(variable, () {
@@ -154,10 +157,15 @@ class Globals {
     });
   }
 
+  /// Return the Wasm global containing the flag indicating whether this static
+  /// field has been initialized, if such a flag global is needed.
+  ///
+  /// Note that [getGlobal] must have been called for the field beforehand.
   w.Global? getGlobalInitializedFlag(Field variable) {
     return globalInitializedFlag[variable];
   }
 
+  /// Emit code to read a static field.
   w.ValueType readGlobal(w.Instructions b, Field variable) {
     w.Global global = getGlobal(variable);
     w.BaseFunction? initFunction = globalInitializers[variable];

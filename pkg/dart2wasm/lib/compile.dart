@@ -23,6 +23,11 @@ import 'package:vm/transformations/type_flow/transformer.dart' as globalTypeFlow
 import 'package:dart2wasm/target.dart';
 import 'package:dart2wasm/translator.dart';
 
+/// Compile a Dart file into a Wasm module.
+///
+/// Returns `null` if an error occurred during compilation. The
+/// [handleDiagnosticMessage] callback will have received an error message
+/// describing the error.
 Future<Uint8List?> compileToModule(
     Uri mainUri,
     Uri sdkRoot,

@@ -15,6 +15,21 @@ import 'package:kernel/type_environment.dart';
 
 import 'package:wasm_builder/wasm_builder.dart' as w;
 
+/// Main code generator for member bodies.
+///
+/// The [generate] method first collects all local functions and function
+/// expressions in the body and then generates code for the body. Code for the
+/// local functions and function expressions must be generated separately by
+/// calling the [generateLambda] method on all lambdas in [closures].
+///
+/// A new [CodeGenerator] object must be created for each new member or lambda.
+///
+/// Every visitor method for an expression takes in the Wasm type that it is
+/// expected to leave on the stack (or the special [voidMarker] to indicate that
+/// it should leave nothing). It returns what it actually left on the stack. The
+/// code generation for every expression or subexpression is done via the [wrap]
+/// method, which emits appropriate conversion code is the produced type is not
+/// a subtype of the expected type.
 class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     implements InitializerVisitor<void>, StatementVisitor<void> {
   final Translator translator;
@@ -27,7 +42,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   late final StaticTypeContext typeContext;
   late final w.Instructions b;
 
-  late Closures closures;
+  late final Closures closures;
 
   final Map<VariableDeclaration, w.Local> locals = {};
   w.Local? thisLocal;
@@ -37,6 +52,12 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   final Map<LabeledStatement, w.Label> labels = {};
   final Map<SwitchCase, w.Label> switchLabels = {};
 
+  /// Create a code generator for a member or one of its lambdas.
+  ///
+  /// The [paramLocals] and [returnLabel] parameters can be used to generate
+  /// code for an inlined function by specifying the locals containing the
+  /// parameters (instead of the function inputs) and the label to jump to on
+  /// return (instead of emitting a `return` instruction).
   CodeGenerator(this.translator, this.function, this.reference,
       {List<w.Local>? paramLocals, this.returnLabel}) {
     this.paramLocals = paramLocals ?? function.locals;
@@ -90,6 +111,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     _unimplemented(node, node.runtimeType, const []);
   }
 
+  /// Generate code for the body of the member.
   void generate() {
     closures = Closures(this);
 
@@ -271,6 +293,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     b.end();
   }
 
+  /// Generate code for the body of a lambda.
   void generateLambda(Lambda lambda, Closures closures) {
     this.closures = closures;
 
@@ -376,6 +399,9 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     });
   }
 
+  /// Generates code for an expression plus conversion code to convert the
+  /// result to the expected type if needed. All expression code generation goes
+  /// through this method.
   w.ValueType wrap(Expression node, w.ValueType expectedType) {
     w.ValueType resultType = node.accept1(this, expectedType);
     translator.convertType(function, resultType, expectedType);
@@ -391,10 +417,14 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
         b.local_set(local);
       }
       w.Label block = b.block(const [], targetFunction.type.outputs);
+      b.comment("Inlined ${target.asMember}");
       CodeGenerator(translator, function, target,
               paramLocals: inlinedLocals, returnLabel: block)
           .generate();
     } else {
+      String access =
+          target.isGetter ? "get" : (target.isSetter ? "set" : "call");
+      b.comment("Direct $access of '${target.asMember}'");
       b.call(targetFunction);
     }
     return translator.outputOrVoid(targetFunction.type.outputs);
@@ -1074,6 +1104,8 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     if (options.polymorphicSpecialization) {
       _polymorphicSpecialization(selector, receiverVar);
     } else {
+      String access = getter ? "get" : (setter ? "set" : "call");
+      b.comment("Instance $access of '${selector.name}'");
       b.local_get(receiverVar);
       b.struct_get(translator.topInfo.struct, FieldIndex.classId);
       if (offset != 0) {
@@ -1329,6 +1361,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
 
     // Dispatch table call
+    b.comment("Dynamic get of '${selector.name}'");
     int offset = selector.offset!;
     b.local_get(receiverVar);
     b.struct_get(translator.topInfo.struct, FieldIndex.classId);
@@ -1531,6 +1564,7 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
       wrap(arg, translator.topInfo.nullableType);
     }
     Lambda lambda = closures.lambdas[decl.function]!;
+    b.comment("Local call of ${decl.variable.name}");
     b.call(lambda.function);
     return translator.topInfo.nullableType;
   }
