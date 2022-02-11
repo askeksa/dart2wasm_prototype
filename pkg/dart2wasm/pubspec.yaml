@@ -5,22 +5,22 @@ environment:
   sdk: '>=2.12.0'
 
 dependencies:
-  _fe_analyzer_shared:
-    path: ../_fe_analyzer_shared
   front_end:
     path: ../front_end
   kernel:
     path: ../kernel
+  vm:
+    path: ../vm
   wasm_builder:
     path: ../wasm_builder
 
 dependency_overrides:
   # Packages with source in the SDK
-  _fe_analyzer_shared:
-    path: ../_fe_analyzer_shared
   front_end:
     path: ../front_end
   kernel:
     path: ../kernel
+  vm:
+    path: ../vm
   wasm_builder:
     path: ../wasm_builder
