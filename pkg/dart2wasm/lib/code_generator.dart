@@ -258,14 +258,6 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     allocateContext(member.function!);
     captureParameters();
 
-    if (options.stubBodies) {
-      member.function!.body!.accept(StubBodyTraversal(this));
-      b.comment("Stubbed body");
-      b.unreachable();
-      b.end();
-      return;
-    }
-
     if (member is Constructor) {
       Class cls = member.enclosingClass;
       ClassInfo info = translator.classInfo[cls]!;
@@ -335,13 +327,6 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     }
     allocateContext(lambda.functionNode);
     captureParameters();
-
-    if (options.stubBodies) {
-      b.comment("Stubbed body");
-      b.unreachable();
-      b.end();
-      return;
-    }
 
     lambda.functionNode.body!.accept(this);
     _implicitReturn();
@@ -1951,126 +1936,5 @@ class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
   w.ValueType visitAsExpression(AsExpression node, w.ValueType expectedType) {
     // TODO(joshualitt): Emit type test and throw exception on failure
     return wrap(node.operand, expectedType);
-  }
-}
-
-class StubBodyTraversal extends RecursiveVisitor {
-  final CodeGenerator codeGen;
-
-  StubBodyTraversal(this.codeGen);
-
-  Translator get translator => codeGen.translator;
-
-  @override
-  void visitRedirectingInitializer(RedirectingInitializer node) {
-    super.visitRedirectingInitializer(node);
-    _call(node.targetReference);
-  }
-
-  @override
-  void visitSuperInitializer(SuperInitializer node) {
-    super.visitSuperInitializer(node);
-    if ((node.parent as Constructor).enclosingClass.superclass?.superclass ==
-        null) {
-      return;
-    }
-    _call(node.targetReference);
-  }
-
-  @override
-  void visitConstructorInvocation(ConstructorInvocation node) {
-    super.visitConstructorInvocation(node);
-    _call(node.targetReference);
-  }
-
-  @override
-  void visitStaticInvocation(StaticInvocation node) {
-    super.visitStaticInvocation(node);
-    _call(node.targetReference);
-  }
-
-  @override
-  void visitSuperMethodInvocation(SuperMethodInvocation node) {
-    super.visitSuperMethodInvocation(node);
-    _call(node.interfaceTargetReference!);
-  }
-
-  @override
-  void visitInstanceInvocation(InstanceInvocation node) {
-    super.visitInstanceInvocation(node);
-    Member? singleTarget = translator.singleTarget(node);
-    if (singleTarget != null) {
-      _call(singleTarget.reference);
-    } else {
-      _virtualCall(node.interfaceTarget, getter: false, setter: false);
-    }
-  }
-
-  @override
-  void visitEqualsCall(EqualsCall node) {
-    super.visitEqualsCall(node);
-    Member? singleTarget = translator.singleTarget(node);
-    if (singleTarget != null) {
-      _call(singleTarget.reference);
-    } else {
-      _virtualCall(node.interfaceTarget, getter: false, setter: false);
-    }
-  }
-
-  @override
-  void visitStaticGet(StaticGet node) {
-    super.visitStaticGet(node);
-    Member target = node.target;
-    if (target is Procedure) {
-      _call(target.reference);
-    }
-  }
-
-  @override
-  void visitStaticSet(StaticSet node) {
-    super.visitStaticSet(node);
-    Member target = node.target;
-    if (target is Procedure) {
-      _call(target.reference);
-    }
-  }
-
-  @override
-  void visitInstanceGet(InstanceGet node) {
-    super.visitInstanceGet(node);
-    Member? singleTarget = translator.singleTarget(node);
-    if (singleTarget != null) {
-      if (singleTarget is Procedure) {
-        _call(singleTarget.reference);
-      }
-    } else {
-      _virtualCall(node.interfaceTarget, getter: true, setter: false);
-    }
-  }
-
-  @override
-  void visitInstanceSet(InstanceSet node) {
-    super.visitInstanceSet(node);
-    Member? singleTarget = translator.singleTarget(node);
-    if (singleTarget != null) {
-      if (singleTarget is Procedure) {
-        _call(singleTarget.reference);
-      }
-    } else {
-      _virtualCall(node.interfaceTarget, getter: false, setter: true);
-    }
-  }
-
-  void _call(Reference target) {
-    if (!target.asMember.isAbstract) {
-      translator.functions.getFunction(target);
-    }
-  }
-
-  void _virtualCall(Member interfaceTarget,
-      {required bool getter, required bool setter}) {
-    SelectorInfo selector = translator.dispatchTable.selectorForTarget(
-        interfaceTarget.referenceAs(getter: getter, setter: setter));
-    translator.functions.activateSelector(selector);
   }
 }

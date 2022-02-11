@@ -36,7 +36,6 @@ class TranslatorOptions {
   bool printWasm = false;
   bool runtimeTypes = true;
   bool stringDataSegments = false;
-  bool stubBodies = false;
   List<int>? watchPoints = null;
 
   bool get useRttGlobals => runtimeTypes && !nominalTypes;
