@@ -199,7 +199,7 @@ class Constants {
     ClassInfo info = translator.classInfo[cls]!;
     w.FunctionType ftype = translator.functionType(
         const [w.NumType.i32, w.NumType.i32], [info.nonNullableType]);
-    return m.addFunction(ftype);
+    return m.addFunction(ftype, "makeString (${cls.name})");
   }
 
   void makeStringFunctionBody(Class cls, w.DefinedFunction function,
@@ -390,7 +390,7 @@ class ConstantCreator extends ConstantVisitor<ConstantInfo?> {
       global.initializer.ref_null(type.heapType);
       global.initializer.end();
       w.FunctionType ftype = translator.functionType(const [], [type]);
-      w.DefinedFunction function = m.addFunction(ftype);
+      w.DefinedFunction function = m.addFunction(ftype, "$constant");
       generator(function, function.body);
       w.Local temp = function.addLocal(translator.typeForLocal(type));
       w.Instructions b2 = function.body;

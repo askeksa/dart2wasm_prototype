@@ -224,7 +224,8 @@ class FindCaptures extends RecursiveVisitor {
     }
     int parameterCount = node.requiredParameterCount;
     w.FunctionType type = translator.closureFunctionType(parameterCount);
-    w.DefinedFunction function = translator.m.addFunction(type);
+    w.DefinedFunction function =
+        translator.m.addFunction(type, "$member (closure)");
     closures.lambdas[node] = Lambda(node, function);
 
     depth++;

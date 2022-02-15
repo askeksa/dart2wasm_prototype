@@ -58,7 +58,8 @@ class Globals {
           translator.array_init(ib, heapType, 0);
           ib.end();
         } else if (heapType is w.FunctionType) {
-          w.DefinedFunction function = translator.m.addFunction(heapType);
+          w.DefinedFunction function =
+              translator.m.addFunction(heapType, "#dummy function $heapType");
           w.Instructions b = function.body;
           b.unreachable();
           b.end();

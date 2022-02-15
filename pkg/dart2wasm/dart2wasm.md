@@ -29,6 +29,7 @@ where *options* include:
 | `--`[`no-`]`inlining`                   | no      | Inline small functions.
 | `--`[`no-`]`lazy-constants`             | no      | Instantiate constants lazily.
 | `--`[`no-`]`local-nullability`          | no      | Use non-nullable types for non-nullable locals and temporaries.
+| `--`[`no-`]`name-section`               | yes     | Emit Name Section with function names.
 | `--`[`no-`]`nominal-types`              | no      | Emit experimental nominal types.
 | `--`[`no-`]`parameter-nullability`      | yes     | Use non-nullable types for non-nullable parameters and return values.
 | `--`[`no-`]`polymorphic-specialization` | no      | Do virtual calls by switching on the class ID instead of using `call_indirect`.

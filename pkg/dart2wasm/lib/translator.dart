@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:typed_data';
+
 import 'package:dart2wasm/class_info.dart';
 import 'package:dart2wasm/closures.dart';
 import 'package:dart2wasm/code_generator.dart';
@@ -29,6 +31,7 @@ class TranslatorOptions {
   int inliningLimit = 3;
   bool lazyConstants = false;
   bool localNullability = false;
+  bool nameSection = true;
   bool nominalTypes = false;
   bool parameterNullability = true;
   bool polymorphicSpecialization = false;
@@ -207,7 +210,7 @@ class Translator {
     };
   }
 
-  w.Module translate() {
+  Uint8List translate() {
     m = w.Module(watchPoints: options.watchPoints);
     voidMarker = w.RefType.def(w.StructType("void"), nullable: true);
 
@@ -218,7 +221,7 @@ class Translator {
         libraries.first.procedures.firstWhere((p) => p.name.text == "main");
     functions.addExport(mainFunction.reference, "main");
 
-    initFunction = m.addFunction(functionType(const [], const []));
+    initFunction = m.addFunction(functionType(const [], const []), "#init");
     m.startFunction = initFunction;
 
     globals = Globals(this);
@@ -318,7 +321,7 @@ class Translator {
     }
     _printFunction(initFunction, "init");
 
-    return m;
+    return m.encode(emitNameSection: options.nameSection);
   }
 
   void _printFunction(w.DefinedFunction function, Object name) {
@@ -483,7 +486,8 @@ class Translator {
       int signatureOffset = member.isInstanceMember ? 1 : 0;
       assert(memberSignature.inputs.length == signatureOffset + parameterCount);
       assert(closureSignature.inputs.length == 1 + parameterCount);
-      w.DefinedFunction function = m.addFunction(closureSignature);
+      w.DefinedFunction function =
+          m.addFunction(closureSignature, "$member (tear-off)");
       w.BaseFunction target = functions.getFunction(member.reference);
       w.Instructions b = function.body;
       for (int i = 0; i < memberSignature.inputs.length; i++) {

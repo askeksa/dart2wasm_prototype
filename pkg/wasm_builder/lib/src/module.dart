@@ -29,6 +29,8 @@ class Module with SerializerMixin {
   bool anyGlobalsDefined = false;
   bool dataReferencedFromGlobalInitializer = false;
 
+  int functionNameCount = 0;
+
   /// Create a new, initially empty, module.
   ///
   /// The [watchPoints] is a list of byte offsets within the final module of
@@ -100,9 +102,10 @@ class Module with SerializerMixin {
   ///
   /// The [DefinedFunction.body] must be completed (including the terminating
   /// `end`) before the module can be serialized.
-  DefinedFunction addFunction(FunctionType type) {
+  DefinedFunction addFunction(FunctionType type, [String? name]) {
     anyFunctionsDefined = true;
-    final function = DefinedFunction(this, functions.length, type);
+    if (name != null) functionNameCount++;
+    final function = DefinedFunction(this, functions.length, type, name);
     functions.add(function);
     return function;
   }
@@ -156,12 +159,14 @@ class Module with SerializerMixin {
   ///
   /// All imported functions must be specified before any functions are declared
   /// using [Module.addFunction].
-  ImportedFunction importFunction(
-      String module, String name, FunctionType type) {
+  ImportedFunction importFunction(String module, String name, FunctionType type,
+      [String? functionName]) {
     if (anyFunctionsDefined) {
       throw "All function imports must be specified before any definitions.";
     }
-    final function = ImportedFunction(module, name, functions.length, type);
+    if (functionName != null) functionNameCount++;
+    final function =
+        ImportedFunction(module, name, functions.length, type, functionName);
     functions.add(function);
     return function;
   }
@@ -200,7 +205,7 @@ class Module with SerializerMixin {
   }
 
   /// Serialize the module to its binary representation.
-  Uint8List encode() {
+  Uint8List encode({bool emitNameSection: true}) {
     // Wasm module preamble: magic number, version 1.
     writeBytes(const [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]);
     TypeSection(this).serialize(this);
@@ -220,6 +225,9 @@ class Module with SerializerMixin {
     }
     CodeSection(this).serialize(this);
     DataSection(this).serialize(this);
+    if (emitNameSection) {
+      NameSection(this).serialize(this);
+    }
     return data;
   }
 }
@@ -262,9 +270,10 @@ class _FunctionTypeKey {
 abstract class BaseFunction {
   final int index;
   final FunctionType type;
+  final String? functionName;
   String? exportedName;
 
-  BaseFunction(this.index, this.type);
+  BaseFunction(this.index, this.type, this.functionName);
 }
 
 /// A function defined in the module.
@@ -277,8 +286,9 @@ class DefinedFunction extends BaseFunction
   /// The body of the function.
   late final Instructions body;
 
-  DefinedFunction(Module module, int index, FunctionType type)
-      : super(index, type) {
+  DefinedFunction(Module module, int index, FunctionType type,
+      [String? functionName])
+      : super(index, type, functionName) {
     for (ValueType paramType in type.inputs) {
       addLocal(paramType);
     }
@@ -465,8 +475,9 @@ class ImportedFunction extends BaseFunction implements Import {
   final String module;
   final String name;
 
-  ImportedFunction(this.module, this.name, int index, FunctionType type)
-      : super(index, type);
+  ImportedFunction(this.module, this.name, int index, FunctionType type,
+      [String? functionName])
+      : super(index, type, functionName);
 
   @override
   void serialize(Serializer s) {
@@ -774,3 +785,36 @@ class DataSection extends Section {
     writeList(module.dataSegments);
   }
 }
+
+abstract class CustomSection extends Section {
+  CustomSection(Module module) : super(module);
+
+  @override
+  int get id => 0;
+}
+
+class NameSection extends CustomSection {
+  NameSection(Module module) : super(module);
+
+  @override
+  bool get isNotEmpty => module.functionNameCount > 0;
+
+  @override
+  void serializeContents() {
+    writeName("name");
+    var functionNameSubsection = _NameSubsection();
+    functionNameSubsection.writeUnsigned(module.functionNameCount);
+    for (int i = 0; i < module.functions.length; i++) {
+      String? functionName = module.functions[i].functionName;
+      if (functionName != null) {
+        functionNameSubsection.writeUnsigned(i);
+        functionNameSubsection.writeName(functionName);
+      }
+    }
+    writeByte(1); // Function names subsection
+    writeUnsigned(functionNameSubsection.data.length);
+    writeData(functionNameSubsection);
+  }
+}
+
+class _NameSubsection with SerializerMixin {}

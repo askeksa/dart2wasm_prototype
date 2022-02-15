@@ -65,5 +65,5 @@ Future<Uint8List?> compileToModule(
 
   var translator = Translator(component, coreTypes,
       TypeEnvironment(coreTypes, compilerResult.classHierarchy!), options);
-  return translator.translate().encode();
+  return translator.translate();
 }

@@ -56,7 +56,8 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
         w.FunctionType ftype = _makeFunctionType(
             procedure.reference, procedure.function.returnType, null,
             isImportOrExport: true);
-        _functions[procedure.reference] = m.importFunction(module, name, ftype);
+        _functions[procedure.reference] =
+            m.importFunction(module, name, ftype, "$importName (import)");
       }
     }
     String? exportName =
@@ -80,7 +81,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
       w.FunctionType ftype = _makeFunctionType(
           target, node.function.returnType, null,
           isImportOrExport: true);
-      _functions[target] = m.addFunction(ftype);
+      _functions[target] = m.addFunction(ftype, "$node");
     }
 
     // Value classes are always implicitly allocated.
@@ -99,7 +100,7 @@ class FunctionCollector extends MemberVisitor1<w.FunctionType, Reference> {
       w.FunctionType ftype = target.isTearOffReference
           ? translator.dispatchTable.selectorForTarget(target).signature
           : target.asMember.accept1(this, target);
-      return m.addFunction(ftype);
+      return m.addFunction(ftype, "${target.asMember}");
     });
   }
 

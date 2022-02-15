@@ -16,6 +16,7 @@ final Map<String, void Function(TranslatorOptions, bool)> boolOptionMap = {
   "inlining": (o, value) => o.inlining = value,
   "lazy-constants": (o, value) => o.lazyConstants = value,
   "local-nullability": (o, value) => o.localNullability = value,
+  "name-section": (o, value) => o.nameSection = value,
   "nominal-types": (o, value) => o.nominalTypes = value,
   "parameter-nullability": (o, value) => o.parameterNullability = value,
   "polymorphic-specialization": (o, value) =>
