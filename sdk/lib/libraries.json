@@ -156,9 +156,6 @@
   },
   "wasm": {
     "libraries": {
-      "_builtin": {
-        "uri": "_internal/wasm/lib/builtin.dart"
-      },
       "_internal": {
         "uri": "internal/internal.dart",
         "patches": [
@@ -216,15 +213,6 @@
           "_internal/wasm/lib/developer.dart"
         ]
       },
-      "ffi": {
-        "uri": "ffi/ffi.dart"
-      },
-      "_http": {
-        "uri": "_http/http.dart"
-      },
-      "io": {
-        "uri": "io/io.dart"
-      },
       "isolate": {
         "uri": "isolate/isolate.dart"
       },
@@ -232,24 +220,9 @@
         "uri": "math/math.dart",
         "patches": "_internal/wasm/lib/math_patch.dart"
       },
-      "mirrors": {
-        "uri": "mirrors/mirrors.dart"
-      },
-      "nativewrappers": {
-        "uri": "html/dartium/nativewrappers.dart"
-      },
-      "cli": {
-        "uri": "cli/cli.dart"
-      },
       "typed_data": {
         "uri": "typed_data/typed_data.dart",
         "patches": "_internal/vm/lib/typed_data_patch.dart"
-      },
-      "_vmservice": {
-        "uri": "vmservice/vmservice.dart"
-      },
-      "vmservice_io": {
-        "uri": "_internal/vm/bin/vmservice_io.dart"
       },
       "wasm": {
         "uri": "wasm/wasm_types.dart"
