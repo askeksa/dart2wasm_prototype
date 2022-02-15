@@ -32,7 +32,8 @@ mixin SerializerMixin implements Serializer {
   Uint8List _data = Uint8List(24);
   int _index = 0;
 
-  // Stack traces or other serializers attached to byte positions within this.
+  // Stack traces or other serializers attached to byte positions within the
+  // chunk of data produced by this serializer.
   late final SplayTreeMap<int, Object> _traces = SplayTreeMap();
 
   void _ensure(int size) {

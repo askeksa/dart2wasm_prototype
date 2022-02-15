@@ -89,14 +89,14 @@ class Instructions with SerializerMixin {
   /// Is this the initializer of a global variable?
   final bool isGlobalInitializer;
 
-  /// When emitting instructions, should a textual trace of the instruction
-  /// stream be recorded (provided asserts are enabled)?
+  /// Whether a textual trace of the instruction stream should be recorded when
+  /// emitting instructions (provided asserts are enabled).
   ///
   /// This trace can be accessed via the [trace] property and will be part of
   /// the exception text if a validation error occurs.
   bool traceEnabled = true;
 
-  /// Should the textual trace contain a byte offset for each instruction?
+  /// Whether to print a byte offset for each instruction in the textual trace.
   bool byteOffsetEnabled = false;
 
   /// Column width for the instruction byte offset.
@@ -119,10 +119,10 @@ class Instructions with SerializerMixin {
     _labelStack.add(Expression(const [], outputs));
   }
 
-  /// Is the current point in the instruction stream reachable?
+  /// Whether the current point in the instruction stream is reachable.
   bool get reachable => _reachable;
 
-  /// Has the instruction sequence been completed by the final `end`?
+  /// Whether the instruction sequence has been completed by the final `end`.
   bool get isComplete => _labelStack.isEmpty;
 
   /// Textual trace of the instructions.

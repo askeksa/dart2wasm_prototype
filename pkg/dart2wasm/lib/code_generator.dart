@@ -28,7 +28,7 @@ import 'package:wasm_builder/wasm_builder.dart' as w;
 /// expected to leave on the stack (or the special [voidMarker] to indicate that
 /// it should leave nothing). It returns what it actually left on the stack. The
 /// code generation for every expression or subexpression is done via the [wrap]
-/// method, which emits appropriate conversion code is the produced type is not
+/// method, which emits appropriate conversion code if the produced type is not
 /// a subtype of the expected type.
 class CodeGenerator extends ExpressionVisitor1<w.ValueType, w.ValueType>
     implements InitializerVisitor<void>, StatementVisitor<void> {

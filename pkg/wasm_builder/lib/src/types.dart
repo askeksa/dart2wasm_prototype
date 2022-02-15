@@ -8,18 +8,18 @@ import 'serialize.dart';
 
 /// A *storage type*.
 abstract class StorageType implements Serializable {
-  /// Is this type a subtype of the [other] type, i.e. can this type be used
-  /// as input where [other] is expected.
+  /// Returns whether this type is a subtype of the [other] type, i.e. whether
+  /// it can be used as input where [other] is expected.
   bool isSubtypeOf(StorageType other);
 
-  /// What is the *unpacked* form of this storage type, i.e. the *value type*
-  /// to use when reading/writing this storage type from/to memory.
+  /// The *unpacked* form of this storage type, i.e. the *value type* to use
+  /// when reading/writing this storage type from/to memory.
   ValueType get unpacked;
 
-  /// Is this a primitive (i.e. not reference) type?
+  /// Whether this is a primitive (i.e. not reference) type.
   bool get isPrimitive;
 
-  /// For primitive types: what is the size in bytes of a value of this type?
+  /// For primitive types: the size in bytes of a value of this type.
   int get byteSize;
 }
 
@@ -36,14 +36,14 @@ abstract class ValueType implements StorageType {
   @override
   int get byteSize => throw "Size of non-primitive type $runtimeType";
 
-  /// Is this type nullable? Primitive types are never nullable.
+  /// Whether this type is nullable. Primitive types are never nullable.
   bool get nullable => false;
 
   /// If this exists in both a nullable and non-nullable version, return the
   /// version with the given nullability.
   ValueType withNullability(bool nullable) => this;
 
-  /// Is this type defaultable? Primitive types are always defaultable.
+  /// Whether this type is defaultable. Primitive types are always defaultable.
   bool get defaultable => true;
 }
 
@@ -269,16 +269,16 @@ abstract class HeapType implements Serializable {
   /// The `extern` heap type.
   static const extern = ExternHeapType._();
 
-  /// Is this heap type nullable by default, i.e. when written with the -`ref`
-  /// shorthand? A `null` value here means the heap type has no default
+  /// Whether this heap type is nullable by default, i.e. when written with the
+  /// -`ref` shorthand. A `null` value here means the heap type has no default
   /// nullability, so the nullability of a reference has to be specified
   /// explicitly.
   bool? get nullableByDefault;
 
-  /// Is this heap type a declared subtype of the other heap type?
+  /// Whether this heap type is a declared subtype of the other heap type.
   bool isSubtypeOf(HeapType other);
 
-  /// Is this heap type a structural subtype of the other heap type?
+  /// Whether this heap type is a structural subtype of the other heap type.
   bool isStructuralSubtypeOf(HeapType other) => isSubtypeOf(other);
 }
 

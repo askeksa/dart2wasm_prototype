@@ -247,9 +247,9 @@ class Constants {
 
   /// Ensure that the constant has a Wasm global assigned.
   ///
-  /// In eager mode, all sub-constants must be ensured before the global for
-  /// the composite constant is assigned, since global initializers can only
-  /// refer to earlier constants.
+  /// In eager mode, sub-constants must have Wasm globals assigned before the
+  /// global for the composite constant is assigned, since global initializers
+  /// can only refer to earlier globals.
   void ensureConstant(Constant constant) {
     ConstantCreator(this).ensureConstant(constant);
   }

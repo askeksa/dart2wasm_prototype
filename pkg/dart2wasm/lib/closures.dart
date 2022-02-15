@@ -32,7 +32,7 @@ class Lambda {
 /// A context may be empty (containing no captured variables), in which case it
 /// is skipped in the context parent chain and never allocated. A context can
 /// also be skipped if it only contains variables that are not in scope for the
-/// child context (and its descendents).
+/// child context (and its descendants).
 class Context {
   /// The node containing the scope covered by the context. This is either a
   /// [FunctionNode] (for members, local functions and function expressions),
@@ -47,7 +47,7 @@ class Context {
   /// The variables captured by this context.
   final List<VariableDeclaration> variables = [];
 
-  /// Does this context capture `this`? Only member contexts can.
+  /// Whether this context contains a captured `this`. Only member contexts can.
   bool containsThis = false;
 
   /// The Wasm struct representing this context at runtime.
@@ -99,7 +99,7 @@ class Closures {
   Translator get translator => codeGen.translator;
 
   void findCaptures(Member member) {
-    var find = FindCaptures(this, member);
+    var find = CaptureFinder(this, member);
     if (member is Constructor) {
       Class cls = member.enclosingClass;
       for (Field field in cls.fields) {
@@ -113,7 +113,7 @@ class Closures {
 
   void collectContexts(TreeNode node, {TreeNode? container}) {
     if (captures.isNotEmpty || isThisCaptured) {
-      node.accept(CollectContexts(this, container));
+      node.accept(ContextCollector(this, container));
     }
   }
 
@@ -149,13 +149,13 @@ class Closures {
   }
 }
 
-class FindCaptures extends RecursiveVisitor {
+class CaptureFinder extends RecursiveVisitor {
   final Closures closures;
   final Member member;
   final Map<VariableDeclaration, int> variableDepth = {};
   int depth = 0;
 
-  FindCaptures(this.closures, this.member);
+  CaptureFinder(this.closures, this.member);
 
   Translator get translator => closures.translator;
 
@@ -246,11 +246,11 @@ class FindCaptures extends RecursiveVisitor {
   }
 }
 
-class CollectContexts extends RecursiveVisitor {
+class ContextCollector extends RecursiveVisitor {
   final Closures closures;
   Context? currentContext;
 
-  CollectContexts(this.closures, TreeNode? container) {
+  ContextCollector(this.closures, TreeNode? container) {
     if (container != null) {
       currentContext = closures.contexts[container]!;
     }

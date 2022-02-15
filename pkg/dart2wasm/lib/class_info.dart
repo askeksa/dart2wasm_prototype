@@ -242,7 +242,7 @@ class ClassInfoCollector {
             typeParameterMatch: typeParameterMatch);
 
         // Mark all interfaces as being implemented by this class. This is
-        // needed to calculate represetations types.
+        // needed to calculate representation types.
         for (Supertype interface in cls.implementedTypes) {
           ClassInfo? interfaceInfo = translator.classInfo[interface.classNode];
           while (interfaceInfo != null) {

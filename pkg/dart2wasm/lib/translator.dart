@@ -49,7 +49,8 @@ typedef CodeGenCallback = void Function(w.Instructions);
 /// The main entry point for the translation from kernel to Wasm and the hub for
 /// all global state in the compiler.
 ///
-///
+/// This class also contains utility methods for types and code generation used
+/// throughout the compiler.
 class Translator {
   // Options for the translation.
   final TranslatorOptions options;
