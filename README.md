@@ -1,5 +1,5 @@
 **Note:** This branch contains a prototype Dart-to-WebAssembly compiler used for a feasibility study of compiling Dart to [WasmGC](https://github.com/WebAssembly/gc).
-As of February 2022, it is still work-in-progress and will be updated and rebased regularly.
+As of February 2022, the compiler has been merged into the main branch, and this branch is no longer maintained.
 
 Usage information for the prototype can be found [here](pkg/dart2wasm/dart2wasm.md).
 
