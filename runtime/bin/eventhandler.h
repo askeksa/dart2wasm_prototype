@@ -10,14 +10,15 @@
 #include "bin/isolate_data.h"
 
 #include "platform/hashmap.h"
+#include "platform/priority_queue.h"
 
 namespace dart {
 namespace bin {
 
 // Flags used to provide information and actions to the eventhandler
 // when sending a message about a file descriptor. These flags should
-// be kept in sync with the constants in socket_impl.dart. For more
-// information see the comments in socket_impl.dart
+// be kept in sync with the constants in socket_patch.dart. For more
+// information see the comments in socket_patch.dart
 enum MessageFlags {
   kInEvent = 0,
   kOutEvent = 1,
@@ -31,6 +32,7 @@ enum MessageFlags {
   kSetEventMaskCommand = 12,
   kListeningSocket = 16,
   kPipe = 17,
+  kSignalSocket = 18,
 };
 
 // clang-format off
@@ -53,64 +55,47 @@ enum MessageFlags {
      (data & ~(1 << kInEvent | 1 << kOutEvent | 1 << kCloseEvent)) == 0)
 #define IS_LISTENING_SOCKET(data)                                              \
     ((data & (1 << kListeningSocket)) != 0)  // NOLINT
+#define IS_SIGNAL_SOCKET(data)                                                 \
+    ((data & (1 << kSignalSocket)) != 0)  // NOLINT
 #define TOKEN_COUNT(data) (data & ((1 << kCloseCommand) - 1))
 // clang-format on
 
 class TimeoutQueue {
- private:
-  class Timeout {
-   public:
-    Timeout(Dart_Port port, int64_t timeout, Timeout* next)
-        : port_(port), timeout_(timeout), next_(next) {}
-
-    Dart_Port port() const { return port_; }
-
-    int64_t timeout() const { return timeout_; }
-    void set_timeout(int64_t timeout) {
-      ASSERT(timeout >= 0);
-      timeout_ = timeout;
-    }
-
-    Timeout* next() const { return next_; }
-    void set_next(Timeout* next) { next_ = next; }
-
-   private:
-    Dart_Port port_;
-    int64_t timeout_;
-    Timeout* next_;
-  };
-
  public:
-  TimeoutQueue() : next_timeout_(NULL), timeouts_(NULL) {}
+  TimeoutQueue() {}
 
   ~TimeoutQueue() {
     while (HasTimeout())
       RemoveCurrent();
   }
 
-  bool HasTimeout() const { return next_timeout_ != NULL; }
+  bool HasTimeout() const { return !timeouts_.IsEmpty(); }
 
   int64_t CurrentTimeout() const {
-    ASSERT(next_timeout_ != NULL);
-    return next_timeout_->timeout();
+    ASSERT(!timeouts_.IsEmpty());
+    return timeouts_.Minimum().priority;
   }
 
   Dart_Port CurrentPort() const {
-    ASSERT(next_timeout_ != NULL);
-    return next_timeout_->port();
+    ASSERT(!timeouts_.IsEmpty());
+    return timeouts_.Minimum().value;
   }
 
-  void RemoveCurrent() { UpdateTimeout(CurrentPort(), -1); }
+  void RemoveCurrent() { timeouts_.RemoveMinimum(); }
 
-  void UpdateTimeout(Dart_Port port, int64_t timeout);
+  void UpdateTimeout(Dart_Port port, int64_t timeout) {
+    if (timeout < 0) {
+      timeouts_.RemoveByValue(port);
+    } else {
+      timeouts_.InsertOrChangePriority(timeout, port);
+    }
+  }
 
  private:
-  Timeout* next_timeout_;
-  Timeout* timeouts_;
+  PriorityQueue<int64_t, Dart_Port> timeouts_;
 
   DISALLOW_COPY_AND_ASSIGN(TimeoutQueue);
 };
-
 
 class InterruptMessage {
  public:
@@ -119,12 +104,10 @@ class InterruptMessage {
   int64_t data;
 };
 
-
 static const int kInterruptMessageSize = sizeof(InterruptMessage);
 static const int kInfinityTimeout = -1;
 static const int kTimerId = -1;
 static const int kShutdownId = -2;
-
 
 template <typename T>
 class CircularLinkedList {
@@ -229,7 +212,6 @@ class CircularLinkedList {
   DISALLOW_COPY_AND_ASSIGN(CircularLinkedList);
 };
 
-
 class DescriptorInfoBase {
  public:
   explicit DescriptorInfoBase(intptr_t fd) : fd_(fd) { ASSERT(fd_ != -1); }
@@ -276,7 +258,6 @@ class DescriptorInfoBase {
  private:
   DISALLOW_COPY_AND_ASSIGN(DescriptorInfoBase);
 };
-
 
 // Describes a OS descriptor (e.g. file descriptor on linux or HANDLE on
 // windows) which is connected to a single Dart_Port.
@@ -367,7 +348,6 @@ class DescriptorInfoSingleMixin : public DI {
   DISALLOW_COPY_AND_ASSIGN(DescriptorInfoSingleMixin);
 };
 
-
 // Describes a OS descriptor (e.g. file descriptor on linux or HANDLE on
 // windows) which is connected to multiple Dart_Port's.
 //
@@ -405,7 +385,7 @@ class DescriptorInfoMultipleMixin : public DI {
     intptr_t is_reading;
     intptr_t token_count;
 
-    bool IsReady() { return token_count > 0 && is_reading; }
+    bool IsReady() { return token_count > 0 && is_reading != 0; }
   };
 
  public:
@@ -419,7 +399,7 @@ class DescriptorInfoMultipleMixin : public DI {
   virtual bool IsListeningSocket() const { return true; }
 
   virtual void SetPortAndMask(Dart_Port port, intptr_t mask) {
-    HashMap::Entry* entry = tokens_map_.Lookup(
+    SimpleHashMap::Entry* entry = tokens_map_.Lookup(
         GetHashmapKeyFromPort(port), GetHashmapHashFromPort(port), true);
     PortEntry* pentry;
     if (entry->value == NULL) {
@@ -460,7 +440,7 @@ class DescriptorInfoMultipleMixin : public DI {
       } while (current != root);
     }
 
-    for (HashMap::Entry* entry = tokens_map_.Start(); entry != NULL;
+    for (SimpleHashMap::Entry* entry = tokens_map_.Start(); entry != NULL;
          entry = tokens_map_.Next(entry)) {
       PortEntry* pentry = reinterpret_cast<PortEntry*>(entry->value);
       if (pentry->IsReady()) {
@@ -473,7 +453,7 @@ class DescriptorInfoMultipleMixin : public DI {
   }
 
   virtual void RemovePort(Dart_Port port) {
-    HashMap::Entry* entry = tokens_map_.Lookup(
+    SimpleHashMap::Entry* entry = tokens_map_.Lookup(
         GetHashmapKeyFromPort(port), GetHashmapHashFromPort(port), false);
     if (entry != NULL) {
       PortEntry* pentry = reinterpret_cast<PortEntry*>(entry->value);
@@ -497,7 +477,7 @@ class DescriptorInfoMultipleMixin : public DI {
   }
 
   virtual void RemoveAllPorts() {
-    for (HashMap::Entry* entry = tokens_map_.Start(); entry != NULL;
+    for (SimpleHashMap::Entry* entry = tokens_map_.Start(); entry != NULL;
          entry = tokens_map_.Next(entry)) {
       PortEntry* pentry = reinterpret_cast<PortEntry*>(entry->value);
       entry->value = NULL;
@@ -538,7 +518,7 @@ class DescriptorInfoMultipleMixin : public DI {
     ASSERT(IS_EVENT(events, kCloseEvent) || IS_EVENT(events, kErrorEvent) ||
            IS_EVENT(events, kDestroyedEvent));
 
-    for (HashMap::Entry* entry = tokens_map_.Start(); entry != NULL;
+    for (SimpleHashMap::Entry* entry = tokens_map_.Start(); entry != NULL;
          entry = tokens_map_.Next(entry)) {
       PortEntry* pentry = reinterpret_cast<PortEntry*>(entry->value);
       DartUtils::PostInt32(pentry->dart_port, events);
@@ -556,7 +536,7 @@ class DescriptorInfoMultipleMixin : public DI {
   }
 
   virtual void ReturnTokens(Dart_Port port, int count) {
-    HashMap::Entry* entry = tokens_map_.Lookup(
+    SimpleHashMap::Entry* entry = tokens_map_.Lookup(
         GetHashmapKeyFromPort(port), GetHashmapHashFromPort(port), false);
     ASSERT(entry != NULL);
 
@@ -566,7 +546,7 @@ class DescriptorInfoMultipleMixin : public DI {
       pentry->token_count += count;
     }
     ASSERT(pentry->token_count <= kTokenCount);
-    bool is_ready = pentry->token_count > 0 && pentry->IsReady();
+    bool is_ready = pentry->IsReady();
     if (!was_ready && is_ready) {
       active_readers_.Add(pentry);
     }
@@ -594,7 +574,7 @@ class DescriptorInfoMultipleMixin : public DI {
 
   // A convenience mapping:
   //   Dart_Port -> struct PortEntry { dart_port, mask, token_count }
-  HashMap tokens_map_;
+  SimpleHashMap tokens_map_;
 
   bool disable_tokens_;
 
@@ -605,15 +585,15 @@ class DescriptorInfoMultipleMixin : public DI {
 }  // namespace dart
 
 // The event handler delegation class is OS specific.
-#if defined(HOST_OS_ANDROID)
+#if defined(DART_HOST_OS_ANDROID)
 #include "bin/eventhandler_android.h"
-#elif defined(HOST_OS_FUCHSIA)
+#elif defined(DART_HOST_OS_FUCHSIA)
 #include "bin/eventhandler_fuchsia.h"
-#elif defined(HOST_OS_LINUX)
+#elif defined(DART_HOST_OS_LINUX)
 #include "bin/eventhandler_linux.h"
-#elif defined(HOST_OS_MACOS)
+#elif defined(DART_HOST_OS_MACOS)
 #include "bin/eventhandler_macos.h"
-#elif defined(HOST_OS_WINDOWS)
+#elif defined(DART_HOST_OS_WINDOWS)
 #include "bin/eventhandler_win.h"
 #else
 #error Unknown target os.

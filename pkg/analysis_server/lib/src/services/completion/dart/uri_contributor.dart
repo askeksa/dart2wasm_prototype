@@ -1,61 +1,53 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library services.completion.contributor.dart.importuri;
-
-import 'dart:async';
-import 'dart:core';
-
-import 'package:analysis_server/src/protocol_server.dart'
-    show CompletionSuggestion, CompletionSuggestionKind;
 import 'package:analysis_server/src/provisional/completion/dart/completion_dart.dart';
+import 'package:analysis_server/src/services/completion/dart/completion_manager.dart';
+import 'package:analysis_server/src/services/completion/dart/suggestion_builder.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/file_system/file_system.dart';
-import 'package:analyzer/src/generated/sdk.dart';
-import 'package:analyzer/src/generated/source.dart';
 import 'package:path/path.dart' show posix;
-import 'package:path/src/context.dart';
 
-/**
- * A contributor for calculating uri suggestions
- * for import and part directives.
- */
+/// A contributor that produces suggestions based on the content of the file
+/// system to complete within URIs in import, export and part directives.
 class UriContributor extends DartCompletionContributor {
-  _UriSuggestionBuilder builder;
+  UriContributor(
+    DartCompletionRequest request,
+    SuggestionBuilder builder,
+  ) : super(request, builder);
 
   @override
-  Future<List<CompletionSuggestion>> computeSuggestions(
-      DartCompletionRequest request) async {
-    builder = new _UriSuggestionBuilder(request);
-    request.target.containingNode.accept(builder);
-    return builder.suggestions;
+  Future<void> computeSuggestions() async {
+    var visitor = _UriSuggestionBuilder(request, builder);
+    request.target.containingNode.accept(visitor);
   }
 }
 
-class _UriSuggestionBuilder extends SimpleAstVisitor {
+class _UriSuggestionBuilder extends SimpleAstVisitor<void> {
   final DartCompletionRequest request;
-  final List<CompletionSuggestion> suggestions = <CompletionSuggestion>[];
 
-  _UriSuggestionBuilder(this.request);
+  final SuggestionBuilder builder;
+
+  _UriSuggestionBuilder(this.request, this.builder);
 
   @override
-  visitExportDirective(ExportDirective node) {
+  void visitExportDirective(ExportDirective node) {
     visitNamespaceDirective(node);
   }
 
   @override
-  visitImportDirective(ImportDirective node) {
+  void visitImportDirective(ImportDirective node) {
     visitNamespaceDirective(node);
   }
 
-  visitNamespaceDirective(NamespaceDirective node) {
-    StringLiteral uri = node.uri;
+  void visitNamespaceDirective(NamespaceDirective node) {
+    var uri = node.uri;
     if (uri is SimpleStringLiteral) {
-      int offset = request.offset;
-      int start = uri.offset;
-      int end = uri.end;
+      var offset = request.offset;
+      var start = uri.offset;
+      var end = uri.end;
       if (offset > start) {
         if (offset < end) {
           // Quoted non-empty string
@@ -65,9 +57,9 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
             // Quoted empty string
             visitSimpleStringLiteral(uri);
           } else {
-            String data = request.sourceContents;
+            var data = request.content;
             if (end == data.length) {
-              String ch = data[end - 1];
+              var ch = data[end - 1];
               if (ch != '"' && ch != "'") {
                 // Insertion point at end of file
                 // and missing closing quote on non-empty string
@@ -77,9 +69,9 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
           }
         }
       } else if (offset == start && offset == end) {
-        String data = request.sourceContents;
+        var data = request.content;
         if (end == data.length) {
-          String ch = data[end - 1];
+          var ch = data[end - 1];
           if (ch == '"' || ch == "'") {
             // Insertion point at end of file
             // and missing closing quote on empty string
@@ -91,17 +83,17 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
   }
 
   @override
-  visitSimpleStringLiteral(SimpleStringLiteral node) {
-    AstNode parent = node.parent;
+  void visitSimpleStringLiteral(SimpleStringLiteral node) {
+    var parent = node.parent;
     if (parent is NamespaceDirective && parent.uri == node) {
-      String partialUri = _extractPartialUri(node);
+      var partialUri = _extractPartialUri(node);
       if (partialUri != null) {
         _addDartSuggestions();
         _addPackageSuggestions(partialUri);
         _addFileSuggestions(partialUri);
       }
     } else if (parent is PartDirective && parent.uri == node) {
-      String partialUri = _extractPartialUri(node);
+      var partialUri = _extractPartialUri(node);
       if (partialUri != null) {
         _addFileSuggestions(partialUri);
       }
@@ -109,27 +101,24 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
   }
 
   void _addDartSuggestions() {
-    _addSuggestion('dart:');
-    SourceFactory factory = request.sourceFactory;
-    for (SdkLibrary lib in factory.dartSdk.sdkLibraries) {
+    builder.suggestUri('dart:');
+    var factory = request.sourceFactory;
+    for (var lib in factory.dartSdk!.sdkLibraries) {
       if (!lib.isInternal && !lib.isImplementation) {
         if (!lib.shortName.startsWith('dart:_')) {
-          _addSuggestion(lib.shortName,
-              relevance: lib.shortName == 'dart:core'
-                  ? DART_RELEVANCE_LOW
-                  : DART_RELEVANCE_DEFAULT);
+          builder.suggestUri(lib.shortName);
         }
       }
     }
   }
 
   void _addFileSuggestions(String partialUri) {
-    ResourceProvider resProvider = request.resourceProvider;
-    Context resContext = resProvider.pathContext;
-    Source source = request.source;
+    var resProvider = request.resourceProvider;
+    var resContext = resProvider.pathContext;
+    var source = request.source;
 
     String parentUri;
-    if ((partialUri.endsWith('/'))) {
+    if (partialUri.endsWith('/')) {
       parentUri = partialUri;
     } else {
       parentUri = posix.dirname(partialUri);
@@ -137,19 +126,27 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
         parentUri = '$parentUri/';
       }
     }
-    String uriPrefix = parentUri == '.' ? '' : parentUri;
+    var uriPrefix = parentUri == '.' ? '' : parentUri;
 
-    String dirPath = resContext.normalize(parentUri);
+    // Only handle file uris in the format file:///xxx or /xxx
+    var parentUriScheme = Uri.parse(parentUri).scheme;
+    if (!parentUri.startsWith('file://') && parentUriScheme != '') {
+      return;
+    }
+
+    var dirPath = resProvider.pathContext.fromUri(parentUri);
+    dirPath = resContext.normalize(dirPath);
+
     if (resContext.isRelative(dirPath)) {
-      String sourceDirPath = resContext.dirname(source.fullName);
+      var sourceDirPath = resContext.dirname(source.fullName);
       if (resContext.isAbsolute(sourceDirPath)) {
         dirPath = resContext.normalize(resContext.join(sourceDirPath, dirPath));
       } else {
         return;
       }
       // Do not suggest relative paths reaching outside the 'lib' directory.
-      bool srcInLib = resContext.split(sourceDirPath).contains('lib');
-      bool dstInLib = resContext.split(dirPath).contains('lib');
+      var srcInLib = resContext.split(sourceDirPath).contains('lib');
+      var dstInLib = resContext.split(dirPath).contains('lib');
       if (srcInLib && !dstInLib) {
         return;
       }
@@ -158,18 +155,22 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
       dirPath = dirPath.substring(0, dirPath.length - 1);
     }
 
-    Resource dir = resProvider.getResource(dirPath);
+    var dir = resProvider.getResource(dirPath);
     if (dir is Folder) {
       try {
-        for (Resource child in dir.getChildren()) {
-          String completion;
+        for (var child in dir.getChildren()) {
+          String? completion;
           if (child is Folder) {
-            completion = '$uriPrefix${child.shortName}/';
-          } else {
-            completion = '$uriPrefix${child.shortName}';
+            if (!child.shortName.startsWith('.')) {
+              completion = '$uriPrefix${child.shortName}/';
+            }
+          } else if (child is File) {
+            if (child.shortName.endsWith('.dart')) {
+              completion = '$uriPrefix${child.shortName}';
+            }
           }
-          if (completion != source.shortName) {
-            _addSuggestion(completion);
+          if (completion != null && completion != source.shortName) {
+            builder.suggestUri(completion);
           }
         }
       } on FileSystemException {
@@ -181,15 +182,15 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
   void _addPackageFolderSuggestions(
       String partial, String prefix, Folder folder) {
     try {
-      for (Resource child in folder.getChildren()) {
+      for (var child in folder.getChildren()) {
         if (child is Folder) {
-          String childPrefix = '$prefix${child.shortName}/';
-          _addSuggestion(childPrefix);
+          var childPrefix = '$prefix${child.shortName}/';
+          builder.suggestUri(childPrefix);
           if (partial.startsWith(childPrefix)) {
             _addPackageFolderSuggestions(partial, childPrefix, child);
           }
         } else {
-          _addSuggestion('$prefix${child.shortName}');
+          builder.suggestUri('$prefix${child.shortName}');
         }
       }
     } on FileSystemException {
@@ -199,14 +200,14 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
   }
 
   void _addPackageSuggestions(String partial) {
-    SourceFactory factory = request.sourceFactory;
-    Map<String, List<Folder>> packageMap = factory.packageMap;
+    var factory = request.sourceFactory;
+    var packageMap = factory.packageMap;
     if (packageMap != null) {
-      _addSuggestion('package:');
-      packageMap.forEach((String pkgName, List<Folder> folders) {
-        String prefix = 'package:$pkgName/';
-        _addSuggestion(prefix);
-        for (Folder folder in folders) {
+      builder.suggestUri('package:');
+      packageMap.forEach((pkgName, folders) {
+        var prefix = 'package:$pkgName/';
+        builder.suggestUri(prefix);
+        for (var folder in folders) {
           if (folder.exists) {
             _addPackageFolderSuggestions(partial, prefix, folder);
           }
@@ -215,13 +216,7 @@ class _UriSuggestionBuilder extends SimpleAstVisitor {
     }
   }
 
-  void _addSuggestion(String completion,
-      {int relevance: DART_RELEVANCE_DEFAULT}) {
-    suggestions.add(new CompletionSuggestion(CompletionSuggestionKind.IMPORT,
-        relevance, completion, completion.length, 0, false, false));
-  }
-
-  String _extractPartialUri(SimpleStringLiteral node) {
+  String? _extractPartialUri(SimpleStringLiteral node) {
     if (request.offset < node.contentsOffset) {
       return null;
     }

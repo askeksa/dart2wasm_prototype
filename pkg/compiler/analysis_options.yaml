@@ -3,10 +3,14 @@
 # BSD-style license that can be found in the LICENSE file.
 
 analyzer:
-  strong-mode: false
-  language:
-    enableSuperMixins: false
   errors:
     todo: ignore
+    # Allow deprecated calls from within the same package
+    deprecated_member_use_from_same_package: ignore
 
-    deprecated_member_use: ignore
+linter:
+  rules:
+    - annotate_overrides
+    - prefer_final_fields
+    - prefer_if_null_operators
+    - prefer_null_aware_operators

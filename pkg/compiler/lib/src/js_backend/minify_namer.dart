@@ -4,32 +4,23 @@
 
 part of js_backend.namer;
 
-/**
- * Assigns JavaScript identifiers to Dart variables, class-names and members.
- */
+/// Assigns JavaScript identifiers to Dart variables, class-names and members.
 class MinifyNamer extends Namer
     with
         _MinifiedFieldNamer,
         _MinifyConstructorBodyNamer,
         _MinifiedOneShotInterceptorNamer {
-  MinifyNamer(ClosedWorld closedWorld, CodegenWorldBuilder codegenWorldBuilder)
-      : super(closedWorld, codegenWorldBuilder) {
+  MinifyNamer(JClosedWorld closedWorld, FixedNames fixedNames)
+      : super(closedWorld, fixedNames) {
     reserveBackendNames();
-    fieldRegistry = new _FieldNamingRegistry(this);
+    fieldRegistry = _FieldNamingRegistry(this);
   }
 
+  @override
   _FieldNamingRegistry fieldRegistry;
 
-  String get isolateName => 'I';
-  String get isolatePropertiesName => 'p';
-  bool get shouldMinify => true;
-
-  final String getterPrefix = 'g';
-  final String setterPrefix = 's';
-  final String callPrefix = ''; // this will create function names $<n>
-  String get requiredParameterField => r'$R';
-  String get defaultValuesField => r'$D';
-  String get operatorSignature => r'$S';
+  @override
+  String get genericInstantiationPrefix => r'$I';
 
   final ALPHABET_CHARACTERS = 52; // a-zA-Z.
   final ALPHANUMERIC_CHARACTERS = 62; // a-zA-Z0-9.
@@ -41,7 +32,7 @@ class MinifyNamer extends Namer
   /// minified names will always avoid clashing with annotated names or natives.
   @override
   String _generateFreshStringForName(String proposedName, NamingScope scope,
-      {bool sanitizeForNatives: false, bool sanitizeForAnnotations: false}) {
+      {bool sanitizeForNatives = false, bool sanitizeForAnnotations = false}) {
     String freshName;
     String suggestion = scope.suggestName(proposedName);
     if (suggestion != null && scope.isUnused(suggestion)) {
@@ -53,33 +44,61 @@ class MinifyNamer extends Namer
     return freshName;
   }
 
-  // From issue 7554.  These should not be used on objects (as instance
-  // variables) because they clash with names from the DOM. However, it is
-  // OK to use them as fields, as we only access fields directly if we know
-  // the receiver type.
-  static const List<String> _reservedNativeProperties = const <String>[
-    'a', 'b', 'c', 'd', 'e', 'f', 'r', 'x', 'y', 'z', 'Q',
-    // 2-letter:
-    'ch', 'cx', 'cy', 'db', 'dx', 'dy', 'fr', 'fx', 'fy', 'go', 'id', 'k1',
-    'k2', 'k3', 'k4', 'r1', 'r2', 'rx', 'ry', 'x1', 'x2', 'y1', 'y2',
-    // 3-letter:
-    'add', 'all', 'alt', 'arc', 'CCW', 'cmp', 'dir', 'end', 'get', 'in1',
-    'in2', 'INT', 'key', 'log', 'low', 'm11', 'm12', 'm13', 'm14', 'm21',
-    'm22', 'm23', 'm24', 'm31', 'm32', 'm33', 'm34', 'm41', 'm42', 'm43',
-    'm44', 'max', 'min', 'now', 'ONE', 'put', 'red', 'rel', 'rev', 'RGB',
-    'sdp', 'set', 'src', 'tag', 'top', 'uid', 'uri', 'url', 'URL',
-    // 4-letter:
-    'abbr', 'atob', 'Attr', 'axes', 'axis', 'back', 'BACK', 'beta', 'bias',
-    'Blob', 'blue', 'blur', 'BLUR', 'body', 'BOOL', 'BOTH', 'btoa', 'BYTE',
-    'cite', 'clip', 'code', 'cols', 'cues', 'data', 'DECR', 'DONE', 'face',
-    'file', 'File', 'fill', 'find', 'font', 'form', 'gain', 'hash', 'head',
-    'high', 'hint', 'host', 'href', 'HRTF', 'IDLE', 'INCR', 'info', 'INIT',
-    'isId', 'item', 'KEEP', 'kind', 'knee', 'lang', 'left', 'LESS', 'line',
-    'link', 'list', 'load', 'loop', 'mode', 'name', 'Node', 'None', 'NONE',
-    'only', 'open', 'OPEN', 'ping', 'play', 'port', 'rect', 'Rect', 'refX',
-    'refY', 'RGBA', 'root', 'rows', 'save', 'seed', 'seek', 'self', 'send',
-    'show', 'SINE', 'size', 'span', 'stat', 'step', 'stop', 'tags', 'text',
-    'Text', 'time', 'type', 'view', 'warn', 'wrap', 'ZERO'
+  /// Property names that are used on 'native' JavaScript classes.
+  ///
+  /// It is best not to use these names for dynamic call selectors.
+  ///
+  /// Dynamic calls to selectors that are used on an intercepted (e.g. String)
+  /// class (e.g. String) or native class (e.g. HtmlElement) are not a problem
+  /// since they are handled via the interceptor calling mechanism. Other
+  /// selectors are called directly, so the minified selector should not be a
+  /// name that accidentally collides with a JavaScript method.  For example,
+  /// the minified call site for the dynamic call `item.yowza()` should not be
+  /// `x.at()`, since, if `x` was a String, that would call
+  /// `String.prototype.at` instead of generating an error.
+  ///
+  /// These names are reserved for the property names of fields, since fields
+  /// are always accessed from a know receiver. (A 'field' of an unknown
+  /// receiver would actually be the getter method.)
+  ///
+  /// These names could be used for selectors that use the interceptor calling
+  /// convention, or for selectors are not called from a `dynamic` call site, or
+  /// any other use where the JavaScript receiver is constrained to be something
+  /// from within the dart program.
+  ///
+  /// TODO(7554): Refresh periodically.
+  static const List<String> _reservedNativeProperties = [
+    // 1 character
+    'a', 'b', 'c', 'd', 'e', 'f', 'r', 'w', 'x', 'y', 'z', 'Q',
+
+    // 2 characters
+    'as', 'at', 'ax', 'ay', 'ch', 'CW', 'cx', 'cy', 'db', 'dx', 'dy', 'fr',
+    'fx', 'fy', 'go', 'id', 'k1', 'k2', 'k3', 'k4', 'ok', 'p1', 'p2', 'p3',
+    'p4', 'R8', 'RG', 'rx', 'ry', 'to', 'x1', 'x2', 'xr', 'y1', 'y2',
+
+    // 3 characters
+    'add', 'all', 'alt', 'arc', 'big', 'CCW', 'cmp', 'csp', 'dir', 'div', 'end',
+    'eye', 'get', 'has', 'hid', 'in1', 'in2', 'ink', 'INT', 'key', 'low', 'm11',
+    'm12', 'm13', 'm14', 'm21', 'm22', 'm23', 'm24', 'm31', 'm32', 'm33', 'm34',
+    'm41', 'm42', 'm43', 'm44', 'map', 'max', 'MAX', 'mid', 'min', 'MIN', 'mul',
+    'now', 'ONE', 'pad', 'pan', 'pop', 'put', 'R8I', 'RED', 'rel', 'rev', 'RG8',
+    'RGB', 'rtt', 'sdp', 'set', 'src', 'sub', 'sup', 'tag', 'tee', 'top', 'upX',
+    'upY', 'upZ', 'url', 'URL', 'usb',
+
+    // 4 characters
+    'abbr', 'axes', 'axis', 'back', 'BACK', 'beta', 'bias', 'bind', 'blob',
+    'blur', 'body', 'bold', 'BOOL', 'BYTE', 'call', 'cite', 'city', 'clip',
+    'code', 'cols', 'cues', 'data', 'DECR', 'DONE', 'dtmf', 'exec', 'face',
+    'fill', 'find', 'flat', 'font', 'form', 'gain', 'hash', 'head', 'hide',
+    'high', 'hint', 'host', 'href', 'icon', 'INCR', 'is2D', 'item', 'join',
+    'json', 'KEEP', 'keys', 'kind', 'knee', 'lang', 'left', 'LESS', 'line',
+    'link', 'list', 'load', 'lock', 'loop', 'mark', 'mode', 'name', 'node',
+    'NONE', 'open', 'OPEN', 'part', 'path', 'ping', 'play', 'port', 'push',
+    'R16F', 'R16I', 'R32F', 'R32I', 'R8UI', 'rate', 'read', 'rect', 'refX',
+    'refY', 'RG8I', 'RGB8', 'RGBA', 'role', 'root', 'rows', 'save', 'sctp',
+    'seed', 'seek', 'send', 'show', 'sign', 'size', 'slot', 'some', 'sort',
+    'span', 'SRGB', 'step', 'stop', 'sync', 'test', 'text', 'then', 'time',
+    'tone', 'trim', 'type', 'unit', 'view', 'wrap', 'ZERO',
   ];
 
   void reserveBackendNames() {
@@ -104,7 +123,7 @@ class MinifyNamer extends Namer
     // individually per program, but that would mean that the output of the
     // minifier was less stable from version to version of the program being
     // minified.
-    _populateSuggestedNames(instanceScope, const <String>[
+    _populateSuggestedNames(instanceScope, const [
       r'$add',
       r'add$1',
       r'$and',
@@ -145,7 +164,7 @@ class MinifyNamer extends Namer
       r'toString$0'
     ]);
 
-    _populateSuggestedNames(globalScope, const <String>[
+    _populateSuggestedNames(globalScope, const [
       r'Object',
       'wrapException',
       r'$eq',
@@ -165,7 +184,7 @@ class MinifyNamer extends Namer
       r'BoundClosure',
       r'Closure',
       r'StateError$',
-      r'getInterceptor',
+      r'getInterceptor$',
       r'max',
       r'$mul',
       r'Map',
@@ -181,7 +200,7 @@ class MinifyNamer extends Namer
       r'JSArray',
       r'createInvocationMirror',
       r'String',
-      r'setRuntimeTypeInfo',
+      r'setArrayType',
       r'createRuntimeType'
     ]);
   }
@@ -193,7 +212,7 @@ class MinifyNamer extends Namer
       do {
         assert(c != $Z);
         c = (c == $z) ? $A : c + 1;
-        letter = new String.fromCharCodes([c]);
+        letter = String.fromCharCodes([c]);
       } while (_hasBannedPrefix(letter) || scope.isUsed(letter));
       assert(!scope.hasSuggestion(name));
       scope.addSuggestion(name, letter);
@@ -217,13 +236,13 @@ class MinifyNamer extends Namer
     for (int n = 1; n <= 3; n++) {
       int h = hash;
       while (h > 10) {
-        List<int> codes = <int>[_letterNumber(h)];
+        List<int> codes = [_letterNumber(h)];
         int h2 = h ~/ ALPHABET_CHARACTERS;
         for (int i = 1; i < n; i++) {
           codes.add(_alphaNumericNumber(h2));
           h2 ~/= ALPHANUMERIC_CHARACTERS;
         }
-        final candidate = new String.fromCharCodes(codes);
+        final candidate = String.fromCharCodes(codes);
         if (scope.isUnused(candidate) &&
             !jsReserved.contains(candidate) &&
             !_hasBannedPrefix(candidate) &&
@@ -260,14 +279,13 @@ class MinifyNamer extends Namer
 
   /// Remember bad hashes to avoid using a the same character with long numbers
   /// for frequent hashes. For example, `closure` is a very common name.
-  Map<int, int> _badNames = new Map<int, int>();
+  final Map<int, int> _badNames = {};
 
   /// If we can't find a hash based name in the three-letter space, then base
   /// the name on a letter and a counter.
   String _badName(int hash, NamingScope scope) {
     int count = _badNames.putIfAbsent(hash, () => 0);
-    String startLetter =
-        new String.fromCharCodes([_letterNumber(hash + count)]);
+    String startLetter = String.fromCharCodes([_letterNumber(hash + count)]);
     _badNames[hash] = count + 1;
     String name;
     int i = 0;
@@ -294,7 +312,7 @@ class MinifyNamer extends Namer
   }
 
   @override
-  jsAst.Name instanceFieldPropertyName(FieldElement element) {
+  jsAst.Name instanceFieldPropertyName(FieldEntity element) {
     jsAst.Name proposed = _minifiedInstanceFieldPropertyName(element);
     if (proposed != null) {
       return proposed;
@@ -315,56 +333,68 @@ class MinifyNamer extends Namer
 /// constructors declared along the inheritance chain.
 class _ConstructorBodyNamingScope {
   final int _startIndex;
-  final List _constructors;
-
+  final List<ConstructorEntity> _constructors;
   int get numberOfConstructors => _constructors.length;
 
-  _ConstructorBodyNamingScope.rootScope(ClassElement cls)
+  _ConstructorBodyNamingScope.rootScope(
+      ClassEntity cls, ElementEnvironment environment)
       : _startIndex = 0,
-        _constructors = cls.constructors.toList(growable: false);
+        _constructors = _getConstructorList(cls, environment);
 
-  _ConstructorBodyNamingScope.forClass(
-      ClassElement cls, _ConstructorBodyNamingScope superScope)
+  _ConstructorBodyNamingScope.forClass(ClassEntity cls,
+      _ConstructorBodyNamingScope superScope, ElementEnvironment environment)
       : _startIndex = superScope._startIndex + superScope.numberOfConstructors,
-        _constructors = cls.constructors.toList(growable: false);
+        _constructors = _getConstructorList(cls, environment);
 
   // Mixin Applications have constructors but we never generate code for them,
   // so they do not count in the inheritance chain.
   _ConstructorBodyNamingScope.forMixinApplication(
-      ClassElement cls, _ConstructorBodyNamingScope superScope)
+      ClassEntity cls, _ConstructorBodyNamingScope superScope)
       : _startIndex = superScope._startIndex + superScope.numberOfConstructors,
         _constructors = const [];
 
-  factory _ConstructorBodyNamingScope(ClassElement cls,
-      Map<ClassElement, _ConstructorBodyNamingScope> registry) {
+  factory _ConstructorBodyNamingScope(
+      ClassEntity cls,
+      Map<ClassEntity, _ConstructorBodyNamingScope> registry,
+      ElementEnvironment environment) {
     return registry.putIfAbsent(cls, () {
-      if (cls.superclass == null) {
-        return new _ConstructorBodyNamingScope.rootScope(cls);
-      } else if (cls.isMixinApplication) {
-        return new _ConstructorBodyNamingScope.forMixinApplication(
-            cls, new _ConstructorBodyNamingScope(cls.superclass, registry));
+      ClassEntity superclass = environment.getSuperClass(cls);
+      if (superclass == null) {
+        return _ConstructorBodyNamingScope.rootScope(cls, environment);
+      } else if (environment.isMixinApplication(cls)) {
+        return _ConstructorBodyNamingScope.forMixinApplication(cls,
+            _ConstructorBodyNamingScope(superclass, registry, environment));
       } else {
-        return new _ConstructorBodyNamingScope.forClass(
-            cls, new _ConstructorBodyNamingScope(cls.superclass, registry));
+        return _ConstructorBodyNamingScope.forClass(
+            cls,
+            _ConstructorBodyNamingScope(superclass, registry, environment),
+            environment);
       }
     });
   }
 
-  String constructorBodyKeyFor(ConstructorBodyElement body) {
+  String constructorBodyKeyFor(ConstructorBodyEntity body) {
     int position = _constructors.indexOf(body.constructor);
-    assert(invariant(body, position >= 0, message: "constructor body missing"));
+    assert(position >= 0, failedAt(body, "constructor body missing"));
     return "@constructorBody@${_startIndex + position}";
+  }
+
+  static List<ConstructorEntity> _getConstructorList(
+      ClassEntity cls, ElementEnvironment environment) {
+    var result = <ConstructorEntity>[];
+    environment.forEachConstructor(cls, result.add);
+    return result;
   }
 }
 
 abstract class _MinifyConstructorBodyNamer implements Namer {
-  Map<ClassElement, _ConstructorBodyNamingScope> _constructorBodyScopes =
-      new Map<ClassElement, _ConstructorBodyNamingScope>();
+  final Map<ClassEntity, _ConstructorBodyNamingScope> _constructorBodyScopes =
+      {};
 
   @override
-  jsAst.Name constructorBodyName(FunctionElement method) {
-    _ConstructorBodyNamingScope scope = new _ConstructorBodyNamingScope(
-        method.enclosingClass, _constructorBodyScopes);
+  jsAst.Name constructorBodyName(ConstructorBodyEntity method) {
+    _ConstructorBodyNamingScope scope = _ConstructorBodyNamingScope(
+        method.enclosingClass, _constructorBodyScopes, _elementEnvironment);
     String key = scope.constructorBodyKeyFor(method);
     return _disambiguateMemberByKey(
         key, () => _proposeNameForConstructorBody(method));
@@ -375,17 +405,21 @@ abstract class _MinifiedOneShotInterceptorNamer implements Namer {
   /// Property name used for the one-shot interceptor method for the given
   /// [selector] and return-type specialization.
   @override
-  jsAst.Name nameForGetOneShotInterceptor(
+  jsAst.Name nameForOneShotInterceptor(
       Selector selector, Iterable<ClassEntity> classes) {
     String root = selector.isOperator
-        ? operatorNameToIdentifier(selector.name)
+        ? Namer.operatorNameToIdentifier(selector.name)
         : privateName(selector.memberName);
-    String prefix =
-        selector.isGetter ? r"$get" : selector.isSetter ? r"$set" : "";
+    String prefix = selector.isGetter
+        ? r"$get"
+        : selector.isSetter
+            ? r"$set"
+            : "";
     String callSuffix = selector.isCall
-        ? callSuffixForStructure(selector.callStructure).join()
+        ? Namer.callSuffixForStructure(selector.callStructure).join()
         : "";
-    String suffix = suffixForGetInterceptor(classes);
+    String suffix =
+        suffixForGetInterceptor(_commonElements, _nativeData, classes);
     String fullName = "\$intercepted$prefix\$$root$callSuffix\$$suffix";
     return _disambiguateInternalGlobal(fullName);
   }

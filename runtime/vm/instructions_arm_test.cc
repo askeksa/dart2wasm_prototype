@@ -5,7 +5,7 @@
 #include "vm/globals.h"
 #if defined(TARGET_ARCH_ARM)
 
-#include "vm/assembler.h"
+#include "vm/compiler/assembler/assembler.h"
 #include "vm/cpu.h"
 #include "vm/instructions.h"
 #include "vm/stub_code.h"
@@ -16,12 +16,13 @@ namespace dart {
 #define __ assembler->
 
 ASSEMBLER_TEST_GENERATE(Call, assembler) {
-  // Code accessing pp is generated, but not executed. Uninitialized pp is OK.
-  __ set_constant_pool_allowed(true);
-  __ BranchLinkPatchable(*StubCode::InvokeDartCode_entry());
+  // Code is generated, but not executed. Just parsed with CallPattern.
+  __ set_constant_pool_allowed(true);  // Uninitialized pp is OK.
+  SPILLS_LR_TO_FRAME({});              // Clobbered LR is OK.
+  __ BranchLinkPatchable(StubCode::InvokeDartCode());
+  RESTORES_LR_FROM_FRAME({});  // Clobbered LR is OK.
   __ Ret();
 }
-
 
 ASSEMBLER_TEST_RUN(Call, test) {
   // The return address, which must be the address of an instruction contained
@@ -29,7 +30,7 @@ ASSEMBLER_TEST_RUN(Call, test) {
   // before the end of the code buffer.
   uword end = test->payload_start() + test->code().Size();
   CallPattern call(end - Instr::kInstrSize, test->code());
-  EXPECT_EQ(StubCode::InvokeDartCode_entry()->code(), call.TargetCode());
+  EXPECT_EQ(StubCode::InvokeDartCode().ptr(), call.TargetCode());
 }
 
 }  // namespace dart

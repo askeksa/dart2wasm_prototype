@@ -9,25 +9,22 @@ import 'dart:async';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/any_ref.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/instance_ref.dart';
 
-class EvalBoxElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<EvalBoxElement>('eval-box',
-      dependencies: const [InstanceRefElement.tag]);
-
-  RenderingScheduler<EvalBoxElement> _r;
+class EvalBoxElement extends CustomElement implements Renderable {
+  late RenderingScheduler<EvalBoxElement> _r;
 
   Stream<RenderedEvent<EvalBoxElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.ObjectRef _context;
-  M.ObjectRepository _objects;
-  M.EvalRepository _eval;
+  late M.IsolateRef _isolate;
+  late M.ObjectRef _context;
+  late M.ObjectRepository _objects;
+  late M.EvalRepository _eval;
   final _results = <_ExpressionDescription>[];
-  String _expression = '';
-  bool _multiline;
-  Iterable<String> _quickExpressions;
+  String? _expression = '';
+  late bool _multiline;
+  late Iterable<String> _quickExpressions;
 
   M.IsolateRef get isolate => _isolate;
   M.ObjectRef get context => _context;
@@ -36,15 +33,15 @@ class EvalBoxElement extends HtmlElement implements Renderable {
       M.ObjectRepository objects, M.EvalRepository eval,
       {bool multiline: false,
       Iterable<String> quickExpressions: const [],
-      RenderingQueue queue}) {
+      RenderingQueue? queue}) {
     assert(isolate != null);
     assert(context != null);
     assert(objects != null);
     assert(eval != null);
     assert(multiline != null);
     assert(quickExpressions != null);
-    EvalBoxElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    EvalBoxElement e = new EvalBoxElement.created();
+    e._r = new RenderingScheduler<EvalBoxElement>(e, queue: queue);
     e._isolate = isolate;
     e._context = context;
     e._objects = objects;
@@ -54,7 +51,7 @@ class EvalBoxElement extends HtmlElement implements Renderable {
     return e;
   }
 
-  EvalBoxElement.created() : super.created();
+  EvalBoxElement.created() : super.created('eval-box');
 
   @override
   void attached() {
@@ -66,30 +63,32 @@ class EvalBoxElement extends HtmlElement implements Renderable {
   void detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
     _results.clear();
   }
 
   void render() {
-    children = [
+    children = <Element>[
       new DivElement()
         ..classes = ['quicks']
-        ..children = _quickExpressions.map((q) => new ButtonElement()
-          ..text = q
-          ..onClick.listen((_) {
-            _expression = q;
-            _run();
-          })),
+        ..children = _quickExpressions
+            .map<Element>((q) => new ButtonElement()
+              ..text = q
+              ..onClick.listen((_) {
+                _expression = q;
+                _run();
+              }))
+            .toList(),
       new DivElement()
         ..classes = ['heading']
-        ..children = [
+        ..children = <Element>[
           new FormElement()
             ..autocomplete = 'on'
-            ..children = [
+            ..children = <Element>[
               _multiline ? _createEvalTextArea() : _createEvalTextBox(),
               new SpanElement()
                 ..classes = ['buttons']
-                ..children = [
+                ..children = <Element>[
                   _createEvalButton(),
                   _createMultilineCheckbox(),
                   new SpanElement()..text = 'Multi-line'
@@ -98,11 +97,11 @@ class EvalBoxElement extends HtmlElement implements Renderable {
         ],
       new TableElement()
         ..children = _results.reversed
-            .map((result) => new TableRowElement()
-              ..children = [
+            .map<Element>((result) => new TableRowElement()
+              ..children = <Element>[
                 new TableCellElement()
                   ..classes = ['historyExpr']
-                  ..children = [
+                  ..children = <Element>[
                     new ButtonElement()
                       ..text = result.expression
                       ..onClick.listen((_) {
@@ -112,7 +111,7 @@ class EvalBoxElement extends HtmlElement implements Renderable {
                   ],
                 new TableCellElement()
                   ..classes = ['historyValue']
-                  ..children = [
+                  ..children = <Element>[
                     result.isPending
                         ? (new SpanElement()..text = 'Pending...')
                         : anyRef(_isolate, result.value, _objects,
@@ -120,7 +119,7 @@ class EvalBoxElement extends HtmlElement implements Renderable {
                   ],
                 new TableCellElement()
                   ..classes = ['historyDelete']
-                  ..children = [
+                  ..children = <Element>[
                     new ButtonElement()
                       ..text = '✖ Remove'
                       ..onClick.listen((_) {
@@ -133,7 +132,7 @@ class EvalBoxElement extends HtmlElement implements Renderable {
     ];
   }
 
-  TextInputElement _createEvalTextArea() {
+  TextAreaElement _createEvalTextArea() {
     var area = new TextAreaElement()
       ..classes = ['textbox']
       ..placeholder = 'evaluate an expression'
@@ -178,15 +177,15 @@ class EvalBoxElement extends HtmlElement implements Renderable {
     final checkbox = new CheckboxInputElement()..checked = _multiline;
     checkbox.onClick.listen((e) {
       e.preventDefault();
-      _multiline = checkbox.checked;
+      _multiline = checkbox.checked!;
       _r.dirty();
     });
     return checkbox;
   }
 
   Future _run() async {
-    if (_expression == null || _expression.isEmpty) return;
     final expression = _expression;
+    if (expression == null || expression.isEmpty) return;
     _expression = null;
     final result = new _ExpressionDescription.pending(expression);
     _results.add(result);
@@ -200,7 +199,7 @@ class EvalBoxElement extends HtmlElement implements Renderable {
 
 class _ExpressionDescription {
   final String expression;
-  final M.ObjectRef value;
+  final M.ObjectRef? value;
   bool get isPending => value == null;
 
   _ExpressionDescription(this.expression, this.value);

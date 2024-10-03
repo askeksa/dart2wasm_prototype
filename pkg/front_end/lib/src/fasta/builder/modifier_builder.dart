@@ -4,36 +4,47 @@
 
 library fasta.modifier_builder;
 
-import '../modifier.dart'
-    show
-        abstractMask,
-        constMask,
-        externalMask,
-        finalMask,
-        namedMixinApplicationMask,
-        staticMask;
+import '../modifier.dart';
 
-import 'builder.dart' show Builder;
+import 'builder.dart';
 
-abstract class ModifierBuilder extends Builder {
-  final int charOffset;
+abstract class ModifierBuilder implements Builder {
+  String? get name;
 
-  ModifierBuilder(Builder parent, this.charOffset, [Uri fileUri])
-      : super(parent, charOffset, fileUri ?? parent?.fileUri);
+  bool get isNative;
+}
 
+abstract class ModifierBuilderImpl extends BuilderImpl
+    implements ModifierBuilder {
   int get modifiers;
 
-  bool get isAbstract => (modifiers & abstractMask) != 0;
+  String get debugName;
 
+  @override
+  Builder? parent;
+
+  @override
+  final int charOffset;
+
+  ModifierBuilderImpl(Builder? parent, this.charOffset) : this.parent = parent;
+
+  @override
   bool get isConst => (modifiers & constMask) != 0;
 
-  bool get isExternal => (modifiers & externalMask) != 0;
-
+  @override
   bool get isFinal => (modifiers & finalMask) != 0;
 
+  @override
   bool get isStatic => (modifiers & staticMask) != 0;
 
-  bool get isNamedMixinApplication {
-    return (modifiers & namedMixinApplicationMask) != 0;
+  @override
+  bool get isNative => false;
+
+  StringBuffer printOn(StringBuffer buffer) {
+    return buffer..write(name);
   }
+
+  @override
+  String toString() =>
+      "${isPatch ? 'patch ' : ''}$debugName(${printOn(new StringBuffer())})";
 }

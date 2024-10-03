@@ -153,7 +153,7 @@ testPhiForwarding4() {
   var b = new V(0.1);
   var c = new V(0.0);
 
-  var result = new List(9);
+  var result = new List<dynamic>.filled(9, null);
   for (var i = 0, j = 0; i < 3; i++) {
     result[j++] = a.f;
     result[j++] = b.f;
@@ -171,16 +171,16 @@ testPhiForwarding4() {
 class C {
   C(this.box, this.parent);
   final box;
-  final C parent;
+  final C? parent;
 }
 
 testPhiForwarding5(C c) {
   var s = 0;
   var tmp = c;
   var a = c.parent;
-  if (a.box + tmp.box != 1) throw "failed";
+  if (a!.box + tmp.box != 1) throw "failed";
   do {
-    s += tmp.box + a.box;
+    s += (tmp.box + a!.box) as int;
     tmp = a;
     a = a.parent;
   } while (a != null);
@@ -208,7 +208,7 @@ testEqualPhisElimination() {
       v.x = i - 1;
       v.y = i - 1;
     }
-    sum += v.x + v.y;
+    sum += (v.x + v.y) as int;
   }
   Expect.equals(4, sum);
   Expect.equals(2, u.x);
@@ -245,14 +245,14 @@ testIndexedNoAlias(a) {
 //
 
 testIndexedAliasedStore1(i) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   a[0] = 1; // X[C]
   a[i] = 2; // X[*]
   return a[0];
 }
 
 testIndexedAliasedStore2(f, c) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   a[0] = 1; // X[C]
   d[0] = 2; // *[C]
@@ -260,7 +260,7 @@ testIndexedAliasedStore2(f, c) {
 }
 
 testIndexedAliasedStore3(f, c, i) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   a[0] = 1; // X[C]
   d[i] = 2; // *[*]
@@ -268,21 +268,21 @@ testIndexedAliasedStore3(f, c, i) {
 }
 
 testIndexedAliasedStore4(i) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   a[i] = 1; // X[*]
   a[0] = 2; // X[C]
   return a[i];
 }
 
 testIndexedAliasedStore5(i, j) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   a[i] = 1; // X[*]
   a[j] = 2; // X[*]
   return a[i];
 }
 
 testIndexedAliasedStore6(i, f, c) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   a[i] = 1; // X[*]
   d[0] = 2; // *[C]
@@ -290,7 +290,7 @@ testIndexedAliasedStore6(i, f, c) {
 }
 
 testIndexedAliasedStore7(i, f, c) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   a[i] = 1; // X[*]
   d[i] = 2; // *[*]
@@ -304,7 +304,7 @@ testIndexedAliasedStore8(c, i) {
 }
 
 testIndexedAliasedStore9(c, f) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   c[0] = 1; // *[C]
   d[0] = 2; // *[C]
@@ -324,7 +324,7 @@ testIndexedAliasedStore11(c, i, j) {
 }
 
 testIndexedAliasedStore12(f, c) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   d[0] = 1; // *[C]
   a[0] = 2; // X[C]
@@ -332,7 +332,7 @@ testIndexedAliasedStore12(f, c) {
 }
 
 testIndexedAliasedStore13(f, c, i) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   d[0] = 1; // *[C]
   a[i] = 2; // X[*]
@@ -340,7 +340,7 @@ testIndexedAliasedStore13(f, c, i) {
 }
 
 testIndexedAliasedStore14(f, c, i) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   d[i] = 1; // *[*]
   a[0] = 2; // X[C]
@@ -348,7 +348,7 @@ testIndexedAliasedStore14(f, c, i) {
 }
 
 testIndexedAliasedStore15(f, c, i) {
-  var a = new List(2);
+  var a = new List<dynamic>.filled(2, null);
   var d = f ? a : c;
   d[i] = 1; // *[*]
   a[i] = 2; // X[*]
@@ -356,7 +356,7 @@ testIndexedAliasedStore15(f, c, i) {
 }
 
 testIndexedAliasedStores() {
-  var arr = new List(2);
+  var arr = new List<dynamic>.filled(2, null);
 
   for (var i = 0; i < 50; i++) {
     Expect.equals(2, testIndexedAliasedStore1(0));
@@ -456,10 +456,10 @@ class Z {
   var x = 42;
 }
 
-var global_array = new List<Z>(1);
+var global_array = new List<Z?>.filled(1, null);
 
 side_effect() {
-  global_array[0].x++;
+  global_array[0]!.x++;
 }
 
 testAliasingStoreIndexed(array) {
@@ -494,15 +494,15 @@ testViewAliasing1() {
 
 testViewAliasing2() {
   final f64 = new Float64List(2);
-  final f64v = new Float64List.view(f64.buffer, Float64List.BYTES_PER_ELEMENT);
+  final f64v = new Float64List.view(f64.buffer, Float64List.bytesPerElement);
   f64[1] = 1.0; // Should not be forwarded.
   f64v[0] = 2.0;
   return f64[1];
 }
 
 testViewAliasing3() {
-  final u8 = new Uint8List(Float64List.BYTES_PER_ELEMENT * 2);
-  final f64 = new Float64List.view(u8.buffer, Float64List.BYTES_PER_ELEMENT);
+  final u8 = new Uint8List(Float64List.bytesPerElement * 2);
+  final f64 = new Float64List.view(u8.buffer, Float64List.bytesPerElement);
   f64[0] = 1.0; // Should not be forwarded.
   u8[15] = 0x40;
   u8[14] = 0x00;
@@ -510,8 +510,8 @@ testViewAliasing3() {
 }
 
 testViewAliasing4() {
-  final u8 = new Uint8List(Float64List.BYTES_PER_ELEMENT * 2);
-  final f64 = new Float64List.view(u8.buffer, Float64List.BYTES_PER_ELEMENT);
+  final u8 = new Uint8List(Float64List.bytesPerElement * 2);
+  final f64 = new Float64List.view(u8.buffer, Float64List.bytesPerElement);
   f64[0] = 2.0; // Not aliased: should be forwarded.
   u8[0] = 0x40;
   u8[1] = 0x00;
@@ -519,7 +519,7 @@ testViewAliasing4() {
 }
 
 main() {
-  final fixed = new List(10);
+  final fixed = new List<dynamic>.filled(10, null);
   final growable = [];
   testImmutableVMFields(fixed, true);
   testImmutableVMFields(growable, false);
@@ -548,10 +548,10 @@ main() {
     Expect.equals(f0, testAliasesRefinement());
   }
 
-  Expect.equals(1, testImmutableVMFields([], false));
-  Expect.equals(2, testImmutableVMFields([1], false));
-  Expect.equals(2, testImmutableVMFields([1, 2], false));
-  Expect.equals(3, testImmutableVMFields([1, 2, 3], false));
+  Expect.equals(1, testImmutableVMFields(<dynamic>[], false));
+  Expect.equals(2, testImmutableVMFields(<int?>[1], false));
+  Expect.equals(2, testImmutableVMFields(<int?>[1, 2], false));
+  Expect.equals(3, testImmutableVMFields(<int?>[1, 2, 3], false));
 
   final u32List = new Uint32List(3);
   u32List[0] = 0;
@@ -568,19 +568,19 @@ main() {
     Expect.equals(0, testPhiMultipleRepresentations(false, const [1, 2]));
   }
 
-  final escape = new List(1);
+  final escape = new List<dynamic>.filled(1, null);
   for (var i = 0; i < 20; i++) {
     fakeAliasing(escape);
   }
 
-  final array = new List(3);
+  final array = new List<dynamic>.filled(3, null);
   for (var i = 0; i < 20; i++) {
     Expect.equals(3, testIndexedNoAlias(array));
   }
 
   testIndexedAliasedStores();
 
-  var test_array = new List(1);
+  var test_array = new List<dynamic>.filled(1, null);
   for (var i = 0; i < 20; i++) {
     Expect.equals(43, testAliasingStoreIndexed(global_array));
   }

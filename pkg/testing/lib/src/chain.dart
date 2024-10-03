@@ -6,13 +6,13 @@ library testing.chain;
 
 import 'dart:async' show Future, Stream;
 
-import 'dart:convert' show JSON, JsonEncoder;
+import 'dart:convert' show json, JsonEncoder;
 
 import 'dart:io' show Directory, File, FileSystemEntity, exitCode;
 
 import 'suite.dart' show Suite;
 
-import '../testing.dart' show TestDescription;
+import '../testing.dart' show FileBasedTestDescription, TestDescription;
 
 import 'test_dart/status_file_parser.dart'
     show ReadTestExpectations, TestExpectations;
@@ -21,15 +21,7 @@ import 'zone_helper.dart' show runGuarded;
 
 import 'error_handling.dart' show withErrorHandling;
 
-import 'log.dart'
-    show
-        logMessage,
-        logStepComplete,
-        logStepStart,
-        logSuiteComplete,
-        logTestComplete,
-        logUnexpectedResult,
-        splitLines;
+import 'log.dart' show Logger, StdoutLogger, splitLines;
 
 import 'multitest.dart' show MultitestTransformer, isError;
 
@@ -56,12 +48,16 @@ class Chain extends Suite {
 
   factory Chain.fromJsonMap(Uri base, Map json, String name, String kind) {
     Uri source = base.resolve(json["source"]);
-    Uri uri = base.resolve(json["path"]);
+    String path = json["path"];
+    if (!path.endsWith("/")) {
+      path += "/";
+    }
+    Uri uri = base.resolve(path);
     Uri statusFile = base.resolve(json["status"]);
     List<RegExp> pattern =
-        new List<RegExp>.from(json["pattern"].map((String p) => new RegExp(p)));
+        json["pattern"].map<RegExp>((p) => new RegExp(p)).toList();
     List<RegExp> exclude =
-        new List<RegExp>.from(json["exclude"].map((String p) => new RegExp(p)));
+        json["exclude"].map<RegExp>((p) => new RegExp(p)).toList();
     bool processMultitests = json["process-multitests"] ?? false;
     return new Chain(name, kind, source, uri, statusFile, pattern, exclude,
         processMultitests);
@@ -107,24 +103,40 @@ abstract class ChainContext {
 
   ExpectationSet get expectationSet => ExpectationSet.Default;
 
-  Future<Null> run(Chain suite, Set<String> selectors) async {
+  Future<Null> run(Chain suite, Set<String> selectors,
+      {int shards = 1,
+      int shard = 0,
+      Logger logger: const StdoutLogger()}) async {
+    assert(shards >= 1, "Invalid shards count: $shards");
+    assert(0 <= shard && shard < shards,
+        "Invalid shard index: $shard, not in range [0,$shards[.");
     List<String> partialSelectors = selectors
         .where((s) => s.endsWith('...'))
         .map((s) => s.substring(0, s.length - 3))
         .toList();
     TestExpectations expectations = await ReadTestExpectations(
-        <String>[suite.statusFile.toFilePath()], {}, expectationSet);
+        <String>[suite.statusFile!.toFilePath()], {}, expectationSet);
     Stream<TestDescription> stream = list(suite);
     if (suite.processMultitests) {
       stream = stream.transform(new MultitestTransformer());
     }
     List<TestDescription> descriptions = await stream.toList();
     descriptions.sort();
+    if (shards > 1) {
+      List<TestDescription> shardDescriptions = [];
+      for (int index = 0; index < descriptions.length; index++) {
+        if (index % shards == shard) {
+          shardDescriptions.add(descriptions[index]);
+        }
+      }
+      descriptions = shardDescriptions;
+    }
     Map<TestDescription, Result> unexpectedResults =
         <TestDescription, Result>{};
     Map<TestDescription, Set<Expectation>> unexpectedOutcomes =
         <TestDescription, Set<Expectation>>{};
     int completed = 0;
+    logger.logSuiteStarted(suite);
     List<Future> futures = <Future>[];
     for (TestDescription description in descriptions) {
       String selector = "${suite.name}/${description.shortName}";
@@ -134,15 +146,15 @@ abstract class ChainContext {
           !partialSelectors.any((s) => selector.startsWith(s))) {
         continue;
       }
-      final Set<Expectation> expectedOutcomes =
-          expectations.expectations(description.shortName);
+      final Set<Expectation> expectedOutcomes = processExpectedOutcomes(
+          expectations.expectations(description.shortName), description);
       final StringBuffer sb = new StringBuffer();
-      final Step lastStep = steps.isNotEmpty ? steps.last : null;
+      final Step? lastStep = steps.isNotEmpty ? steps.last : null;
       final Iterator<Step> iterator = steps.iterator;
 
-      Result result;
+      Result? result;
       // Records the outcome of the last step that was run.
-      Step lastStepRun;
+      Step? lastStepRun;
 
       /// Performs one step of [iterator].
       ///
@@ -165,8 +177,8 @@ abstract class ChainContext {
           Step step = iterator.current;
           lastStepRun = step;
           isAsync = step.isAsync;
-          logStepStart(completed, unexpectedResults.length, descriptions.length,
-              suite, description, step);
+          logger.logStepStart(completed, unexpectedResults.length,
+              descriptions.length, suite, description, step);
           // TODO(ahe): It's important to share the zone error reporting zone
           // between all the tasks. Otherwise, if a future completes with an
           // error in one zone, and gets stored, it becomes an uncaught error
@@ -181,40 +193,34 @@ abstract class ChainContext {
         } else {
           future = new Future.value(null);
         }
-        future = future.then((Result currentResult) {
+        future = future.then((_currentResult) async {
+          Result? currentResult = _currentResult;
           if (currentResult != null) {
-            logStepComplete(completed, unexpectedResults.length,
-                descriptions.length, suite, description, lastStepRun);
+            logger.logStepComplete(completed, unexpectedResults.length,
+                descriptions.length, suite, description, lastStepRun!);
             result = currentResult;
             if (currentResult.outcome == Expectation.Pass) {
               // The input to the next step is the output of this step.
-              return doStep(result.output);
+              return doStep(result!.output);
             }
           }
-          if (description.multitestExpectations != null) {
-            if (isError(description.multitestExpectations)) {
-              result = toNegativeTestResult(
-                  result, description.multitestExpectations);
-            }
-          } else if (lastStep == lastStepRun &&
-              description.shortName.endsWith("negative_test")) {
-            if (result.outcome == Expectation.Pass) {
-              result.addLog("Negative test didn't report an error.\n");
-            } else if (result.outcome == Expectation.Fail) {
-              result.addLog("Negative test reported an error as expeceted.\n");
-            }
-            result = toNegativeTestResult(result);
-          }
-          if (!expectedOutcomes.contains(result.outcome)) {
-            result.addLog("$sb");
-            unexpectedResults[description] = result;
+          await cleanUp(description, result!);
+          result =
+              processTestResult(description, result!, lastStep == lastStepRun);
+          if (!expectedOutcomes.contains(result!.outcome) &&
+              !expectedOutcomes.contains(result!.outcome.canonical)) {
+            result!.addLog("$sb");
+            unexpectedResults[description] = result!;
             unexpectedOutcomes[description] = expectedOutcomes;
-            logUnexpectedResult(suite, description, result, expectedOutcomes);
+            logger.logUnexpectedResult(
+                suite, description, result!, expectedOutcomes);
             exitCode = 1;
           } else {
-            logMessage(sb);
+            logger.logExpectedResult(
+                suite, description, result!, expectedOutcomes);
+            logger.logMessage(sb);
           }
-          logTestComplete(++completed, unexpectedResults.length,
+          logger.logTestComplete(++completed, unexpectedResults.length,
               descriptions.length, suite, description);
         });
         if (isAsync) {
@@ -225,21 +231,24 @@ abstract class ChainContext {
         }
       }
 
+      logger.logTestStart(completed, unexpectedResults.length,
+          descriptions.length, suite, description);
       // The input of the first step is [description].
       await doStep(description);
     }
     await Future.wait(futures);
-    logSuiteComplete();
+    logger.logSuiteComplete(suite);
     if (unexpectedResults.isNotEmpty) {
       unexpectedResults.forEach((TestDescription description, Result result) {
-        logUnexpectedResult(
-            suite, description, result, unexpectedOutcomes[description]);
+        logger.logUnexpectedResult(
+            suite, description, result, unexpectedOutcomes[description]!);
       });
       print("${unexpectedResults.length} failed:");
       unexpectedResults.forEach((TestDescription description, Result result) {
         print("${suite.name}/${description.shortName}: ${result.outcome}");
       });
     }
+    postRun();
   }
 
   Stream<TestDescription> list(Chain suite) async* {
@@ -252,7 +261,7 @@ abstract class ChainContext {
         String path = entity.uri.path;
         if (suite.exclude.any((RegExp r) => path.contains(r))) continue;
         if (suite.pattern.any((RegExp r) => path.contains(r))) {
-          yield new TestDescription(suite.uri, entity);
+          yield new FileBasedTestDescription(suite.uri, entity);
         }
       }
     } else {
@@ -260,7 +269,31 @@ abstract class ChainContext {
     }
   }
 
-  Result toNegativeTestResult(Result result, [Set<String> expectations]) {
+  Set<Expectation> processExpectedOutcomes(
+      Set<Expectation> outcomes, TestDescription description) {
+    return outcomes;
+  }
+
+  Result processTestResult(
+      TestDescription description, Result result, bool last) {
+    if (description is FileBasedTestDescription &&
+        description.multitestExpectations != null) {
+      if (isError(description.multitestExpectations!)) {
+        result =
+            toNegativeTestResult(result, description.multitestExpectations);
+      }
+    } else if (last && description.shortName.endsWith("negative_test")) {
+      if (result.outcome == Expectation.Pass) {
+        result.addLog("Negative test didn't report an error.\n");
+      } else if (result.outcome == Expectation.Fail) {
+        result.addLog("Negative test reported an error as expected.\n");
+      }
+      result = toNegativeTestResult(result);
+    }
+    return result;
+  }
+
+  Result toNegativeTestResult(Result result, [Set<String>? expectations]) {
     Expectation outcome = result.outcome;
     if (outcome == Expectation.Pass) {
       if (expectations == null) {
@@ -278,6 +311,10 @@ abstract class ChainContext {
     }
     return result.copyWithOutcome(outcome);
   }
+
+  Future<void> cleanUp(TestDescription description, Result result) async {}
+
+  Future<void> postRun() async {}
 }
 
 abstract class Step<I, O, C extends ChainContext> {
@@ -285,11 +322,28 @@ abstract class Step<I, O, C extends ChainContext> {
 
   String get name;
 
+  /// Sets this (*and effectively subsequent*) test step(s) as async.
+  ///
+  /// TL;DR: Either set to false, or only set to true when this and all
+  /// subsequent steps can run intertwined with another test.
+  ///
+  /// Details:
+  ///
+  /// A single test (TestDescription) can have several steps (Step).
+  /// When running a test the first step is executed, and when that step is done
+  /// the next step is executed by the now-ending step.
+  ///
+  /// When isAsync is false each step returns a future which is awaited,
+  /// effectivly meaning that only a single test is run at a time.
+  ///
+  /// When isAsync is true that step doesn't return a future (but adds it's
+  /// future to a list which is awaited before sending an 'entire suite done'
+  /// message), meaning that the next test can start before the step is
+  /// finished. As the next step in the test only starts after the current
+  /// step finishes, that also means that the next test can start - and run
+  /// intertwined with - a subsequent step even if such a subsequent step has
+  /// isAsync set to false.
   bool get isAsync => false;
-
-  bool get isCompiler => false;
-
-  bool get isRuntime => false;
 
   Future<Result<O>> run(I input, C context);
 
@@ -301,31 +355,46 @@ abstract class Step<I, O, C extends ChainContext> {
 
   Result<O> crash(error, StackTrace trace) => new Result<O>.crash(error, trace);
 
-  Result<O> fail(O output, [error, StackTrace trace]) {
+  Result<O> fail(O output, [error, StackTrace? trace]) {
     return new Result<O>.fail(output, error, trace);
   }
 }
 
 class Result<O> {
-  final O output;
+  final O? output;
 
   final Expectation outcome;
 
   final error;
 
-  final StackTrace trace;
+  final StackTrace? trace;
 
   final List<String> logs = <String>[];
 
-  Result(this.output, this.outcome, this.error, this.trace);
+  /// If set, running the test with '-D$autoFixCommand' will automatically
+  /// update the test to match new expectations.
+  final String? autoFixCommand;
 
-  Result.pass(O output) : this(output, Expectation.Pass, null, null);
+  /// If set, the test can be fixed by running
+  ///
+  ///     dart pkg/front_end/tool/update_expectations.dart
+  ///
+  final bool canBeFixWithUpdateExpectations;
+
+  Result(this.output, this.outcome, this.error,
+      {this.trace,
+      this.autoFixCommand,
+      this.canBeFixWithUpdateExpectations: false});
+
+  Result.pass(O output) : this(output, Expectation.Pass, null);
 
   Result.crash(error, StackTrace trace)
-      : this(null, Expectation.Crash, error, trace);
+      : this(null, Expectation.Crash, error, trace: trace);
 
-  Result.fail(O output, [error, StackTrace trace])
-      : this(output, Expectation.Fail, error, trace);
+  Result.fail(O output, [error, StackTrace? trace])
+      : this(output, Expectation.Fail, error, trace: trace);
+
+  bool get isPass => outcome == Expectation.Pass;
 
   String get log => logs.join();
 
@@ -334,15 +403,25 @@ class Result<O> {
   }
 
   Result<O> copyWithOutcome(Expectation outcome) {
-    return new Result<O>(output, outcome, error, trace)..logs.addAll(logs);
+    return new Result<O>(output, outcome, error, trace: trace)
+      ..logs.addAll(logs);
+  }
+
+  Result<O2> copyWithOutput<O2>(O2 output) {
+    return new Result<O2>(output, outcome, error,
+        trace: trace,
+        autoFixCommand: autoFixCommand,
+        canBeFixWithUpdateExpectations: canBeFixWithUpdateExpectations)
+      ..logs.addAll(logs);
   }
 }
 
 /// This is called from generated code.
 Future<Null> runChain(CreateContext f, Map<String, String> environment,
-    Set<String> selectors, String json) {
+    Set<String> selectors, String jsonText) {
   return withErrorHandling(() async {
-    Chain suite = new Suite.fromJsonMap(Uri.base, JSON.decode(json));
+    Chain suite =
+        new Suite.fromJsonMap(Uri.base, json.decode(jsonText)) as Chain;
     print("Running ${suite.name}");
     ChainContext context = await f(suite, environment);
     return context.run(suite, selectors);

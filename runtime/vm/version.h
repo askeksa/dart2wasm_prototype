@@ -14,11 +14,13 @@ class Version : public AllStatic {
   static const char* String();
   static const char* SnapshotString();
   static const char* CommitString();
+  static const char* SdkHash();
 
  private:
   static const char* str_;
   static const char* snapshot_hash_;
   static const char* commit_;
+  static const char* git_short_hash_;
 };
 
 }  // namespace dart

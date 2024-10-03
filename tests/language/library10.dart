@@ -10,12 +10,12 @@ import "package:expect/expect.dart";
 
 class Library10 {
   Library10(this.fld);
-  func() {
+  int func() {
     return 2;
   }
 
   var fld;
-  static static_func() {
+  static int static_func() {
     var result = 0;
     var obj = new lib11.Library11(4);
     result = obj.fld;
@@ -35,6 +35,6 @@ class Library10 {
 }
 
 const int top_level10 = 10;
-top_level_func10() {
+int top_level_func10() {
   return 20;
 }

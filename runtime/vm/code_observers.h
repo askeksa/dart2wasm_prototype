@@ -5,14 +5,15 @@
 #ifndef RUNTIME_VM_CODE_OBSERVERS_H_
 #define RUNTIME_VM_CODE_OBSERVERS_H_
 
-#include "vm/globals.h"
 #include "vm/allocation.h"
+#include "vm/globals.h"
 
+#include "include/dart_api.h"
+
+#if !defined(PRODUCT)
 namespace dart {
 
-#ifndef PRODUCT
-
-class Mutex;
+class CodeComments;
 
 // Object observing code creation events. Used by external profilers and
 // debuggers to map address ranges to function names.
@@ -32,16 +33,20 @@ class CodeObserver {
                       uword base,
                       uword prologue_offset,
                       uword size,
-                      bool optimized) = 0;
+                      bool optimized,
+                      const CodeComments* comments) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CodeObserver);
 };
 
+class Mutex;
 
 class CodeObservers : public AllStatic {
  public:
-  static void InitOnce();
+  static void Init();
+
+  static void RegisterExternal(Dart_CodeObserver observer);
 
   static void Register(CodeObserver* observer);
 
@@ -50,12 +55,13 @@ class CodeObservers : public AllStatic {
                         uword base,
                         uword prologue_offset,
                         uword size,
-                        bool optimized);
+                        bool optimized,
+                        const CodeComments* comments);
 
   // Returns true if there is at least one active code observer.
   static bool AreActive();
 
-  static void DeleteAll();
+  static void Cleanup();
 
   static Mutex* mutex() { return mutex_; }
 
@@ -65,8 +71,7 @@ class CodeObservers : public AllStatic {
   static CodeObserver** observers_;
 };
 
-#endif  // !PRODUCT
-
 }  // namespace dart
+#endif  // !defined(PRODUCT)
 
 #endif  // RUNTIME_VM_CODE_OBSERVERS_H_

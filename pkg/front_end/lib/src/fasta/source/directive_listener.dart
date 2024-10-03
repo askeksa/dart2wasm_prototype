@@ -6,11 +6,11 @@
 /// import, part, and export directives.
 library front_end.src.fasta.source.directive_listener;
 
-import '../../scanner/token.dart' show Token;
-import '../fasta_codes.dart' show FastaMessage, codeExpectedBlockToSkip;
-import '../parser/identifier_context.dart';
-import '../parser/listener.dart';
-import '../quote.dart';
+import 'package:_fe_analyzer_shared/src/scanner/token.dart' show Token;
+import 'package:_fe_analyzer_shared/src/parser/identifier_context.dart';
+import 'package:_fe_analyzer_shared/src/parser/listener.dart';
+import 'package:_fe_analyzer_shared/src/parser/quote.dart';
+import '../fasta_codes.dart' show messageExpectedBlockToSkip;
 
 /// Listener that records imports, exports, and part directives.
 ///
@@ -27,17 +27,17 @@ class DirectiveListener extends Listener {
   final List<NamespaceDirective> exports = <NamespaceDirective>[];
 
   /// Collects URIs that occur on any part directive.
-  final Set<String> parts = new Set<String>();
+  final Set<String?> parts = new Set<String?>();
 
   bool _inPart = false;
-  String _uri;
-  List<NamespaceCombinator> _combinators;
-  List<String> _combinatorNames;
+  String? _uri;
+  List<NamespaceCombinator>? _combinators;
+  List<String>? _combinatorNames;
 
   DirectiveListener();
 
   @override
-  beginExport(Token export) {
+  void beginExport(Token export) {
     _combinators = <NamespaceCombinator>[];
   }
 
@@ -47,19 +47,19 @@ class DirectiveListener extends Listener {
   }
 
   @override
-  beginImport(Token import) {
+  void beginImport(Token import) {
     _combinators = <NamespaceCombinator>[];
   }
 
   @override
   void beginLiteralString(Token token) {
     if (_combinators != null || _inPart) {
-      _uri = unescapeString(token.lexeme);
+      _uri = unescapeString(token.lexeme, token, this);
     }
   }
 
   @override
-  beginPart(Token part) {
+  void beginPart(Token part) {
     _inPart = true;
   }
 
@@ -69,7 +69,7 @@ class DirectiveListener extends Listener {
   }
 
   @override
-  endExport(Token export, Token semicolon) {
+  void endExport(Token export, Token semicolon) {
     exports.add(new NamespaceDirective.export(_uri, _combinators));
     _uri = null;
     _combinators = null;
@@ -77,19 +77,19 @@ class DirectiveListener extends Listener {
 
   @override
   void endHide(Token hide) {
-    _combinators.add(new NamespaceCombinator.hide(_combinatorNames));
+    _combinators!.add(new NamespaceCombinator.hide(_combinatorNames!));
     _combinatorNames = null;
   }
 
   @override
-  endImport(Token import, Token deferred, Token asKeyword, Token semicolon) {
+  void endImport(Token? import, Token? semicolon) {
     imports.add(new NamespaceDirective.import(_uri, _combinators));
     _uri = null;
     _combinators = null;
   }
 
   @override
-  endPart(Token part, Token semicolon) {
+  void endPart(Token part, Token semicolon) {
     parts.add(_uri);
     _uri = null;
     _inPart = false;
@@ -97,28 +97,22 @@ class DirectiveListener extends Listener {
 
   @override
   void endShow(Token show) {
-    _combinators.add(new NamespaceCombinator.show(_combinatorNames));
+    _combinators!.add(new NamespaceCombinator.show(_combinatorNames!));
     _combinatorNames = null;
   }
 
   @override
   void handleIdentifier(Token token, IdentifierContext context) {
     if (_combinatorNames != null && context == IdentifierContext.combinator) {
-      _combinatorNames.add(token.lexeme);
+      _combinatorNames!.add(token.lexeme);
     }
   }
 
-  /// Defines how native clauses are handled. By default, they are not handled
-  /// and an error is thrown;
-  Token handleNativeClause(Token token) => null;
-
+  /// By default, native clauses are not handled and an error is thrown.
   @override
-  Token handleUnrecoverableError(Token token, FastaMessage message) {
-    if (message.code == codeExpectedBlockToSkip) {
-      Token recover = handleNativeClause(token);
-      if (recover != null) return recover;
-    }
-    return super.handleUnrecoverableError(token, message);
+  void handleNativeFunctionBodySkipped(Token nativeToken, Token semicolon) {
+    super.handleRecoverableError(
+        messageExpectedBlockToSkip, nativeToken, nativeToken);
   }
 }
 
@@ -137,8 +131,8 @@ class NamespaceCombinator {
 
 class NamespaceDirective {
   final bool isImport;
-  final String uri;
-  final List<NamespaceCombinator> combinators;
+  final String? uri;
+  final List<NamespaceCombinator>? combinators;
 
   NamespaceDirective.export(this.uri, this.combinators) : isImport = false;
 

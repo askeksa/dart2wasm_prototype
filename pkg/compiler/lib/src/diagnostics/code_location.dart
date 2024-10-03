@@ -4,7 +4,7 @@
 
 library dart2js.diagnostics.code_location;
 
-import '../util/uri_extras.dart' as uri_extras show relativize;
+import 'package:front_end/src/api_unstable/dart2js.dart' as fe;
 
 /// [CodeLocation] divides uris into different classes.
 ///
@@ -18,16 +18,16 @@ abstract class CodeLocation {
   String relativize(Uri baseUri);
 
   factory CodeLocation(Uri uri) {
-    if (uri.scheme == 'package') {
+    if (uri.isScheme('package')) {
       int slashPos = uri.path.indexOf('/');
       if (slashPos != -1) {
         String packageName = uri.path.substring(0, slashPos);
-        return new PackageLocation(packageName);
+        return PackageLocation(packageName);
       } else {
-        return new UriLocation(uri);
+        return UriLocation(uri);
       }
     } else {
-      return new SchemeLocation(uri);
+      return SchemeLocation(uri);
     }
   }
 }
@@ -40,12 +40,14 @@ class SchemeLocation implements CodeLocation {
 
   SchemeLocation(this.uri);
 
+  @override
   bool inSameLocation(Uri uri) {
-    return this.uri.scheme == uri.scheme;
+    return this.uri.isScheme(uri.scheme);
   }
 
+  @override
   String relativize(Uri baseUri) {
-    return uri_extras.relativize(baseUri, uri, false);
+    return fe.relativizeUri(baseUri, uri, false);
   }
 }
 
@@ -58,10 +60,12 @@ class PackageLocation implements CodeLocation {
 
   PackageLocation(this.packageName);
 
+  @override
   bool inSameLocation(Uri uri) {
-    return uri.scheme == 'package' && uri.path.startsWith('$packageName/');
+    return uri.isScheme('package') && uri.path.startsWith('$packageName/');
   }
 
+  @override
   String relativize(Uri baseUri) => 'package:$packageName';
 }
 
@@ -73,10 +77,12 @@ class UriLocation implements CodeLocation {
 
   UriLocation(this.uri);
 
+  @override
   bool inSameLocation(Uri uri) => this.uri == uri;
 
+  @override
   String relativize(Uri baseUri) {
-    return uri_extras.relativize(baseUri, uri, false);
+    return fe.relativizeUri(baseUri, uri, false);
   }
 }
 
@@ -84,7 +90,9 @@ class UriLocation implements CodeLocation {
 class AnyLocation implements CodeLocation {
   const AnyLocation();
 
+  @override
   bool inSameLocation(Uri uri) => true;
 
+  @override
   String relativize(Uri baseUri) => '$baseUri';
 }

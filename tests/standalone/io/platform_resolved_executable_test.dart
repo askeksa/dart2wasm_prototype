@@ -17,13 +17,17 @@ void expectEquals(a, b) {
   }
 }
 
-void verify(String exePath, {String altPath}) {
+void verify(String exePath, {String? altPath}) {
   var env = {_SCRIPT_KEY: 'yes'};
   if (altPath != null) {
     env['PATH'] = altPath;
   }
 
-  var processResult = Process.runSync(exePath, [scriptPath],
+  List<String> execArgs =
+      ([]..addAll(Platform.executableArguments)
+         ..add('--verbosity=warning'));
+  var processResult = Process.runSync(
+      exePath, [...execArgs, scriptPath],
       includeParentEnvironment: false, runInShell: true, environment: env);
 
   if (processResult.exitCode != 0) {
@@ -40,13 +44,14 @@ void verify(String exePath, {String altPath}) {
 
 void testDartExecShouldNotBeInCurrentDir() {
   var type = FileSystemEntity.typeSync(platformExeName);
-  expectEquals(FileSystemEntityType.NOT_FOUND, type);
+  expectEquals(FileSystemEntityType.notFound, type);
 }
 
 void testShouldFailOutsidePath() {
   var threw = false;
   try {
-    Process.runSync(platformExeName, ['--version'],
+    Process.runSync(([platformExeName]..add('--verbosity=warning')).join(' '),
+        ['--version'],
         includeParentEnvironment: false,
         environment: {_SCRIPT_KEY: 'yes', 'PATH': ''});
   } catch (_) {

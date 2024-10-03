@@ -11,7 +11,7 @@ enum ErrorKind {
   /// The isolate has encountered a Dart language error in the program.
   languageError,
 
-  /// The isolate has encounted an internal error. These errors should be
+  /// The isolate has encountered an internal error. These errors should be
   /// reported as bugs.
   internalError,
 
@@ -20,8 +20,8 @@ enum ErrorKind {
 }
 
 abstract class ErrorRef extends ObjectRef {
-  ErrorKind get kind;
-  String get message;
+  ErrorKind? get kind;
+  String? get message;
 }
 
 abstract class Error extends Object implements ErrorRef {}

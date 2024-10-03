@@ -5,7 +5,12 @@
 #ifndef RUNTIME_VM_CPU_ARM_H_
 #define RUNTIME_VM_CPU_ARM_H_
 
+#if !defined(RUNTIME_VM_CPU_H_)
+#error Do not include cpu_arm.h directly; use cpu.h instead.
+#endif
+
 #include "vm/allocation.h"
+#include "vm/flags.h"
 #include "vm/simulator.h"
 
 namespace dart {
@@ -18,16 +23,9 @@ namespace dart {
 // additionally mock the options needed for the target architecture so that
 // they may be altered for testing.
 
-enum ARMVersion {
-  ARMv5TE,
-  ARMv6,
-  ARMv7,
-  ARMvUnknown,
-};
-
 class HostCPUFeatures : public AllStatic {
  public:
-  static void InitOnce();
+  static void Init();
   static void Cleanup();
   static const char* hardware() {
     DEBUG_ASSERT(initialized_);
@@ -35,11 +33,7 @@ class HostCPUFeatures : public AllStatic {
   }
   static bool integer_division_supported() {
     DEBUG_ASSERT(initialized_);
-    return integer_division_supported_;
-  }
-  static bool vfp_supported() {
-    DEBUG_ASSERT(initialized_);
-    return vfp_supported_;
+    return integer_division_supported_ && !FLAG_target_unknown_cpu;
   }
   static bool neon_supported() {
     DEBUG_ASSERT(initialized_);
@@ -48,10 +42,6 @@ class HostCPUFeatures : public AllStatic {
   static bool hardfp_supported() {
     DEBUG_ASSERT(initialized_);
     return hardfp_supported_;
-  }
-  static ARMVersion arm_version() {
-    DEBUG_ASSERT(initialized_);
-    return arm_version_;
   }
   static intptr_t store_pc_read_offset() {
     DEBUG_ASSERT(initialized_);
@@ -63,27 +53,17 @@ class HostCPUFeatures : public AllStatic {
     DEBUG_ASSERT(initialized_);
     integer_division_supported_ = supported;
   }
-  static void set_vfp_supported(bool supported) {
-    DEBUG_ASSERT(initialized_);
-    vfp_supported_ = supported;
-  }
   static void set_neon_supported(bool supported) {
     DEBUG_ASSERT(initialized_);
     neon_supported_ = supported;
-  }
-  static void set_arm_version(ARMVersion version) {
-    DEBUG_ASSERT(initialized_);
-    arm_version_ = version;
   }
 #endif  // !defined(HOST_ARCH_ARM)
 
  private:
   static const char* hardware_;
   static bool integer_division_supported_;
-  static bool vfp_supported_;
   static bool neon_supported_;
   static bool hardfp_supported_;
-  static ARMVersion arm_version_;
   static intptr_t store_pc_read_offset_;
 #if defined(DEBUG)
   static bool initialized_;
@@ -92,20 +72,15 @@ class HostCPUFeatures : public AllStatic {
 
 class TargetCPUFeatures : public AllStatic {
  public:
-  static void InitOnce() { HostCPUFeatures::InitOnce(); }
+  static void Init() { HostCPUFeatures::Init(); }
   static void Cleanup() { HostCPUFeatures::Cleanup(); }
   static bool double_truncate_round_supported() { return false; }
   static bool integer_division_supported() {
     return HostCPUFeatures::integer_division_supported();
   }
-  static bool vfp_supported() { return HostCPUFeatures::vfp_supported(); }
-  static bool can_divide() {
-    return integer_division_supported() || vfp_supported();
-  }
   static bool neon_supported() { return HostCPUFeatures::neon_supported(); }
   static bool hardfp_supported() { return HostCPUFeatures::hardfp_supported(); }
   static const char* hardware() { return HostCPUFeatures::hardware(); }
-  static ARMVersion arm_version() { return HostCPUFeatures::arm_version(); }
   static intptr_t store_pc_read_offset() {
     return HostCPUFeatures::store_pc_read_offset();
   }

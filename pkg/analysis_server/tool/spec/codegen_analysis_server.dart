@@ -1,29 +1,19 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-/**
- * Code generation for the file "AnalysisServer.java".
- */
-import 'package:analyzer/src/codegen/tools.dart';
-import 'package:front_end/src/codegen/tools.dart';
+/// Code generation for the file "AnalysisServer.java".
+import 'package:analyzer_utilities/tools.dart';
 
 import 'api.dart';
 import 'codegen_java.dart';
 
 final GeneratedFile target = javaGeneratedFile(
     'tool/spec/generated/java/AnalysisServer.java',
-    (Api api) => new CodegenAnalysisServer(api));
+    (Api api) => CodegenAnalysisServer(api));
 
 class CodegenAnalysisServer extends CodegenJavaVisitor {
   CodegenAnalysisServer(Api api) : super(api);
-
-  /**
-   * Get the name of the consumer class for responses to this request.
-   */
-  String consumerName(Request request) {
-    return camelJoin([request.method, 'consumer'], doCapitalize: true);
-  }
 
   @override
   void visitApi() {
@@ -39,7 +29,7 @@ class CodegenAnalysisServer extends CodegenJavaVisitor {
     writeln('''/**
  * The interface {@code AnalysisServer} defines the behavior of objects that interface to an
  * analysis server.
- * 
+ *
  * @coverage dart.server
  */''');
     makeClass('public interface AnalysisServer', () {
@@ -50,7 +40,7 @@ class CodegenAnalysisServer extends CodegenJavaVisitor {
         writeln('''/**
  * Add the given listener to the list of listeners that will receive notification when new
  * analysis results become available.
- * 
+ *
  * @param listener the listener to be added
  */''');
         writeln(
@@ -64,11 +54,64 @@ class CodegenAnalysisServer extends CodegenJavaVisitor {
         writeln('''/**
  * Remove the given listener from the list of listeners that will receive notification when new
    * analysis results become available.
- * 
+ *
  * @param listener the listener to be removed
  */''');
         writeln(
             'public void removeAnalysisServerListener(AnalysisServerListener listener);');
+      });
+
+      //
+      // addRequestListener(..)
+      //
+      publicMethod('addRequestListener', () {
+        writeln('''/**
+ * Add the given listener to the list of listeners that will receive notification when
+   * requests are made by an analysis server client.
+ *
+ * @param listener the listener to be added
+ */''');
+        writeln('public void addRequestListener(RequestListener listener);');
+      });
+
+      //
+      // removeRequestListener(..)
+      //
+      publicMethod('removeRequestListener', () {
+        writeln('''/**
+ * Remove the given listener from the list of listeners that will receive notification when
+   * requests are made by an analysis server client.
+ *
+ * @param listener the listener to be removed
+ */''');
+        writeln('public void removeRequestListener(RequestListener listener);');
+      });
+
+      //
+      // addResponseListener(..)
+      //
+      publicMethod('addResponseListener', () {
+        writeln('''/**
+ * Add the given listener to the list of listeners that will receive notification when
+ * responses are received by an analysis server client.
+ *
+ * @param listener the listener to be added
+ */''');
+        writeln('public void addResponseListener(ResponseListener listener);');
+      });
+
+      //
+      // removeResponseListener(..)
+      //
+      publicMethod('removeResponseListener', () {
+        writeln('''/**
+ * Remove the given listener from the list of listeners that will receive notification when
+   * responses are received by an analysis server client.
+ *
+ * @param listener the listener to be removed
+ */''');
+        writeln(
+            'public void removeResponseListener(ResponseListener listener);');
       });
 
       //
@@ -78,7 +121,7 @@ class CodegenAnalysisServer extends CodegenJavaVisitor {
         writeln('''/**
  * Add the given listener to the list of listeners that will receive notification when the server
  * is not active
- * 
+ *
  * @param listener the listener to be added
  */''');
         writeln(
@@ -110,10 +153,10 @@ class CodegenAnalysisServer extends CodegenJavaVisitor {
 
   @override
   void visitRequest(Request request) {
-    String methodName = '${request.domainName}_${request.method}';
+    var methodName = '${request.domainName}_${request.method}';
     publicMethod(methodName, () {
       docComment(toHtmlVisitor.collectHtml(() {
-        toHtmlVisitor.write('{@code ${request.longMethod }}');
+        toHtmlVisitor.write('{@code ${request.longMethod}}');
         toHtmlVisitor.translateHtml(request.html);
         toHtmlVisitor.javadocParams(request.params);
         if (request.deprecated) {
@@ -121,15 +164,19 @@ class CodegenAnalysisServer extends CodegenJavaVisitor {
         }
       }));
       write('public void $methodName(');
-      List<String> arguments = [];
-      if (request.params != null) {
-        for (TypeObjectField field in request.params.fields) {
+      var arguments = <String>[];
+
+      var params = request.params;
+      if (params != null) {
+        for (var field in params.fields) {
           arguments.add('${javaType(field.type)} ${javaName(field.name)}');
         }
       }
+
       if (request.result != null) {
         arguments.add('${consumerName(request)} consumer');
       }
+
       write(arguments.join(', '));
       writeln(');');
     });

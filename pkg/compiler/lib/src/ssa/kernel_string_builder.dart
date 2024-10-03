@@ -5,24 +5,25 @@
 import 'package:kernel/ast.dart' as ir;
 
 import '../common.dart';
+import '../inferrer/abstract_value_domain.dart';
 import 'builder_kernel.dart';
-import 'kernel_ast_adapter.dart';
 import 'nodes.dart';
 
 /// Visits and concatenates the expressions in a string concatenation.
-class KernelStringBuilder extends ir.Visitor {
-  final KernelSsaBuilder builder;
-  KernelAstAdapter get astAdapter => builder.astAdapter;
+class KernelStringBuilder extends ir.Visitor<void> with ir.VisitorVoidMixin {
+  final KernelSsaGraphBuilder builder;
 
   /// The string value generated so far.
   HInstruction result = null;
 
   KernelStringBuilder(this.builder);
 
+  AbstractValueDomain get _abstractValueDomain =>
+      builder.closedWorld.abstractValueDomain;
+
   @override
   void defaultNode(ir.Node node) {
-    throw new SpannableAssertionFailure(
-        astAdapter.getNode(node), 'Unexpected node.');
+    failedAt(CURRENT_ELEMENT_SPANNABLE, 'Unexpected node: $node');
   }
 
   @override
@@ -36,7 +37,7 @@ class KernelStringBuilder extends ir.Visitor {
     //      conversions.
     //   2. The value can be primitive, because the library stringifier has
     //      fast-path code for most primitives.
-    if (expression.canBePrimitive(builder.closedWorld)) {
+    if (expression.isPrimitive(_abstractValueDomain).isPotentiallyTrue) {
       append(stringify(expression));
       return;
     }
@@ -60,14 +61,15 @@ class KernelStringBuilder extends ir.Visitor {
 
   HInstruction concat(HInstruction left, HInstruction right) {
     HInstruction instruction =
-        new HStringConcat(left, right, builder.commonMasks.stringType);
+        HStringConcat(left, right, _abstractValueDomain.stringType);
     builder.add(instruction);
     return instruction;
   }
 
   HInstruction stringify(HInstruction expression) {
     HInstruction instruction =
-        new HStringify(expression, builder.commonMasks.stringType);
+        HStringify(expression, _abstractValueDomain.stringType)
+          ..sourceInformation = expression.sourceInformation;
     builder.add(instruction);
     return instruction;
   }

@@ -26,7 +26,7 @@ class _WrappedList<E extends Node> extends ListBase<E>
     _list.add(element);
   }
 
-  bool remove(Object element) => _list.remove(element);
+  bool remove(Object? element) => _list.remove(element);
 
   void clear() {
     _list.clear();
@@ -34,7 +34,7 @@ class _WrappedList<E extends Node> extends ListBase<E>
 
   // List APIs
 
-  E operator [](int index) => _downcast/*<Node, E>*/(_list[index]);
+  E operator [](int index) => _list[index] as E;
 
   void operator []=(int index, E value) {
     _list[index] = value;
@@ -44,19 +44,23 @@ class _WrappedList<E extends Node> extends ListBase<E>
     _list.length = newLength;
   }
 
-  void sort([int compare(E a, E b)]) {
-    _list.sort((Node a, Node b) =>
-        compare(_downcast/*<Node, E>*/(a), _downcast/*<Node, E>*/(b)));
+  void sort([int compare(E a, E b)?]) {
+    if (compare == null) {
+      _list.sort();
+    } else {
+      _list.sort((Node a, Node b) => compare(a as E, b as E));
+    }
   }
 
-  int indexOf(Object element, [int start = 0]) => _list.indexOf(element, start);
+  int indexOf(Object? element, [int start = 0]) =>
+      _list.indexOf(element as Node, start);
 
-  int lastIndexOf(Object element, [int start]) =>
-      _list.lastIndexOf(element, start);
+  int lastIndexOf(Object? element, [int? start]) =>
+      _list.lastIndexOf(element as Node, start);
 
   void insert(int index, E element) => _list.insert(index, element);
 
-  E removeAt(int index) => _downcast/*<Node, E>*/(_list.removeAt(index));
+  E removeAt(int index) => _list.removeAt(index) as E;
 
   void setRange(int start, int end, Iterable<E> iterable, [int skipCount = 0]) {
     _list.setRange(start, end, iterable, skipCount);
@@ -70,7 +74,7 @@ class _WrappedList<E extends Node> extends ListBase<E>
     _list.replaceRange(start, end, iterable);
   }
 
-  void fillRange(int start, int end, [E fillValue]) {
+  void fillRange(int start, int end, [E? fillValue]) {
     _list.fillRange(start, end, fillValue);
   }
 
@@ -89,8 +93,5 @@ class _WrappedIterator<E extends Node> implements Iterator<E> {
     return _iterator.moveNext();
   }
 
-  E get current => _downcast/*<Node, E>*/(_iterator.current);
+  E get current => _iterator.current as E;
 }
-
-// ignore: STRONG_MODE_DOWN_CAST_COMPOSITE
-/*=To*/ _downcast/*<From, To extends From>*/(dynamic/*=From*/ x) => x;

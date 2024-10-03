@@ -8,7 +8,7 @@ import 'package:async_helper/async_helper.dart';
 
 main() {
   asyncStart();
-  var x = 499;
+  dynamic x = 499;
   scheduleMicrotask(() {
     Expect.equals(499, x);
     x = 42;
@@ -29,7 +29,7 @@ main() {
   });
 
   asyncStart();
-  new Future.microtask(() {
+  new Future<Null>.microtask(() {
     throw "foo";
   }).catchError((e, stackTrace) {
     Expect.equals("foo", e);

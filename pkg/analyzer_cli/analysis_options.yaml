@@ -1,4 +1,19 @@
+include: package:lints/recommended.yaml
+
 analyzer:
-  strong-mode: true
+  language:
+    strict-casts: true
+    strict-inference: true
   exclude:
-    - 'test/data'
+    - test/data/**
+
+linter:
+  rules:
+    avoid_unused_constructor_parameters: true
+    depend_on_referenced_packages: true
+    directives_ordering: true
+
+    # We import heavily from package:analyzer/src.
+    implementation_imports: false
+    # This rule does not work well with package:test_reflective_loader.
+    non_constant_identifier_names: false

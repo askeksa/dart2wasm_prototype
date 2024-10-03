@@ -2,173 +2,159 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE.md file.
 
-import 'package:front_end/src/base/instrumentation.dart';
-import 'package:front_end/src/dependency_walker.dart' as dependencyWalker;
-import 'package:front_end/src/fasta/kernel/kernel_shadow_ast.dart';
-import 'package:front_end/src/fasta/type_inference/type_inference_listener.dart';
-import 'package:front_end/src/fasta/type_inference/type_inferrer.dart';
-import 'package:front_end/src/fasta/type_inference/type_schema_environment.dart';
-import 'package:kernel/ast.dart' show DartType, DynamicType;
-import 'package:kernel/class_hierarchy.dart';
-import 'package:kernel/core_types.dart';
+import 'package:_fe_analyzer_shared/src/flow_analysis/flow_analysis.dart';
+import 'package:kernel/ast.dart';
+import 'package:kernel/class_hierarchy.dart' show ClassHierarchy;
+import 'package:kernel/core_types.dart' show CoreTypes;
+import 'package:kernel/type_environment.dart';
 
-/// Data structure for tracking dependencies between fields that require type
-/// inference.
-///
-/// TODO(paulberry): see if it's possible to make this class more lightweight
-/// by changing the API so that the walker is passed to computeDependencies().
-/// (This should allow us to drop the _typeInferenceEngine field).
-class FieldNode extends dependencyWalker.Node<FieldNode> {
-  final TypeInferenceEngineImpl _typeInferenceEngine;
+import '../../base/instrumentation.dart' show Instrumentation;
+import '../kernel/forest.dart';
+import '../kernel/hierarchy/hierarchy_builder.dart' show ClassHierarchyBuilder;
+import '../kernel/hierarchy/members_builder.dart' show ClassMembersBuilder;
+import '../kernel/implicit_field_type.dart';
+import '../kernel/internal_ast.dart';
+import '../kernel/kernel_helper.dart';
+import '../source/source_constructor_builder.dart';
+import '../source/source_library_builder.dart' show SourceLibraryBuilder;
+import 'factor_type.dart';
+import 'type_inferrer.dart';
+import 'type_schema_environment.dart' show TypeSchemaEnvironment;
 
-  final KernelField _field;
+/// Visitor to check whether a given type mentions any of a class's type
+/// parameters in a non-covariant fashion.
+class IncludesTypeParametersNonCovariantly extends DartTypeVisitor<bool> {
+  int _variance;
 
-  final dependencies = <FieldNode>[];
+  final List<TypeParameter> _typeParametersToSearchFor;
 
-  FieldNode(this._typeInferenceEngine, this._field);
+  IncludesTypeParametersNonCovariantly(this._typeParametersToSearchFor,
+      {required int initialVariance})
+      : _variance = initialVariance;
 
   @override
-  bool get isEvaluated => _typeInferenceEngine.isFieldInferred(_field);
+  bool defaultDartType(DartType node) => false;
 
   @override
-  List<FieldNode> computeDependencies() {
-    return dependencies;
+  bool visitFunctionType(FunctionType node) {
+    if (node.returnType.accept(this)) return true;
+    int oldVariance = _variance;
+    _variance = Variance.invariant;
+    for (TypeParameter parameter in node.typeParameters) {
+      if (parameter.bound.accept(this)) return true;
+    }
+    _variance = Variance.combine(Variance.contravariant, oldVariance);
+    for (DartType parameter in node.positionalParameters) {
+      if (parameter.accept(this)) return true;
+    }
+    for (NamedType parameter in node.namedParameters) {
+      if (parameter.type.accept(this)) return true;
+    }
+    _variance = oldVariance;
+    return false;
+  }
+
+  @override
+  bool visitInterfaceType(InterfaceType node) {
+    int oldVariance = _variance;
+    for (int i = 0; i < node.typeArguments.length; i++) {
+      _variance = Variance.combine(
+          node.classNode.typeParameters[i].variance, oldVariance);
+      if (node.typeArguments[i].accept(this)) return true;
+    }
+    _variance = oldVariance;
+    return false;
+  }
+
+  @override
+  bool visitFutureOrType(FutureOrType node) {
+    return node.typeArgument.accept(this);
+  }
+
+  @override
+  bool visitTypedefType(TypedefType node) {
+    return node.unalias.accept(this);
+  }
+
+  @override
+  bool visitTypeParameterType(TypeParameterType node) {
+    return !Variance.greaterThanOrEqual(_variance, node.parameter.variance) &&
+        _typeParametersToSearchFor.contains(node.parameter);
   }
 }
 
 /// Keeps track of the global state for the type inference that occurs outside
-/// of method bodies and initalizers.
+/// of method bodies and initializers.
 ///
 /// This class describes the interface for use by clients of type inference
 /// (e.g. DietListener).  Derived classes should derive from
 /// [TypeInferenceEngineImpl].
 abstract class TypeInferenceEngine {
-  ClassHierarchy get classHierarchy;
+  late ClassHierarchy classHierarchy;
 
-  CoreTypes get coreTypes;
+  late ClassHierarchyBuilder hierarchyBuilder;
+
+  late ClassMembersBuilder membersBuilder;
+
+  late CoreTypes coreTypes;
+
+  // TODO(johnniwinther): Shared this with the BodyBuilder.
+  final Forest forest = const Forest();
+
+  /// Indicates whether the "prepare" phase of type inference is complete.
+  bool isTypeInferencePrepared = false;
+
+  late TypeSchemaEnvironment typeSchemaEnvironment;
+
+  /// A map containing constructors with initializing formals whose types
+  /// need to be inferred.
+  ///
+  /// This is represented as a map from a constructor to its library
+  /// builder because the builder is used to report errors due to cyclic
+  /// inference dependencies.
+  final Map<Constructor, DeclaredSourceConstructorBuilder> toBeInferred = {};
+
+  /// A map containing constructors in the process of being inferred.
+  ///
+  /// This is used to detect cyclic inference dependencies.  It is represented
+  /// as a map from a constructor to its library builder because the builder
+  /// is used to report errors.
+  final Map<Constructor, DeclaredSourceConstructorBuilder> beingInferred = {};
+
+  final Map<Member, TypeDependency> typeDependencies = {};
+
+  final Instrumentation? instrumentation;
+
+  TypeInferenceEngine(this.instrumentation);
 
   /// Creates a type inferrer for use inside of a method body declared in a file
   /// with the given [uri].
-  TypeInferrer createLocalTypeInferrer(Uri uri, TypeInferenceListener listener);
+  TypeInferrer createLocalTypeInferrer(Uri uri, InterfaceType? thisType,
+      SourceLibraryBuilder library, InferenceDataForTesting? dataForTesting);
 
   /// Creates a [TypeInferrer] object which is ready to perform type inference
   /// on the given [field].
-  TypeInferrer createTopLevelTypeInferrer(
-      KernelField field, TypeInferenceListener listener);
+  TypeInferrer createTopLevelTypeInferrer(Uri uri, InterfaceType? thisType,
+      SourceLibraryBuilder library, InferenceDataForTesting? dataForTesting);
 
-  /// Performs the second phase of top level initializer inference, which is to
-  /// visit all fields and top level variables that were passed to [recordField]
-  /// in topologically-sorted order and assign their types.
-  void finishTopLevel();
-
-  /// Gets the list of top level type inference dependencies of the given
-  /// [field].
-  List<FieldNode> getFieldDependencies(KernelField field);
-
-  /// Gets ready to do top level type inference for the program having the given
-  /// [hierarchy], using the given [coreTypes].
-  void prepareTopLevel(CoreTypes coreTypes, ClassHierarchy hierarchy);
-
-  /// Records that the given [field] will need top level type inference.
-  void recordField(KernelField field);
-}
-
-/// Derived class containing generic implementations of
-/// [TypeInferenceEngineImpl].
-///
-/// This class contains as much of the implementation of type inference as
-/// possible without knowing the identity of the type parameter.  It defers to
-/// abstract methods for everything else.
-abstract class TypeInferenceEngineImpl extends TypeInferenceEngine {
-  final Instrumentation instrumentation;
-
-  final bool strongMode;
-
-  final fieldNodes = <FieldNode>[];
-
-  @override
-  CoreTypes coreTypes;
-
-  @override
-  ClassHierarchy classHierarchy;
-
-  TypeSchemaEnvironment typeSchemaEnvironment;
-
-  TypeInferenceEngineImpl(this.instrumentation, this.strongMode);
-
-  /// Clears the initializer of [field].
-  void clearFieldInitializer(KernelField field);
-
-  /// Creates a [FieldNode] to track dependencies of the given [field].
-  FieldNode createFieldNode(KernelField field);
-
-  /// Queries whether the given [field] has an initializer.
-  bool fieldHasInitializer(KernelField field);
-
-  @override
-  void finishTopLevel() {
-    for (var fieldNode in fieldNodes) {
-      if (fieldNode.isEvaluated) continue;
-      new _FieldWalker().walk(fieldNode);
+  /// Performs the third phase of top level inference, which is to visit all
+  /// constructors still needing inference and infer the types of their
+  /// initializing formals from the corresponding fields.
+  void finishTopLevelInitializingFormals() {
+    // Field types have all been inferred so we don't need to guard against
+    // cyclic dependency.
+    for (DeclaredSourceConstructorBuilder builder in toBeInferred.values) {
+      builder.inferFormalTypes(classHierarchy);
     }
+    toBeInferred.clear();
+    for (TypeDependency typeDependency in typeDependencies.values) {
+      typeDependency.copyInferred();
+    }
+    typeDependencies.clear();
   }
 
-  /// Gets the declared type of the given [field], or `null` if the type is
-  /// implicit.
-  DartType getFieldDeclaredType(KernelField field);
-
-  /// Gets the character offset of the declaration of [field] within its
-  /// compilation unit.
-  int getFieldOffset(KernelField field);
-
-  /// Retrieve the [TypeInferrer] for the given [field], which was created by
-  /// a previous call to [createTopLevelTypeInferrer].
-  TypeInferrerImpl getFieldTypeInferrer(KernelField field);
-
-  /// Gets the URI of the compilation unit the [field] is declared in.
-  /// TODO(paulberry): can we remove this?
-  String getFieldUri(KernelField field);
-
-  /// Performs type inference on the given [field].
-  void inferField(KernelField field) {
-    if (fieldHasInitializer(field)) {
-      var typeInferrer = getFieldTypeInferrer(field);
-      var type = getFieldDeclaredType(field);
-      var inferredType = typeInferrer.inferDeclarationType(
-          typeInferrer.inferFieldInitializer(field, type, type == null));
-      if (type == null && strongMode) {
-        instrumentation?.record(
-            Uri.parse(typeInferrer.uri),
-            getFieldOffset(field),
-            'topType',
-            new InstrumentationValueForType(inferredType));
-        setFieldInferredType(field, inferredType);
-      }
-      // TODO(paulberry): if type != null, then check that the type of the
-      // initializer is assignable to it.
-      // TODO(paulberry): the following is a hack so that outlines don't contain
-      // initializers.  But it means that we rebuild the initializers when doing
-      // a full compile.  There should be a better way.
-      clearFieldInitializer(field);
-    }
-  }
-
-  /// Makes a note that the given [field] is part of a circularity, so its type
-  /// can't be inferred.
-  void inferFieldCircular(KernelField field) {
-    // TODO(paulberry): report the appropriate error.
-    if (getFieldDeclaredType(field) == null) {
-      var uri = getFieldTypeInferrer(field).uri;
-      instrumentation?.record(Uri.parse(uri), getFieldOffset(field), 'topType',
-          const InstrumentationValueLiteral('circular'));
-      setFieldInferredType(field, const DynamicType());
-    }
-  }
-
-  /// Determines if top level type inference has been completed for [field].
-  bool isFieldInferred(KernelField field);
-
-  @override
+  /// Gets ready to do top level type inference for the component having the
+  /// given [hierarchy], using the given [coreTypes].
   void prepareTopLevel(CoreTypes coreTypes, ClassHierarchy hierarchy) {
     this.coreTypes = coreTypes;
     this.classHierarchy = hierarchy;
@@ -176,32 +162,168 @@ abstract class TypeInferenceEngineImpl extends TypeInferenceEngine {
         new TypeSchemaEnvironment(coreTypes, hierarchy);
   }
 
-  @override
-  void recordField(KernelField field) {
-    fieldNodes.add(createFieldNode(field));
+  static Member? resolveInferenceNode(Member? member) {
+    if (member is Field) {
+      DartType type = member.type;
+      if (type is ImplicitFieldType) {
+        type.inferType();
+      }
+    }
+    return member;
   }
-
-  /// Stores [inferredType] as the inferred type of [field].
-  void setFieldInferredType(KernelField field, DartType inferredType);
 }
 
-/// Subtype of [dependencyWalker.DependencyWalker] which is specialized to
-/// perform top level type inference.
-class _FieldWalker extends dependencyWalker.DependencyWalker<FieldNode> {
-  _FieldWalker();
+/// Concrete implementation of [TypeInferenceEngine] specialized to work with
+/// kernel objects.
+class TypeInferenceEngineImpl extends TypeInferenceEngine {
+  TypeInferenceEngineImpl(Instrumentation? instrumentation)
+      : super(instrumentation);
 
   @override
-  void evaluate(FieldNode f) {
-    f._typeInferenceEngine.inferField(f._field);
+  TypeInferrer createLocalTypeInferrer(Uri uri, InterfaceType? thisType,
+      SourceLibraryBuilder library, InferenceDataForTesting? dataForTesting) {
+    AssignedVariables<TreeNode, VariableDeclaration> assignedVariables;
+    if (dataForTesting != null) {
+      assignedVariables = dataForTesting.flowAnalysisResult.assignedVariables =
+          new AssignedVariablesForTesting<TreeNode, VariableDeclaration>();
+    } else {
+      assignedVariables =
+          new AssignedVariables<TreeNode, VariableDeclaration>();
+    }
+    return new TypeInferrerImpl(
+        this, uri, false, thisType, library, assignedVariables, dataForTesting);
   }
 
   @override
-  void evaluateScc(List<FieldNode> scc) {
-    for (var f in scc) {
-      f._typeInferenceEngine.inferFieldCircular(f._field);
+  TypeInferrer createTopLevelTypeInferrer(Uri uri, InterfaceType? thisType,
+      SourceLibraryBuilder library, InferenceDataForTesting? dataForTesting) {
+    AssignedVariables<TreeNode, VariableDeclaration> assignedVariables;
+    if (dataForTesting != null) {
+      assignedVariables = dataForTesting.flowAnalysisResult.assignedVariables =
+          new AssignedVariablesForTesting<TreeNode, VariableDeclaration>();
+    } else {
+      assignedVariables =
+          new AssignedVariables<TreeNode, VariableDeclaration>();
     }
-    for (var f in scc) {
-      f._typeInferenceEngine.inferField(f._field);
+    return new TypeInferrerImpl(
+        this, uri, true, thisType, library, assignedVariables, dataForTesting);
+  }
+}
+
+class InferenceDataForTesting {
+  final FlowAnalysisResult flowAnalysisResult = new FlowAnalysisResult();
+
+  final TypeInferenceResultForTesting typeInferenceResult =
+      new TypeInferenceResultForTesting();
+}
+
+/// The result of performing flow analysis on a unit.
+class FlowAnalysisResult {
+  /// The list of nodes, [Expression]s or [Statement]s, that cannot be reached,
+  /// for example because a previous statement always exits.
+  final List<TreeNode> unreachableNodes = [];
+
+  /// The list of function bodies that don't complete, for example because
+  /// there is a `return` statement at the end of the function body block.
+  final List<TreeNode> functionBodiesThatDontComplete = [];
+
+  /// The list of [Expression]s representing variable accesses that occur before
+  /// the corresponding variable has been definitely assigned.
+  final List<TreeNode> potentiallyUnassignedNodes = [];
+
+  /// The list of [Expression]s representing variable accesses that occur when
+  /// the corresponding variable has been definitely unassigned.
+  final List<TreeNode> definitelyUnassignedNodes = [];
+
+  /// The assigned variables information that computed for the member.
+  AssignedVariablesForTesting<TreeNode, VariableDeclaration>? assignedVariables;
+
+  /// For each expression that led to an error because it was not promoted, a
+  /// string describing the reason it was not promoted.
+  final Map<TreeNode, String> nonPromotionReasons = {};
+
+  /// For each auxiliary AST node pointed to by a non-promotion reason, a string
+  /// describing the non-promotion reason pointing to it.
+  final Map<TreeNode, String> nonPromotionReasonTargets = {};
+}
+
+/// CFE-specific implementation of [TypeOperations].
+class TypeOperationsCfe extends TypeOperations<VariableDeclaration, DartType> {
+  final TypeEnvironment typeEnvironment;
+
+  TypeOperationsCfe(this.typeEnvironment);
+
+  @override
+  TypeClassification classifyType(DartType? type) {
+    if (type == null) {
+      // Note: this can happen during top-level inference.
+      return TypeClassification.potentiallyNullable;
+    } else if (isSubtypeOf(
+        type, typeEnvironment.coreTypes.objectNonNullableRawType)) {
+      return TypeClassification.nonNullable;
+    } else if (isSubtypeOf(type, const NullType())) {
+      return TypeClassification.nullOrEquivalent;
+    } else {
+      return TypeClassification.potentiallyNullable;
     }
   }
+
+  @override
+  DartType factor(DartType from, DartType what) {
+    return factorType(typeEnvironment, from, what);
+  }
+
+  @override
+  bool isNever(DartType type) {
+    return typeEnvironment.coreTypes.isBottom(type);
+  }
+
+  // TODO(dmitryas): Consider checking for mutual subtypes instead of ==.
+  @override
+  bool isSameType(DartType type1, DartType type2) => type1 == type2;
+
+  @override
+  bool isSubtypeOf(DartType leftType, DartType rightType) {
+    return typeEnvironment.isSubtypeOf(
+        leftType, rightType, SubtypeCheckMode.withNullabilities);
+  }
+
+  @override
+  DartType promoteToNonNull(DartType type) {
+    return type.toNonNull();
+  }
+
+  @override
+  DartType variableType(VariableDeclaration variable) {
+    if (variable is VariableDeclarationImpl) {
+      // When late variables get lowered, their type is changed, but the
+      // original type is stored in `VariableDeclarationImpl.lateType`, so we
+      // use that if it exists.
+      return variable.lateType ?? variable.type;
+    }
+    return variable.type;
+  }
+
+  @override
+  bool isTypeParameterType(DartType type) => type is TypeParameterType;
+
+  @override
+  DartType tryPromoteToType(DartType to, DartType from) {
+    if (isSubtypeOf(to, from)) {
+      return to;
+    }
+    if (from is TypeParameterType) {
+      if (isSubtypeOf(to, from.promotedBound ?? from.bound)) {
+        return new TypeParameterType.intersection(
+            from.parameter, from.nullability, to);
+      }
+    }
+    return from;
+  }
+}
+
+/// Type inference results used for testing.
+class TypeInferenceResultForTesting {
+  final Map<TreeNode, List<DartType>> inferredTypeArguments = {};
+  final Map<TreeNode, DartType> inferredVariableTypes = {};
 }

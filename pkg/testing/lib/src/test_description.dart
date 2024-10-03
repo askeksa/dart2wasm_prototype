@@ -6,19 +6,29 @@ library testing.test_description;
 
 import 'dart:io' show File, FileSystemEntity;
 
-class TestDescription implements Comparable<TestDescription> {
+abstract class TestDescription implements Comparable<TestDescription> {
+  Uri get uri;
+
+  String get shortName;
+
+  int compareTo(TestDescription other) => "$uri".compareTo("${other.uri}");
+}
+
+class FileBasedTestDescription extends TestDescription {
   final Uri root;
   final File file;
-  final Uri output;
+  final Uri? output;
 
   /// If non-null, this is a generated multitest, and the set contains the
   /// expected outcomes.
-  Set<String> multitestExpectations;
+  Set<String>? multitestExpectations;
 
-  TestDescription(this.root, this.file, {this.output});
+  FileBasedTestDescription(this.root, this.file, {this.output});
 
+  @override
   Uri get uri => file.uri;
 
+  @override
   String get shortName {
     String baseName = "$uri".substring("$root".length);
     return baseName.substring(0, baseName.length - ".dart".length);
@@ -42,8 +52,8 @@ class TestDescription implements Comparable<TestDescription> {
     sink.writeln('.main,');
   }
 
-  static TestDescription from(Uri root, FileSystemEntity entity,
-      {Pattern pattern}) {
+  static FileBasedTestDescription? from(Uri root, FileSystemEntity entity,
+      {Pattern? pattern}) {
     if (entity is! File) return null;
     pattern ??= "_test.dart";
     String path = entity.uri.path;
@@ -53,10 +63,8 @@ class TestDescription implements Comparable<TestDescription> {
     } else if (path.contains(pattern)) {
       hasMatch = true;
     }
-    return hasMatch ? new TestDescription(root, entity) : null;
+    return hasMatch ? new FileBasedTestDescription(root, entity) : null;
   }
-
-  int compareTo(TestDescription other) => "$uri".compareTo("${other.uri}");
 
   String formatError(String message) {
     String base = Uri.base.toFilePath();

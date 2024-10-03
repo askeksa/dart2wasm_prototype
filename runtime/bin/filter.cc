@@ -2,8 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "bin/filter.h"
 
 #include "bin/dartutils.h"
@@ -33,7 +31,6 @@ static Dart_Handle GetFilter(Dart_Handle filter_obj, Filter** filter) {
   *filter = result;
   return Dart_Null();
 }
-
 
 static Dart_Handle CopyDictionary(Dart_Handle dictionary_obj,
                                   uint8_t** dictionary) {
@@ -68,7 +65,6 @@ static Dart_Handle CopyDictionary(Dart_Handle dictionary_obj,
   *dictionary = result;
   return Dart_Null();
 }
-
 
 void FUNCTION_NAME(Filter_CreateZLibInflate)(Dart_NativeArguments args) {
   Dart_Handle filter_obj = Dart_GetNativeArgument(args, 0);
@@ -114,7 +110,6 @@ void FUNCTION_NAME(Filter_CreateZLibInflate)(Dart_NativeArguments args) {
     Dart_PropagateError(err);
   }
 }
-
 
 void FUNCTION_NAME(Filter_CreateZLibDeflate)(Dart_NativeArguments args) {
   Dart_Handle filter_obj = Dart_GetNativeArgument(args, 0);
@@ -171,7 +166,6 @@ void FUNCTION_NAME(Filter_CreateZLibDeflate)(Dart_NativeArguments args) {
     Dart_PropagateError(result);
   }
 }
-
 
 void FUNCTION_NAME(Filter_Process)(Dart_NativeArguments args) {
   Dart_Handle filter_obj = Dart_GetNativeArgument(args, 0);
@@ -230,7 +224,6 @@ void FUNCTION_NAME(Filter_Process)(Dart_NativeArguments args) {
   }
 }
 
-
 void FUNCTION_NAME(Filter_Processed)(Dart_NativeArguments args) {
   Dart_Handle filter_obj = Dart_GetNativeArgument(args, 0);
   Dart_Handle flush_obj = Dart_GetNativeArgument(args, 1);
@@ -247,25 +240,26 @@ void FUNCTION_NAME(Filter_Processed)(Dart_NativeArguments args) {
   intptr_t read = filter->Processed(
       filter->processed_buffer(), filter->processed_buffer_size(), flush, end);
   if (read < 0) {
-    Dart_ThrowException(DartUtils::NewInternalError("Filter error, bad data"));
+    Dart_ThrowException(
+        DartUtils::NewDartFormatException("Filter error, bad data"));
   } else if (read == 0) {
     Dart_SetReturnValue(args, Dart_Null());
   } else {
     uint8_t* io_buffer;
     Dart_Handle result = IOBuffer::Allocate(read, &io_buffer);
+    if (Dart_IsNull(result)) {
+      Dart_SetReturnValue(args, DartUtils::NewDartOSError());
+      return;
+    }
     memmove(io_buffer, filter->processed_buffer(), read);
     Dart_SetReturnValue(args, result);
   }
 }
 
-
-static void DeleteFilter(void* isolate_data,
-                         Dart_WeakPersistentHandle handle,
-                         void* filter_pointer) {
+static void DeleteFilter(void* isolate_data, void* filter_pointer) {
   Filter* filter = reinterpret_cast<Filter*>(filter_pointer);
   delete filter;
 }
-
 
 Dart_Handle Filter::SetFilterAndCreateFinalizer(Dart_Handle filter,
                                                 Filter* filter_pointer,
@@ -276,11 +270,10 @@ Dart_Handle Filter::SetFilterAndCreateFinalizer(Dart_Handle filter,
   if (Dart_IsError(err)) {
     return err;
   }
-  Dart_NewWeakPersistentHandle(filter, reinterpret_cast<void*>(filter_pointer),
-                               size, DeleteFilter);
+  Dart_NewFinalizableHandle(filter, reinterpret_cast<void*>(filter_pointer),
+                            size, DeleteFilter);
   return err;
 }
-
 
 Dart_Handle Filter::GetFilterNativeField(Dart_Handle filter,
                                          Filter** filter_pointer) {
@@ -288,7 +281,6 @@ Dart_Handle Filter::GetFilterNativeField(Dart_Handle filter,
       filter, kFilterPointerNativeField,
       reinterpret_cast<intptr_t*>(filter_pointer));
 }
-
 
 ZLibDeflateFilter::~ZLibDeflateFilter() {
   delete[] dictionary_;
@@ -298,9 +290,18 @@ ZLibDeflateFilter::~ZLibDeflateFilter() {
   }
 }
 
-
 bool ZLibDeflateFilter::Init() {
   int window_bits = window_bits_;
+  if ((raw_ || gzip_) && (window_bits == 8)) {
+    // zlib deflater does not work with windows size of 8 bits. Old versions
+    // of zlib would silently upgrade window size to 9 bits, newer versions
+    // return Z_STREAM_ERROR if window size is 8 bits but the stream header
+    // is suppressed. To maintain the old behavior upgrade window size here.
+    // This is safe because you can inflate a stream deflated with zlib
+    // using 9-bits with 8-bits window.
+    // For more details see https://crbug.com/691074.
+    window_bits = 9;
+  }
   if (raw_) {
     window_bits = -window_bits;
   } else if (gzip_) {
@@ -326,7 +327,6 @@ bool ZLibDeflateFilter::Init() {
   set_initialized(true);
   return true;
 }
-
 
 bool ZLibDeflateFilter::Process(uint8_t* data, intptr_t length) {
   if (current_buffer_ != NULL) {
@@ -367,7 +367,6 @@ intptr_t ZLibDeflateFilter::Processed(uint8_t* buffer,
   return error ? -1 : 0;
 }
 
-
 ZLibInflateFilter::~ZLibInflateFilter() {
   delete[] dictionary_;
   delete[] current_buffer_;
@@ -375,7 +374,6 @@ ZLibInflateFilter::~ZLibInflateFilter() {
     inflateEnd(&stream_);
   }
 }
-
 
 bool ZLibInflateFilter::Init() {
   int window_bits =
@@ -394,7 +392,6 @@ bool ZLibInflateFilter::Init() {
   return true;
 }
 
-
 bool ZLibInflateFilter::Process(uint8_t* data, intptr_t length) {
   if (current_buffer_ != NULL) {
     return false;
@@ -403,7 +400,6 @@ bool ZLibInflateFilter::Process(uint8_t* data, intptr_t length) {
   stream_.next_in = current_buffer_ = data;
   return true;
 }
-
 
 intptr_t ZLibInflateFilter::Processed(uint8_t* buffer,
                                       intptr_t length,
@@ -456,5 +452,3 @@ intptr_t ZLibInflateFilter::Processed(uint8_t* buffer,
 
 }  // namespace bin
 }  // namespace dart
-
-#endif  // !defined(DART_IO_DISABLED)

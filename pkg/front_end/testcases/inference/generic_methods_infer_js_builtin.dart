@@ -1,15 +1,18 @@
 // Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
+// @dart=2.9
 /*@testedFeatures=inference*/
 library test;
 
-/*error:IMPORT_INTERNAL_LIBRARY*/ import 'dart:_foreign_helper' show JS;
+// TODO(johnniwinther): Support testing of internal libraries.
+import 'dart:_foreign_helper' show JS; // error
 
-main() {
-  String x = /*error:INVALID_ASSIGNMENT*/ JS('int', '42');
-  var /*@type=String*/ y = JS('String', '"hello"');
+test() {
+  String x = JS('int', '42'); // error
+  var /*@type=invalid-type*/ y = JS<String>('String', '"hello"');
   y = "world";
-  y = /*error:INVALID_ASSIGNMENT*/ 42;
+  y = 42; // error
 }
+
+main() {}

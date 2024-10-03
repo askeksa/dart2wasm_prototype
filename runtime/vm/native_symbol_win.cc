@@ -3,10 +3,11 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_WINDOWS)
+#if defined(DART_HOST_OS_WINDOWS)
 
 #include "vm/lockers.h"
 #include "vm/native_symbol.h"
+#include "vm/os.h"
 #include "vm/os_thread.h"
 
 #include <dbghelp.h>  // NOLINT
@@ -16,35 +17,49 @@ namespace dart {
 static bool running_ = false;
 static Mutex* lock_ = NULL;
 
-void NativeSymbolResolver::InitOnce() {
+void NativeSymbolResolver::Init() {
   ASSERT(running_ == false);
-  lock_ = new Mutex();
+  if (lock_ == NULL) {
+    lock_ = new Mutex();
+  }
   running_ = true;
+
+// Symbol resolution API's used in this file are not supported
+// when compiled in UWP.
+#ifndef DART_TARGET_OS_WINDOWS_UWP
   SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
   HANDLE hProcess = GetCurrentProcess();
   if (!SymInitialize(hProcess, NULL, TRUE)) {
     DWORD error = GetLastError();
-    printf("Failed to init NativeSymbolResolver (SymInitialize %d)\n", error);
+    OS::PrintErr("Failed to init NativeSymbolResolver (SymInitialize %" Pu32
+                 ")\n",
+                 error);
     return;
   }
+#endif
 }
 
-
-void NativeSymbolResolver::ShutdownOnce() {
+void NativeSymbolResolver::Cleanup() {
   MutexLocker lock(lock_);
   if (!running_) {
     return;
   }
   running_ = false;
+#ifndef DART_TARGET_OS_WINDOWS_UWP
   HANDLE hProcess = GetCurrentProcess();
   if (!SymCleanup(hProcess)) {
     DWORD error = GetLastError();
-    printf("Failed to shutdown NativeSymbolResolver (SymCleanup  %d)\n", error);
+    OS::PrintErr("Failed to shutdown NativeSymbolResolver (SymCleanup  %" Pu32
+                 ")\n",
+                 error);
   }
+#endif
 }
 
-
-char* NativeSymbolResolver::LookupSymbolName(uintptr_t pc, uintptr_t* start) {
+char* NativeSymbolResolver::LookupSymbolName(uword pc, uword* start) {
+#ifdef DART_TARGET_OS_WINDOWS_UWP
+  return NULL;
+#else
   static const intptr_t kMaxNameLength = 2048;
   static const intptr_t kSymbolInfoSize = sizeof(SYMBOL_INFO);  // NOLINT.
   static char buffer[kSymbolInfoSize + kMaxNameLength];
@@ -70,14 +85,13 @@ char* NativeSymbolResolver::LookupSymbolName(uintptr_t pc, uintptr_t* start) {
   if (start != NULL) {
     *start = pc - displacement;
   }
-  return strdup(pSymbol->Name);
+  return Utils::StrDup(pSymbol->Name);
+#endif  // ifdef DART_TARGET_OS_WINDOWS_UWP
 }
-
 
 void NativeSymbolResolver::FreeSymbolName(char* name) {
   free(name);
 }
-
 
 bool NativeSymbolResolver::LookupSharedObject(uword pc,
                                               uword* dso_base,
@@ -85,6 +99,12 @@ bool NativeSymbolResolver::LookupSharedObject(uword pc,
   return false;
 }
 
+void NativeSymbolResolver::AddSymbols(const char* dso_name,
+                                      void* buffer,
+                                      size_t size) {
+  OS::PrintErr("warning: Dart_AddSymbols has no effect on Windows\n");
+}
+
 }  // namespace dart
 
-#endif  // defined(HOST_OS_WINDOWS)
+#endif  // defined(DART_HOST_OS_WINDOWS)

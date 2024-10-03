@@ -37,7 +37,7 @@ code() {
   };
   print(myList);
   print(myConstList);
-  int lookup = myMap[1];
+  int lookup = myMap[1]!;
   print(lookup);
   print(myMap);
   print(myConstMap);
@@ -78,7 +78,7 @@ List<String> expected = [
   "$file:${LINE_A+33}:1"
 ];
 
-var tests = [
+var tests = <IsolateTest>[
   hasPausedAtStart,
   setBreakpointAtLine(LINE_A),
   runStepThroughProgramRecordingStops(stops),

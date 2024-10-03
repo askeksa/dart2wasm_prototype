@@ -34,7 +34,7 @@ class Path {
   static String _cleanWindows(String source) {
     // Change \ to /.
     var clean = source.replaceAll('\\', '/');
-    // Add / before intial [Drive letter]:
+    // Add / before initial [Drive letter]:
     if (clean.length >= 2 && clean[1] == ':') {
       clean = '/$clean';
     }
@@ -121,7 +121,7 @@ class Path {
     while (common < length && pathSegments[common] == baseSegments[common]) {
       common++;
     }
-    final segments = new List<String>();
+    final segments = <String>[];
 
     if (common < baseSegments.length && baseSegments[common] == '..') {
       throw new ArgumentError("Invalid case of Path.relativeTo(base):\n"
@@ -192,7 +192,7 @@ class Path {
   Path makeCanonical() {
     bool isAbs = isAbsolute;
     List segs = segments();
-    String drive;
+    String? drive;
     if (isAbs && !segs.isEmpty && segs[0].length == 2 && segs[0][1] == ':') {
       drive = segs[0];
       segs.removeRange(0, 1);
@@ -267,7 +267,7 @@ class Path {
   }
 
   List<String> segments() {
-    List result = _path.split('/');
+    List<String> result = _path.split('/');
     if (isAbsolute) result.removeRange(0, 1);
     if (hasTrailingSeparator) result.removeLast();
     return result;

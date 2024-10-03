@@ -2,10 +2,10 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED) && !defined(DART_IO_SECURE_SOCKET_DISABLED)
+#if !defined(DART_IO_SECURE_SOCKET_DISABLED)
 
 #include "platform/globals.h"
-#if defined(HOST_OS_MACOS) || defined(HOST_OS_ANDROID) ||                      \
+#if defined(DART_HOST_OS_MACOS) || defined(DART_HOST_OS_ANDROID) ||            \
     defined(DART_IO_ROOT_CERTS_DISABLED)
 
 namespace dart {
@@ -17,7 +17,6 @@ unsigned int root_certificates_pem_length = 0;
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_MACOS) || defined(HOST_OS_ANDROID) || ...
+#endif  // defined(DART_HOST_OS_MACOS) || defined(DART_HOST_OS_ANDROID) || ...
 
-#endif  // !defined(DART_IO_DISABLED) &&
-        // !defined(DART_IO_SECURE_SOCKET_DISABLED)
+#endif  // !defined(DART_IO_SECURE_SOCKET_DISABLED)

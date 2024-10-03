@@ -5,77 +5,72 @@
 #ifndef RUNTIME_VM_CODE_DESCRIPTORS_H_
 #define RUNTIME_VM_CODE_DESCRIPTORS_H_
 
-#include "vm/ast.h"
 #include "vm/datastream.h"
 #include "vm/globals.h"
 #include "vm/growable_array.h"
 #include "vm/log.h"
-#include "vm/object.h"
 #include "vm/runtime_entry.h"
+#include "vm/token_position.h"
 
 namespace dart {
 
+static const intptr_t kInvalidTryIndex = -1;
+
 class DescriptorList : public ZoneAllocated {
  public:
-  explicit DescriptorList(intptr_t initial_capacity)
-      : encoded_data_(initial_capacity),
-        prev_pc_offset(0),
-        prev_deopt_id(0),
-        prev_token_pos(0) {}
+  explicit DescriptorList(
+      Zone* zone,
+      const GrowableArray<const Function*>* inline_id_to_function = nullptr);
 
   ~DescriptorList() {}
 
-  void AddDescriptor(RawPcDescriptors::Kind kind,
+  void AddDescriptor(UntaggedPcDescriptors::Kind kind,
                      intptr_t pc_offset,
                      intptr_t deopt_id,
                      TokenPosition token_pos,
-                     intptr_t try_index);
+                     intptr_t try_index,
+                     intptr_t yield_index);
 
-  RawPcDescriptors* FinalizePcDescriptors(uword entry_point);
+  PcDescriptorsPtr FinalizePcDescriptors(uword entry_point);
 
  private:
-  GrowableArray<uint8_t> encoded_data_;
+  static constexpr intptr_t kInitialStreamSize = 64;
+
+  const Function& function_;
+  const Script& script_;
+  ZoneWriteStream encoded_data_;
 
   intptr_t prev_pc_offset;
   intptr_t prev_deopt_id;
-  intptr_t prev_token_pos;
+  int32_t prev_token_pos;
 
   DISALLOW_COPY_AND_ASSIGN(DescriptorList);
 };
 
-
-class StackMapTableBuilder : public ZoneAllocated {
+class CompressedStackMapsBuilder : public ZoneAllocated {
  public:
-  StackMapTableBuilder()
-      : stack_map_(StackMap::ZoneHandle()),
-        list_(GrowableObjectArray::ZoneHandle(
-            GrowableObjectArray::New(Heap::kOld))) {}
-  ~StackMapTableBuilder() {}
+  explicit CompressedStackMapsBuilder(Zone* zone)
+      : encoded_bytes_(zone, kInitialStreamSize) {}
 
   void AddEntry(intptr_t pc_offset,
                 BitmapBuilder* bitmap,
-                intptr_t register_bit_count);
+                intptr_t spill_slot_bit_count);
 
-  bool Verify();
-
-  RawArray* FinalizeStackMaps(const Code& code);
+  CompressedStackMapsPtr Finalize() const;
 
  private:
-  intptr_t Length() const { return list_.Length(); }
-  RawStackMap* MapAt(intptr_t index) const;
+  static constexpr intptr_t kInitialStreamSize = 16;
 
-  StackMap& stack_map_;
-  GrowableObjectArray& list_;
-  DISALLOW_COPY_AND_ASSIGN(StackMapTableBuilder);
+  ZoneWriteStream encoded_bytes_;
+  intptr_t last_pc_offset_ = 0;
+  DISALLOW_COPY_AND_ASSIGN(CompressedStackMapsBuilder);
 };
-
 
 class ExceptionHandlerList : public ZoneAllocated {
  public:
   struct HandlerDesc {
     intptr_t outer_try_index;    // Try block in which this try block is nested.
     intptr_t pc_offset;          // Handler PC offset value.
-    TokenPosition token_pos;     // Token position of handler.
     bool is_generated;           // False if this is directly from Dart code.
     const Array* handler_types;  // Catch clause guards.
     bool needs_stacktrace;
@@ -89,7 +84,6 @@ class ExceptionHandlerList : public ZoneAllocated {
     struct HandlerDesc data;
     data.outer_try_index = -1;
     data.pc_offset = ExceptionHandlers::kInvalidPcOffset;
-    data.token_pos = TokenPosition::kNoSource;
     data.is_generated = true;
     data.handler_types = NULL;
     data.needs_stacktrace = false;
@@ -99,7 +93,6 @@ class ExceptionHandlerList : public ZoneAllocated {
   void AddHandler(intptr_t try_index,
                   intptr_t outer_try_index,
                   intptr_t pc_offset,
-                  TokenPosition token_pos,
                   bool is_generated,
                   const Array& handler_types,
                   bool needs_stacktrace) {
@@ -110,18 +103,16 @@ class ExceptionHandlerList : public ZoneAllocated {
     list_[try_index].outer_try_index = outer_try_index;
     ASSERT(list_[try_index].pc_offset == ExceptionHandlers::kInvalidPcOffset);
     list_[try_index].pc_offset = pc_offset;
-    list_[try_index].token_pos = token_pos;
     list_[try_index].is_generated = is_generated;
     ASSERT(handler_types.IsZoneHandle());
     list_[try_index].handler_types = &handler_types;
     list_[try_index].needs_stacktrace |= needs_stacktrace;
   }
 
-
   // Called by rethrows, to mark their enclosing handlers.
   void SetNeedsStackTrace(intptr_t try_index) {
     // Rethrows can be generated outside a try by the compiler.
-    if (try_index == CatchClauseNode::kInvalidTryIndex) {
+    if (try_index == kInvalidTryIndex) {
       return;
     }
     ASSERT(try_index >= 0);
@@ -131,62 +122,34 @@ class ExceptionHandlerList : public ZoneAllocated {
     list_[try_index].needs_stacktrace = true;
   }
 
-
-  static bool ContainsDynamic(const Array& array) {
+  static bool ContainsCatchAllType(const Array& array) {
+    auto& type = AbstractType::Handle();
     for (intptr_t i = 0; i < array.Length(); i++) {
-      if (array.At(i) == Type::DynamicType()) {
+      type ^= array.At(i);
+      if (type.IsCatchAllType()) {
         return true;
       }
     }
     return false;
   }
 
-  RawExceptionHandlers* FinalizeExceptionHandlers(uword entry_point) const;
+  ExceptionHandlersPtr FinalizeExceptionHandlers(uword entry_point) const;
 
  private:
   GrowableArray<struct HandlerDesc> list_;
   DISALLOW_COPY_AND_ASSIGN(ExceptionHandlerList);
 };
 
-
-// An encoded move from stack/constant to stack performed
-struct CatchEntryStatePair {
-  enum { kCatchEntryStateIsMove = 1, kCatchEntryStateDestShift = 1 };
-
-  intptr_t src, dest;
-
-  static CatchEntryStatePair FromConstant(intptr_t pool_id,
-                                          intptr_t dest_slot) {
-    CatchEntryStatePair pair;
-    pair.src = pool_id;
-    pair.dest = (dest_slot << kCatchEntryStateDestShift);
-    return pair;
-  }
-
-  static CatchEntryStatePair FromMove(intptr_t src_slot, intptr_t dest_slot) {
-    CatchEntryStatePair pair;
-    pair.src = src_slot;
-    pair.dest =
-        (dest_slot << kCatchEntryStateDestShift) | kCatchEntryStateIsMove;
-    return pair;
-  }
-
-  bool operator==(const CatchEntryStatePair& rhs) {
-    return src == rhs.src && dest == rhs.dest;
-  }
-};
-
-
-// Used to construct CatchEntryState metadata for AoT mode of compilation.
-class CatchEntryStateMapBuilder : public ZoneAllocated {
+#if !defined(DART_PRECOMPILED_RUNTIME)
+// Used to construct CatchEntryMoves for the AOT mode of compilation.
+class CatchEntryMovesMapBuilder : public ZoneAllocated {
  public:
-  CatchEntryStateMapBuilder();
+  CatchEntryMovesMapBuilder();
 
   void NewMapping(intptr_t pc_offset);
-  void AppendMove(intptr_t src_slot, intptr_t dest_slot);
-  void AppendConstant(intptr_t pool_id, intptr_t dest_slot);
+  void Append(const CatchEntryMove& move);
   void EndMapping();
-  RawTypedData* FinalizeCatchEntryStateMap();
+  TypedDataPtr FinalizeCatchEntryMovesMap();
 
  private:
   class TrieNode;
@@ -194,13 +157,62 @@ class CatchEntryStateMapBuilder : public ZoneAllocated {
   Zone* zone_;
   TrieNode* root_;
   intptr_t current_pc_offset_;
-  GrowableArray<CatchEntryStatePair> moves_;
-  uint8_t* buffer_;
-  WriteStream stream_;
+  GrowableArray<CatchEntryMove> moves_;
+  ZoneWriteStream stream_;
 
-  DISALLOW_COPY_AND_ASSIGN(CatchEntryStateMapBuilder);
+  DISALLOW_COPY_AND_ASSIGN(CatchEntryMovesMapBuilder);
+};
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
+
+// Instructions have two pieces of information needed to get accurate source
+// locations: the token position and the inlining id. The inlining id tells us
+// which function, and thus which script, to use for this instruction and the
+// token position, when real, tells us the position in the source for the
+// script for the instruction.
+//
+// Thus, we bundle the two pieces of information in InstructionSource structs
+// when copying or retrieving to lower the likelihood that the token position
+// is used without the appropriate inlining id.
+struct InstructionSource {
+  // Treat an instruction source without inlining id information as unset.
+  InstructionSource() : InstructionSource(TokenPosition::kNoSource) {}
+  explicit InstructionSource(TokenPosition pos) : InstructionSource(pos, -1) {}
+  InstructionSource(TokenPosition pos, intptr_t id)
+      : token_pos(pos), inlining_id(id) {}
+
+  const TokenPosition token_pos;
+  const intptr_t inlining_id;
+
+  DISALLOW_ALLOCATION();
 };
 
+struct CodeSourceMapOps : AllStatic {
+  static const uint8_t kChangePosition = 0;
+  static const uint8_t kAdvancePC = 1;
+  static const uint8_t kPushFunction = 2;
+  static const uint8_t kPopFunction = 3;
+  static const uint8_t kNullCheck = 4;
+
+  static uint8_t Read(ReadStream* stream,
+                      int32_t* arg1,
+                      int32_t* arg2 = nullptr);
+
+  static void Write(BaseWriteStream* stream,
+                    uint8_t op,
+                    int32_t arg1 = 0,
+                    int32_t arg2 = 0);
+
+ private:
+  static constexpr intptr_t kOpBits = 3;
+
+  using OpField = BitField<int32_t, uint8_t, 0, kOpBits>;
+  using ArgField = BitField<int32_t, int32_t, OpField::kNextBit>;
+
+  static constexpr int32_t kMaxArgValue =
+      Utils::NBitMask<int32_t>(ArgField::bitsize() - 1);
+  static constexpr int32_t kMinArgValue = ~kMaxArgValue;
+  static constexpr int32_t kSignBits = static_cast<uint32_t>(kMinArgValue) << 1;
+};
 
 // A CodeSourceMap maps from pc offsets to a stack of inlined functions and
 // their positions. This is encoded as a little bytecode that pushes and pops
@@ -215,6 +227,7 @@ class CatchEntryStateMapBuilder : public ZoneAllocated {
 class CodeSourceMapBuilder : public ZoneAllocated {
  public:
   CodeSourceMapBuilder(
+      Zone* zone,
       bool stack_traces_only,
       const GrowableArray<intptr_t>& caller_inline_id,
       const GrowableArray<TokenPosition>& inline_id_to_token_pos,
@@ -223,34 +236,38 @@ class CodeSourceMapBuilder : public ZoneAllocated {
   // The position at which a function implicitly starts, for both the root and
   // after a push bytecode. We use the classifying position kDartCodePrologue
   // since it is the most common.
-  static const TokenPosition kInitialPosition;
+  static const TokenPosition& kInitialPosition;
 
-  static const uint8_t kChangePosition = 0;
-  static const uint8_t kAdvancePC = 1;
-  static const uint8_t kPushFunction = 2;
-  static const uint8_t kPopFunction = 3;
-
-  void StartInliningInterval(int32_t pc_offset, intptr_t inline_id);
-  void BeginCodeSourceRange(int32_t pc_offset);
-  void EndCodeSourceRange(int32_t pc_offset, TokenPosition pos);
-  void NoteDescriptor(RawPcDescriptors::Kind kind,
+  void BeginCodeSourceRange(int32_t pc_offset, const InstructionSource& source);
+  void EndCodeSourceRange(int32_t pc_offset, const InstructionSource& source);
+  void NoteDescriptor(UntaggedPcDescriptors::Kind kind,
                       int32_t pc_offset,
-                      TokenPosition pos);
+                      const InstructionSource& source);
+  void NoteNullCheck(int32_t pc_offset,
+                     const InstructionSource& source,
+                     intptr_t name_index);
+  void WriteFunctionEntrySourcePosition(const InstructionSource& source);
 
-  RawArray* InliningIdToFunction();
-  RawCodeSourceMap* Finalize();
+  // If source is from an inlined call, returns the token position of the
+  // original call in the root function, otherwise the source's token position.
+  TokenPosition RootPosition(const InstructionSource& source);
+  ArrayPtr InliningIdToFunction();
+  CodeSourceMapPtr Finalize();
+
+  const GrowableArray<const Function*>& inline_id_to_function() const {
+    return inline_id_to_function_;
+  }
 
  private:
   intptr_t GetFunctionId(intptr_t inline_id);
+  void StartInliningInterval(int32_t pc_offset,
+                             const InstructionSource& source);
 
-  void BufferChangePosition(TokenPosition pos) {
-    buffered_token_pos_stack_.Last() = pos;
-  }
+  void BufferChangePosition(TokenPosition pos);
   void WriteChangePosition(TokenPosition pos);
   void BufferAdvancePC(int32_t distance) { buffered_pc_offset_ += distance; }
   void WriteAdvancePC(int32_t distance) {
-    stream_.Write<uint8_t>(kAdvancePC);
-    stream_.Write<int32_t>(distance);
+    CodeSourceMapOps::Write(&stream_, CodeSourceMapOps::kAdvancePC, distance);
     written_pc_offset_ += distance;
   }
   void BufferPush(intptr_t inline_id) {
@@ -258,8 +275,8 @@ class CodeSourceMapBuilder : public ZoneAllocated {
     buffered_token_pos_stack_.Add(kInitialPosition);
   }
   void WritePush(intptr_t inline_id) {
-    stream_.Write<uint8_t>(kPushFunction);
-    stream_.Write<int32_t>(GetFunctionId(inline_id));
+    CodeSourceMapOps::Write(&stream_, CodeSourceMapOps::kPushFunction,
+                            GetFunctionId(inline_id));
     written_inline_id_stack_.Add(inline_id);
     written_token_pos_stack_.Add(kInitialPosition);
   }
@@ -268,15 +285,15 @@ class CodeSourceMapBuilder : public ZoneAllocated {
     buffered_token_pos_stack_.RemoveLast();
   }
   void WritePop() {
-    stream_.Write<uint8_t>(kPopFunction);
+    CodeSourceMapOps::Write(&stream_, CodeSourceMapOps::kPopFunction);
     written_inline_id_stack_.RemoveLast();
     written_token_pos_stack_.RemoveLast();
   }
+  void WriteNullCheck(int32_t name_index) {
+    CodeSourceMapOps::Write(&stream_, CodeSourceMapOps::kNullCheck, name_index);
+  }
 
   void FlushBuffer();
-  void FlushBufferStack();
-  void FlushBufferPosition();
-  void FlushBufferPC();
 
   bool IsOnBufferedStack(intptr_t inline_id) {
     for (intptr_t i = 0; i < buffered_inline_id_stack_.length(); i++) {
@@ -285,6 +302,7 @@ class CodeSourceMapBuilder : public ZoneAllocated {
     return false;
   }
 
+  Zone* const zone_;
   intptr_t buffered_pc_offset_;
   GrowableArray<intptr_t> buffered_inline_id_stack_;
   GrowableArray<TokenPosition> buffered_token_pos_stack_;
@@ -299,14 +317,13 @@ class CodeSourceMapBuilder : public ZoneAllocated {
 
   const GrowableObjectArray& inlined_functions_;
 
-  uint8_t* buffer_;
-  WriteStream stream_;
+  Script& script_;
+  ZoneWriteStream stream_;
 
   const bool stack_traces_only_;
 
   DISALLOW_COPY_AND_ASSIGN(CodeSourceMapBuilder);
 };
-
 
 class CodeSourceMapReader : public ValueObject {
  public:
@@ -322,7 +339,23 @@ class CodeSourceMapReader : public ValueObject {
   void DumpInlineIntervals(uword start);
   void DumpSourcePositions(uword start);
 
+  intptr_t GetNullCheckNameIndexAt(int32_t pc_offset);
+
  private:
+  static const TokenPosition& InitialPosition() {
+    if (FLAG_precompiled_mode) {
+      // In precompiled mode, the CodeSourceMap stores lines instead of
+      // real token positions and uses kNoSourcePos for no line information.
+      return TokenPosition::kNoSource;
+    } else {
+      return CodeSourceMapBuilder::kInitialPosition;
+    }
+  }
+
+  // Reads a TokenPosition value from a CSM, handling the different encoding for
+  // when non-symbolic stack traces are enabled.
+  static TokenPosition ReadPosition(ReadStream* stream);
+
   const CodeSourceMap& map_;
   const Array& functions_;
   const Function& root_;

@@ -4,7 +4,7 @@
 
 import 'dart:html';
 import 'dart:async';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
 
 class RefreshEvent {
@@ -12,10 +12,8 @@ class RefreshEvent {
   RefreshEvent(this.element);
 }
 
-class NavRefreshElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<NavRefreshElement>('nav-refresh');
-
-  RenderingScheduler _r;
+class NavRefreshElement extends CustomElement implements Renderable {
+  late RenderingScheduler<NavRefreshElement> _r;
 
   Stream<RenderedEvent<NavRefreshElement>> get onRendered => _r.onRendered;
 
@@ -23,8 +21,8 @@ class NavRefreshElement extends HtmlElement implements Renderable {
       new StreamController<RefreshEvent>.broadcast();
   Stream<RefreshEvent> get onRefresh => _onRefresh.stream;
 
-  bool _disabled;
-  String _label;
+  late bool _disabled;
+  late String _label;
 
   bool get disabled => _disabled;
   String get label => _label;
@@ -33,17 +31,17 @@ class NavRefreshElement extends HtmlElement implements Renderable {
   set label(String value) => _label = _r.checkAndReact(_label, value);
 
   factory NavRefreshElement(
-      {String label: 'Refresh', bool disabled: false, RenderingQueue queue}) {
+      {String label: 'Refresh', bool disabled: false, RenderingQueue? queue}) {
     assert(label != null);
     assert(disabled != null);
-    NavRefreshElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    NavRefreshElement e = new NavRefreshElement.created();
+    e._r = new RenderingScheduler<NavRefreshElement>(e, queue: queue);
     e._label = label;
     e._disabled = disabled;
     return e;
   }
 
-  NavRefreshElement.created() : super.created();
+  NavRefreshElement.created() : super.created('nav-refresh');
 
   @override
   void attached() {
@@ -54,14 +52,14 @@ class NavRefreshElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [
+    children = <Element>[
       new LIElement()
-        ..children = [
+        ..children = <Element>[
           new ButtonElement()
             ..text = label
             ..disabled = disabled

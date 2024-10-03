@@ -2,10 +2,18 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 library touch;
 
 import 'dart:async';
-import 'dart:collection' show Queue, DoubleLinkedQueue, DoubleLinkedQueueEntry;
+import 'dart:collection'
+    show
+        Queue,
+        DoubleLinkedQueue,
+        DoubleLinkedQueueEntry,
+        ListMixin,
+        ImmutableListMixin;
 import 'dart:html';
 import 'dart:math' as Math;
 

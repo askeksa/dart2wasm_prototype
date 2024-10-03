@@ -6,8 +6,7 @@
 /// If a test is asynchronous, it needs to notify the testing driver
 /// about this (otherwise tests may get reported as passing [after main()
 /// finished] even if the asynchronous operations fail).
-/// Tests which can't use the unittest framework should use the helper functions
-/// in this library.
+///
 /// This library provides four methods
 ///  - asyncStart(): Needs to be called before an asynchronous operation is
 ///                  scheduled.
@@ -23,14 +22,11 @@
 
 library async_helper;
 
-// TODO(kustermann): This is problematic because we rely on a working
-// 'dart:isolate' (i.e. it is in particular problematic with dart2js).
-// It would be nice if we could use a different mechanism for different
-// runtimes.
-import 'dart:isolate';
+import 'dart:async';
+
+import 'package:expect/expect.dart';
 
 bool _initialized = false;
-ReceivePort _port = null;
 int _asyncLevel = 0;
 
 Exception _buildException(String msg) {
@@ -38,7 +34,10 @@ Exception _buildException(String msg) {
 }
 
 /// Call this method before an asynchronous test is created.
-void asyncStart() {
+///
+/// If [count] is provided, expect [count] [asyncEnd] calls instead of just one.
+void asyncStart([int count = 1]) {
+  if (count <= 0) return;
   if (_initialized && _asyncLevel == 0) {
     throw _buildException('asyncStart() was called even though we are done '
         'with testing.');
@@ -46,9 +45,8 @@ void asyncStart() {
   if (!_initialized) {
     print('unittest-suite-wait-for-done');
     _initialized = true;
-    _port = new ReceivePort();
   }
-  _asyncLevel++;
+  _asyncLevel += count;
 }
 
 /// Call this after an asynchronous test has ended successfully.
@@ -63,8 +61,6 @@ void asyncEnd() {
   }
   _asyncLevel--;
   if (_asyncLevel == 0) {
-    _port.close();
-    _port = null;
     print('unittest-suite-success');
   }
 }
@@ -88,7 +84,55 @@ void asyncSuccess(_) => asyncEnd();
  *
  * [f] must return a [:Future:] for the test computation.
  */
-void asyncTest(f()) {
+Future<void> asyncTest(f()) {
   asyncStart();
-  f().then(asyncSuccess);
+  return f().then(asyncSuccess);
+}
+
+/// Verifies that the asyncronous [result] throws a [T].
+///
+/// Fails if [result] completes with a value, or it completes with
+/// an error which is not a [T].
+///
+/// Returns the accepted thrown object.
+/// For example, to check the content of the thrown object,
+/// you could write this:
+/// ```
+/// var e = await asyncExpectThrows<MyException>(asyncExpression)
+/// Expect.isTrue(e.myMessage.contains("WARNING"));
+/// ```
+/// If `result` completes with an [ExpectException] error from another
+/// failed test expectation, that error cannot be caught and accepted.
+Future<T> asyncExpectThrows<T extends Object>(Future<void> result,
+    [String reason = ""]) {
+  // Handle null being passed in from legacy code while also avoiding producing
+  // an unnecessary null check warning here.
+  if ((reason as dynamic) == null) reason = "";
+
+  var type = "";
+  if (T != dynamic && T != Object) type = "<$T>";
+  var header = "asyncExpectThrows$type(${reason}):";
+
+  if ((result as dynamic) == null) {
+    Expect.testError("$header result Future must not be null.");
+  }
+  // TODO(rnystrom): It might useful to validate that T is not bound to
+  // ExpectException since that won't work.
+
+  asyncStart();
+  return result.then<T>((_) {
+    throw ExpectException("$header Did not throw.");
+  }, onError: (error, stack) {
+    // A test failure doesn't count as throwing.
+    if (error is ExpectException) throw error;
+
+    if (error is! T) {
+      // Throws something unexpected.
+      throw ExpectException(
+          "$header Unexpected '${Error.safeToString(error)}'\n$stack");
+    }
+
+    asyncEnd();
+    return error;
+  });
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -6,7 +6,7 @@ import 'package:analysis_server/src/services/correction/levenshtein.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(LevenshteinTest);
   });
@@ -43,16 +43,7 @@ class LevenshteinTest {
   void test_negativeThreshold() {
     expect(() {
       levenshtein('', '', -5);
-    }, throws);
-  }
-
-  void test_null() {
-    expect(() {
-      levenshtein('', null, 5);
-    }, throws);
-    expect(() {
-      levenshtein(null, '', 5);
-    }, throws);
+    }, throwsArgumentError);
   }
 
   void test_same() {

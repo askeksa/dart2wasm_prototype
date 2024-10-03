@@ -5,8 +5,8 @@
 #include "vm/globals.h"
 #if defined(TARGET_ARCH_ARM64)
 
-#include "vm/assembler.h"
 #include "vm/code_patcher.h"
+#include "vm/compiler/assembler/assembler.h"
 #include "vm/dart_entry.h"
 #include "vm/instructions.h"
 #include "vm/native_entry.h"
@@ -28,26 +28,37 @@ ASSEMBLER_TEST_GENERATE(IcDataAccess, assembler) {
       Library::Handle(), class_name, script, TokenPosition::kNoSource));
   const String& function_name =
       String::Handle(Symbols::New(thread, "callerFunction"));
+  const FunctionType& signature = FunctionType::ZoneHandle(FunctionType::New());
   const Function& function = Function::Handle(Function::New(
-      function_name, RawFunction::kRegularFunction, true, false, false, false,
-      false, owner_class, TokenPosition::kNoSource));
+      signature, function_name, UntaggedFunction::kRegularFunction, true, false,
+      false, false, false, owner_class, TokenPosition::kNoSource));
 
-  const String& target_name = String::Handle(String::New("targetFunction"));
+  const String& target_name =
+      String::Handle(Symbols::New(thread, "targetFunction"));
   const intptr_t kTypeArgsLen = 0;
   const intptr_t kNumArgs = 1;
-  const Array& args_descriptor = Array::Handle(
-      ArgumentsDescriptor::New(kTypeArgsLen, kNumArgs, Object::null_array()));
-  const ICData& ic_data = ICData::ZoneHandle(
-      ICData::New(function, target_name, args_descriptor, 15, 1, false));
+  const Array& args_descriptor = Array::Handle(ArgumentsDescriptor::NewBoxed(
+      kTypeArgsLen, kNumArgs, Object::null_array()));
+  const ICData& ic_data = ICData::ZoneHandle(ICData::New(
+      function, target_name, args_descriptor, 15, 1, ICData::kInstance));
+  const Code& stub = StubCode::OneArgCheckInlineCache();
 
-  // Code accessing pp is generated, but not executed. Uninitialized pp is OK.
-  __ set_constant_pool_allowed(true);
+  // Code is generated, but not executed. Just parsed with CodePatcher.
+  __ set_constant_pool_allowed(true);  // Uninitialized pp is OK.
+  SPILLS_LR_TO_FRAME({});              // Clobbered LR is OK.
 
-  __ LoadObject(R5, ic_data);
-  __ BranchLinkPatchable(*StubCode::OneArgCheckInlineCache_entry());
+  compiler::ObjectPoolBuilder& op = __ object_pool_builder();
+  const intptr_t ic_data_index =
+      op.AddObject(ic_data, ObjectPool::Patchability::kPatchable);
+  const intptr_t stub_index =
+      op.AddObject(stub, ObjectPool::Patchability::kPatchable);
+  ASSERT((ic_data_index + 1) == stub_index);
+  __ LoadDoubleWordFromPoolIndex(R5, CODE_REG, ic_data_index);
+  __ Call(compiler::FieldAddress(
+      CODE_REG, Code::entry_point_offset(Code::EntryKind::kMonomorphic)));
+  RESTORES_LR_FROM_FRAME({});  // Clobbered LR is OK.
   __ ret();
 }
-
 
 ASSEMBLER_TEST_RUN(IcDataAccess, test) {
   uword end = test->payload_start() + test->code().Size();

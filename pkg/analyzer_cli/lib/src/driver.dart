@@ -1,178 +1,154 @@
-// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
 import 'dart:io' as io;
 
+import 'package:analyzer/dart/sdk/build_sdk_summary.dart';
 import 'package:analyzer/error/error.dart';
-import 'package:analyzer/file_system/file_system.dart' as file_system;
+import 'package:analyzer/error/listener.dart';
 import 'package:analyzer/file_system/file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
-import 'package:analyzer/plugin/resolver_provider.dart';
-import 'package:analyzer/source/package_map_provider.dart';
-import 'package:analyzer/source/package_map_resolver.dart';
-import 'package:analyzer/source/pub_package_map_provider.dart';
-import 'package:analyzer/source/sdk_ext.dart';
-import 'package:analyzer/src/context/builder.dart';
+import 'package:analyzer/src/dart/analysis/analysis_context_collection.dart';
+import 'package:analyzer/src/dart/analysis/byte_store.dart';
 import 'package:analyzer/src/dart/analysis/driver.dart';
+import 'package:analyzer/src/dart/analysis/driver_based_analysis_context.dart';
+import 'package:analyzer/src/dart/analysis/file_content_cache.dart';
 import 'package:analyzer/src/dart/analysis/file_state.dart';
-import 'package:analyzer/src/dart/sdk/sdk.dart';
-import 'package:analyzer/src/generated/constant.dart';
+import 'package:analyzer/src/dart/analysis/results.dart';
 import 'package:analyzer/src/generated/engine.dart';
-import 'package:analyzer/src/generated/interner.dart';
-import 'package:analyzer/src/generated/java_engine.dart';
-import 'package:analyzer/src/generated/sdk.dart';
 import 'package:analyzer/src/generated/source.dart';
-import 'package:analyzer/src/generated/source_io.dart';
-import 'package:analyzer/src/generated/utilities_general.dart'
-    show PerformanceTag;
-import 'package:analyzer/src/source/source_resource.dart';
-import 'package:analyzer/src/summary/idl.dart';
-import 'package:analyzer/src/summary/package_bundle_reader.dart';
-import 'package:analyzer/src/summary/summary_sdk.dart' show SummaryBasedDartSdk;
+import 'package:analyzer/src/lint/linter.dart';
+import 'package:analyzer/src/lint/pub.dart';
+import 'package:analyzer/src/manifest/manifest_validator.dart';
+import 'package:analyzer/src/pubspec/pubspec_validator.dart';
+import 'package:analyzer/src/source/path_filter.dart';
+import 'package:analyzer/src/task/options.dart';
+import 'package:analyzer/src/util/file_paths.dart' as file_paths;
+import 'package:analyzer/src/util/yaml.dart';
 import 'package:analyzer_cli/src/analyzer_impl.dart';
 import 'package:analyzer_cli/src/batch_mode.dart';
-import 'package:analyzer_cli/src/build_mode.dart';
 import 'package:analyzer_cli/src/error_formatter.dart';
 import 'package:analyzer_cli/src/error_severity.dart';
 import 'package:analyzer_cli/src/options.dart';
 import 'package:analyzer_cli/src/perf_report.dart';
 import 'package:analyzer_cli/starter.dart' show CommandLineStarter;
-import 'package:front_end/src/base/performace_logger.dart';
-import 'package:front_end/src/incremental/byte_store.dart';
 import 'package:linter/src/rules.dart' as linter;
-import 'package:package_config/discovery.dart' as pkg_discovery;
-import 'package:package_config/packages.dart' show Packages;
-import 'package:package_config/packages_file.dart' as pkgfile show parse;
-import 'package:package_config/src/packages_impl.dart' show MapPackages;
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as path;
-import 'package:plugin/manager.dart';
-import 'package:plugin/plugin.dart';
 import 'package:yaml/yaml.dart';
 
 /// Shared IO sink for standard error reporting.
-///
-/// *Visible for testing.*
-StringSink errorSink = io.stderr;
+late StringSink errorSink = io.stderr;
 
 /// Shared IO sink for standard out reporting.
-///
-/// *Visible for testing.*
-StringSink outSink = io.stdout;
+late StringSink outSink = io.stdout;
 
 /// Test this option map to see if it specifies lint rules.
-bool containsLintRuleEntry(Map<String, YamlNode> options) {
-  var linterNode = options['linter'];
-  return linterNode is YamlMap && linterNode.containsKey('rules');
+bool containsLintRuleEntry(YamlMap options) {
+  var linterNode = options.valueAt('linter');
+  return linterNode is YamlMap && linterNode.valueAt('rules') != null;
 }
 
 class Driver implements CommandLineStarter {
-  static final PerformanceTag _analyzeAllTag =
-      new PerformanceTag("Driver._analyzeAll");
+  static final ByteStore analysisDriverMemoryByteStore = MemoryByteStore();
 
-  static ByteStore analysisDriverMemoryByteStore = new MemoryByteStore();
+  bool _isStarted = false;
 
-  /// The plugins that are defined outside the `analyzer_cli` package.
-  List<Plugin> _userDefinedPlugins = <Plugin>[];
+  late _AnalysisContextProvider _analysisContextProvider;
+  DriverBasedAnalysisContext? analysisContext;
 
-  /// The context that was most recently created by a call to [_analyzeAll], or
-  /// `null` if [_analyzeAll] hasn't been called yet.
-  InternalAnalysisContext _context;
-
-  AnalysisDriver analysisDriver;
+  /// The driver that was most recently created by a call to [_analyzeAll].
+  @visibleForTesting
+  AnalysisDriver? analysisDriver;
 
   /// The total number of source files loaded by an AnalysisContext.
   int _analyzedFileCount = 0;
 
-  /// If [_context] is not `null`, the [CommandLineOptions] that guided its
-  /// creation.
-  CommandLineOptions _previousOptions;
-
-  @override
-  ResolverProvider packageResolverProvider;
-
-  /// SDK instance.
-  DartSdk sdk;
-
-  /**
-   * The resource provider used to access the file system.
-   */
-  file_system.ResourceProvider resourceProvider =
-      PhysicalResourceProvider.INSTANCE;
+  /// The resource provider used to access the file system.
+  final ResourceProvider resourceProvider = PhysicalResourceProvider.INSTANCE;
 
   /// Collected analysis statistics.
-  final AnalysisStats stats = new AnalysisStats();
+  final AnalysisStats stats = AnalysisStats();
 
-  /// This Driver's current analysis context.
-  ///
-  /// *Visible for testing.*
-  AnalysisContext get context => _context;
+  /// The [PathFilter] for excluded files with wildcards, etc.
+  late PathFilter pathFilter;
 
-  @override
-  void set userDefinedPlugins(List<Plugin> plugins) {
-    _userDefinedPlugins = plugins ?? <Plugin>[];
+  /// Create a new Driver instance.
+  Driver({@Deprecated('This parameter has no effect') bool isTesting = false});
+
+  /// Converts the given [filePath] into absolute and normalized.
+  String normalizePath(String filePath) {
+    filePath = filePath.trim();
+    filePath = resourceProvider.pathContext.absolute(filePath);
+    filePath = resourceProvider.pathContext.normalize(filePath);
+    return filePath;
   }
 
   @override
-  Future<Null> start(List<String> args) async {
-    if (_context != null) {
-      throw new StateError("start() can only be called once");
+  Future<void> start(List<String> arguments) async {
+    if (_isStarted) {
+      throw StateError('start() can only be called once');
     }
-    int startTime = new DateTime.now().millisecondsSinceEpoch;
+    _isStarted = true;
+    var startTime = DateTime.now().millisecondsSinceEpoch;
 
-    StringUtilities.INTERNER = new MappedInterner();
-
-    _processPlugins();
+    linter.registerLintRules();
 
     // Parse commandline options.
-    CommandLineOptions options = CommandLineOptions.parse(args);
+    var options = CommandLineOptions.parse(resourceProvider, arguments)!;
+
+    _analysisContextProvider = _AnalysisContextProvider(resourceProvider);
 
     // Do analysis.
-    if (options.buildMode) {
-      ErrorSeverity severity = _buildModeAnalyze(options);
-      // Propagate issues to the exit code.
-      if (_shouldBeFatal(severity, options)) {
-        io.exitCode = severity.ordinal;
-      }
-    } else if (options.shouldBatch) {
-      BatchRunner batchRunner = new BatchRunner(outSink, errorSink);
-      batchRunner.runAsBatch(args, (List<String> args) async {
-        CommandLineOptions options = CommandLineOptions.parse(args);
+    if (options.batchMode) {
+      var batchRunner = BatchRunner(outSink, errorSink);
+      batchRunner.runAsBatch(arguments, (List<String> args) async {
+        var options = CommandLineOptions.parse(resourceProvider, args)!;
         return await _analyzeAll(options);
       });
     } else {
-      ErrorSeverity severity = await _analyzeAll(options);
+      var severity = await _analyzeAll(options);
       // Propagate issues to the exit code.
       if (_shouldBeFatal(severity, options)) {
         io.exitCode = severity.ordinal;
       }
     }
 
-    if (_context != null) {
-      _analyzedFileCount += _context.sources.length;
+    // When training a snapshot, in addition to training regular analysis
+    // (above), we train build mode as well.
+    if (options.trainSnapshot) {
+      // TODO(devoncarew): Iterate on this training to make it more
+      // representative of what we see internally; call into _buildModeAnalyze()
+      // with some appropriate options.
+      print('\nGenerating strong mode summary...');
+      final stopwatch = Stopwatch()..start();
+
+      for (var i = 0; i < 3; i++) {
+        buildSdkSummary(
+          resourceProvider: PhysicalResourceProvider.INSTANCE,
+          sdkPath: options.dartSdkPath!,
+        );
+      }
+
+      print('Done in ${stopwatch.elapsedMilliseconds} ms.');
+    }
+
+    if (analysisDriver != null) {
+      _analyzedFileCount += analysisDriver!.knownFiles.length;
     }
 
     if (options.perfReport != null) {
-      String json = makePerfReport(
+      var json = makePerfReport(
           startTime, currentTimeMillis, options, _analyzedFileCount, stats);
-      new io.File(options.perfReport).writeAsStringSync(json);
-    }
-  }
-
-  Future<ErrorSeverity> _analyzeAll(CommandLineOptions options) async {
-    PerformanceTag previous = _analyzeAllTag.makeCurrent();
-    try {
-      return await _analyzeAllImpl(options);
-    } finally {
-      previous.makeCurrent();
+      io.File(options.perfReport!).writeAsStringSync(json);
     }
   }
 
   /// Perform analysis according to the given [options].
-  Future<ErrorSeverity> _analyzeAllImpl(CommandLineOptions options) async {
-    if (!options.machineFormat) {
-      List<String> fileNames = options.sourceFiles.map((String file) {
+  Future<ErrorSeverity> _analyzeAll(CommandLineOptions options) async {
+    if (!options.jsonFormat && !options.machineFormat) {
+      var fileNames = options.sourceFiles.map((String file) {
         file = path.normalize(file);
         if (file == '.') {
           file = path.basename(path.current);
@@ -185,55 +161,19 @@ class Driver implements CommandLineStarter {
       outSink.writeln("Analyzing ${fileNames.join(', ')}...");
     }
 
-    // Create a context, or re-use the previous one.
-    try {
-      _createAnalysisContext(options);
-    } on _DriverError catch (error) {
-      outSink.writeln(error.msg);
-      return ErrorSeverity.ERROR;
-    }
+    _verifyAnalysisOptionsFileExists(options);
 
-    // Add all the files to be analyzed en masse to the context. Skip any
-    // files that were added earlier (whether explicitly or implicitly) to
-    // avoid causing those files to be unnecessarily re-read.
-    Set<Source> knownSources = context.sources.toSet();
-    Set<Source> sourcesToAnalyze = new Set<Source>();
-    ChangeSet changeSet = new ChangeSet();
-    for (String sourcePath in options.sourceFiles) {
-      sourcePath = sourcePath.trim();
+    // These are used to do part file analysis across sources.
+    var dartFiles = <String>{};
+    var libraryFiles = <FileState>{};
+    var danglingParts = <FileState>{};
 
-      // Collect files for analysis.
-      // Note that these files will all be analyzed in the same context.
-      // This should be updated when the ContextManager re-work is complete
-      // (See: https://github.com/dart-lang/sdk/issues/24133)
-      Iterable<io.File> files = _collectFiles(sourcePath);
-      if (files.isEmpty) {
-        errorSink.writeln('No dart files found at: $sourcePath');
-        io.exitCode = ErrorSeverity.ERROR.ordinal;
-        return ErrorSeverity.ERROR;
-      }
-
-      for (io.File file in files) {
-        Source source = _computeLibrarySource(file.absolute.path);
-        if (!knownSources.contains(source)) {
-          changeSet.addedSource(source);
-        }
-        sourcesToAnalyze.add(source);
-      }
-
-      if (analysisDriver == null) {
-        context.applyChanges(changeSet);
-      }
-    }
-
-    // Analyze the libraries.
-    ErrorSeverity allResult = ErrorSeverity.NONE;
-    List<Uri> libUris = <Uri>[];
-    Set<Source> partSources = new Set<Source>();
-
-    SeverityProcessor defaultSeverityProcessor = (AnalysisError error) {
+    // Note: This references analysisDriver via closure, so it will change over
+    // time during the following analysis.
+    SeverityProcessor defaultSeverityProcessor;
+    defaultSeverityProcessor = (AnalysisError error) {
       return determineProcessedSeverity(
-          error, options, _context.analysisOptions);
+          error, options, analysisDriver!.analysisOptions);
     };
 
     // We currently print out to stderr to ensure that when in batch mode we
@@ -243,278 +183,217 @@ class Driver implements CommandLineStarter {
     // batch mode which removes the batch flag to prevent the "cannot have the
     // batch flag and source file" error message.
     ErrorFormatter formatter;
-    if (options.machineFormat) {
-      formatter = new MachineErrorFormatter(errorSink, options, stats,
+    if (options.jsonFormat) {
+      formatter = JsonErrorFormatter(outSink, options, stats,
+          severityProcessor: defaultSeverityProcessor);
+    } else if (options.machineFormat) {
+      // The older machine format emits to stderr (instead of stdout) for legacy
+      // reasons.
+      formatter = MachineErrorFormatter(errorSink, options, stats,
           severityProcessor: defaultSeverityProcessor);
     } else {
-      formatter = new HumanErrorFormatter(outSink, options, stats,
+      formatter = HumanErrorFormatter(outSink, options, stats,
           severityProcessor: defaultSeverityProcessor);
     }
 
-    for (Source source in sourcesToAnalyze) {
-      SourceKind sourceKind = analysisDriver != null
-          ? await analysisDriver.getSourceKind(source.fullName)
-          : context.computeKindOf(source);
-      if (sourceKind == SourceKind.PART) {
-        partSources.add(source);
-        continue;
+    var allResult = ErrorSeverity.NONE;
+
+    void reportPartError(String partPath) {
+      errorSink.writeln('$partPath is a part and cannot be analyzed.');
+      errorSink.writeln('Please pass in a library that contains this part.');
+      io.exitCode = ErrorSeverity.ERROR.ordinal;
+      allResult = allResult.max(ErrorSeverity.ERROR);
+    }
+
+    var pathList = options.sourceFiles.map(normalizePath).toList();
+    _analysisContextProvider.setCommandLineOptions(options, pathList);
+
+    for (var sourcePath in pathList) {
+      _analysisContextProvider.configureForPath(sourcePath);
+      analysisContext = _analysisContextProvider.analysisContext;
+      final analysisDriver =
+          this.analysisDriver = _analysisContextProvider.analysisDriver;
+      pathFilter = _analysisContextProvider.pathFilter;
+
+      // Add all the files to be analyzed en masse to the context. Skip any
+      // files that were added earlier (whether explicitly or implicitly) to
+      // avoid causing those files to be unnecessarily re-read.
+      var filesToAnalyze = <String>{};
+
+      // Collect files for analysis.
+      // Note that these files will all be analyzed in the same context.
+      // This should be updated when the ContextManager re-work is complete
+      // (See: https://github.com/dart-lang/sdk/issues/24133)
+      var files = _collectFiles(sourcePath, analysisDriver.analysisOptions);
+      if (files.isEmpty) {
+        errorSink.writeln('No dart files found at: $sourcePath');
+        io.exitCode = ErrorSeverity.ERROR.ordinal;
+        return ErrorSeverity.ERROR;
       }
-      ErrorSeverity status = await _runAnalyzer(source, options, formatter);
-      allResult = allResult.max(status);
-      libUris.add(source.uri);
+
+      for (var file in files) {
+        filesToAnalyze.add(file.absolute.path);
+      }
+
+      // Analyze the libraries.
+      var pathContext = resourceProvider.pathContext;
+      for (var path in filesToAnalyze) {
+        if (file_paths.isAnalysisOptionsYaml(pathContext, path)) {
+          var file = resourceProvider.getFile(path);
+          var content = file.readAsStringSync();
+          var lineInfo = LineInfo.fromContent(content);
+          var errors = analyzeAnalysisOptions(
+            file.createSource(),
+            content,
+            analysisDriver.sourceFactory,
+            analysisDriver.currentSession.analysisContext.contextRoot.root.path,
+          );
+          formatter.formatErrors([
+            ErrorsResultImpl(analysisDriver.currentSession, path,
+                pathContext.toUri(path), lineInfo, false, errors)
+          ]);
+          for (var error in errors) {
+            var severity = determineProcessedSeverity(
+                error, options, analysisDriver.analysisOptions);
+            if (severity != null) {
+              allResult = allResult.max(severity);
+            }
+          }
+        } else if (file_paths.isPubspecYaml(pathContext, path)) {
+          var errors = <AnalysisError>[];
+          try {
+            var file = resourceProvider.getFile(path);
+            var content = file.readAsStringSync();
+            var node = loadYamlNode(content);
+            if (node is YamlMap) {
+              var validator =
+                  PubspecValidator(resourceProvider, file.createSource());
+              errors.addAll(validator.validate(node.nodes));
+            }
+
+            if (analysisDriver.analysisOptions.lint) {
+              var visitors = <LintRule, PubspecVisitor>{};
+              for (var linter in analysisDriver.analysisOptions.lintRules) {
+                if (linter is LintRule) {
+                  var visitor = linter.getPubspecVisitor();
+                  if (visitor != null) {
+                    visitors[linter] = visitor;
+                  }
+                }
+              }
+              if (visitors.isNotEmpty) {
+                var sourceUri = pathContext.toUri(path);
+                var pubspecAst = Pubspec.parse(content,
+                    sourceUrl: sourceUri, resourceProvider: resourceProvider);
+                var listener = RecordingErrorListener();
+                var reporter = ErrorReporter(listener,
+                    resourceProvider.getFile(path).createSource(sourceUri),
+                    isNonNullableByDefault: false);
+                for (var entry in visitors.entries) {
+                  entry.key.reporter = reporter;
+                  pubspecAst.accept(entry.value);
+                }
+                errors.addAll(listener.errors);
+              }
+            }
+
+            if (errors.isNotEmpty) {
+              for (var error in errors) {
+                var severity = determineProcessedSeverity(
+                    error, options, analysisDriver.analysisOptions)!;
+                allResult = allResult.max(severity);
+              }
+              var lineInfo = LineInfo.fromContent(content);
+              formatter.formatErrors([
+                ErrorsResultImpl(analysisDriver.currentSession, path,
+                    pathContext.toUri(path), lineInfo, false, errors)
+              ]);
+            }
+          } catch (exception) {
+            // If the file cannot be analyzed, ignore it.
+          }
+        } else if (file_paths.isAndroidManifestXml(pathContext, path)) {
+          try {
+            var file = resourceProvider.getFile(path);
+            var content = file.readAsStringSync();
+            var validator = ManifestValidator(file.createSource());
+            var lineInfo = LineInfo.fromContent(content);
+            var errors = validator.validate(
+                content, analysisDriver.analysisOptions.chromeOsManifestChecks);
+            formatter.formatErrors([
+              ErrorsResultImpl(analysisDriver.currentSession, path,
+                  pathContext.toUri(path), lineInfo, false, errors)
+            ]);
+            for (var error in errors) {
+              var severity = determineProcessedSeverity(
+                  error, options, analysisDriver.analysisOptions)!;
+              allResult = allResult.max(severity);
+            }
+          } catch (exception) {
+            // If the file cannot be analyzed, ignore it.
+          }
+        } else {
+          dartFiles.add(path);
+          var file = analysisDriver.fsState.getFileForPath(path);
+
+          if (file.isPart) {
+            if (!libraryFiles.contains(file.library)) {
+              danglingParts.add(file);
+            }
+            continue;
+          }
+          libraryFiles.add(file);
+
+          var status = await _runAnalyzer(file, options, formatter);
+          allResult = allResult.max(status);
+
+          // Mark previously dangling parts as no longer dangling.
+          for (var part in file.partedFiles) {
+            danglingParts.remove(part);
+          }
+        }
+      }
+    }
+
+    // We are done analyzing this batch of files.
+    // The next batch should not be affected by a previous batch.
+    // E.g. the same parts in both batches, but with different libraries.
+    for (var path in dartFiles) {
+      analysisDriver!.removeFile(path);
+    }
+
+    // Any dangling parts still in this list were definitely dangling.
+    for (var partFile in danglingParts) {
+      reportPartError(partFile.path);
     }
 
     formatter.flush();
 
-    // Check that each part has a corresponding source in the input list.
-    for (Source partSource in partSources) {
-      bool found = false;
-      if (analysisDriver != null) {
-        var partFile =
-            analysisDriver.fsState.getFileForPath(partSource.fullName);
-        if (libUris.contains(partFile.library?.uri)) {
-          found = true;
-        }
-      } else {
-        for (var lib in context.getLibrariesContaining(partSource)) {
-          if (libUris.contains(lib.uri)) {
-            found = true;
-          }
-        }
-      }
-      if (!found) {
-        errorSink.writeln(
-            "${partSource.fullName} is a part and cannot be analyzed.");
-        errorSink.writeln("Please pass in a library that contains this part.");
-        io.exitCode = ErrorSeverity.ERROR.ordinal;
-        allResult = allResult.max(ErrorSeverity.ERROR);
-      }
-    }
-
-    if (!options.machineFormat) {
+    if (!options.machineFormat && !options.jsonFormat) {
       stats.print(outSink);
     }
 
     return allResult;
   }
 
-  /// Perform analysis in build mode according to the given [options].
-  ErrorSeverity _buildModeAnalyze(CommandLineOptions options) {
-    return _analyzeAllTag.makeCurrentWhile(() {
-      if (options.buildModePersistentWorker) {
-        new AnalyzerWorkerLoop.std(resourceProvider,
-                dartSdkPath: options.dartSdkPath)
-            .run();
-      } else {
-        return new BuildMode(resourceProvider, options, stats).analyze();
-      }
-    });
-  }
-
-  /// Determine whether the context created during a previous call to
-  /// [_analyzeAll] can be re-used in order to analyze using [options].
-  bool _canContextBeReused(CommandLineOptions options) {
-    // TODO(paulberry): add a command-line option that disables context re-use.
-    if (_context == null) {
-      return false;
-    }
-    if (options.packageRootPath != _previousOptions.packageRootPath) {
-      return false;
-    }
-    if (options.packageConfigPath != _previousOptions.packageConfigPath) {
-      return false;
-    }
-    if (!_equalMaps(
-        options.definedVariables, _previousOptions.definedVariables)) {
-      return false;
-    }
-    if (options.log != _previousOptions.log) {
-      return false;
-    }
-    if (options.disableHints != _previousOptions.disableHints) {
-      return false;
-    }
-    if (options.enableStrictCallChecks !=
-        _previousOptions.enableStrictCallChecks) {
-      return false;
-    }
-    if (options.enableAssertInitializer !=
-        _previousOptions.enableAssertInitializer) {
-      return false;
-    }
-    if (options.showPackageWarnings != _previousOptions.showPackageWarnings) {
-      return false;
-    }
-    if (options.showPackageWarningsPrefix !=
-        _previousOptions.showPackageWarningsPrefix) {
-      return false;
-    }
-    if (options.showSdkWarnings != _previousOptions.showSdkWarnings) {
-      return false;
-    }
-    if (options.lints != _previousOptions.lints) {
-      return false;
-    }
-    if (options.strongMode != _previousOptions.strongMode) {
-      return false;
-    }
-    if (options.enableSuperMixins != _previousOptions.enableSuperMixins) {
-      return false;
-    }
-    if (!_equalLists(
-        options.buildSummaryInputs, _previousOptions.buildSummaryInputs)) {
-      return false;
-    }
-    if (options.disableCacheFlushing != _previousOptions.disableCacheFlushing) {
-      return false;
-    }
-    return true;
-  }
-
-  /// Decide on the appropriate policy for which files need to be fully parsed
-  /// and which files need to be diet parsed, based on [options], and return an
-  /// [AnalyzeFunctionBodiesPredicate] that implements this policy.
-  AnalyzeFunctionBodiesPredicate _chooseDietParsingPolicy(
-      CommandLineOptions options) {
-    if (options.shouldBatch) {
-      // As analyzer is currently implemented, once a file has been diet
-      // parsed, it can't easily be un-diet parsed without creating a brand new
-      // context and losing caching.  In batch mode, we can't predict which
-      // files we'll need to generate errors and warnings for in the future, so
-      // we can't safely diet parse anything.
-      return (Source source) => true;
-    }
-
-    return (Source source) {
-      if (options.sourceFiles.contains(source.fullName)) {
-        return true;
-      } else if (source.uri.scheme == 'dart') {
-        return options.showSdkWarnings;
-      } else {
-        // TODO(paulberry): diet parse 'package:' imports when we don't want
-        // diagnostics. (Full parse is still needed for "self" packages.)
-        return true;
-      }
-    };
-  }
-
-  /// Decide on the appropriate method for resolving URIs based on the given
-  /// [options] and [customUrlMappings] settings, and return a
-  /// [SourceFactory] that has been configured accordingly.
-  /// When [includeSdkResolver] is `false`, return a temporary [SourceFactory]
-  /// for the purpose of resolved analysis options file `include:` directives.
-  /// In this situation, [analysisOptions] is ignored and can be `null`.
-  SourceFactory _chooseUriResolutionPolicy(
-      CommandLineOptions options,
-      Map<file_system.Folder, YamlMap> embedderMap,
-      _PackageInfo packageInfo,
-      SummaryDataStore summaryDataStore,
-      bool includeSdkResolver,
-      AnalysisOptions analysisOptions) {
-    // Create a custom package resolver if one has been specified.
-    if (packageResolverProvider != null) {
-      file_system.Folder folder = resourceProvider.getResource('.');
-      UriResolver resolver = packageResolverProvider(folder);
-      if (resolver != null) {
-        // TODO(brianwilkerson) This doesn't handle sdk extensions.
-        List<UriResolver> resolvers = <UriResolver>[];
-        if (includeSdkResolver) {
-          resolvers.add(new DartUriResolver(sdk));
-        }
-        resolvers
-            .add(new InSummaryUriResolver(resourceProvider, summaryDataStore));
-        resolvers.add(resolver);
-        resolvers.add(new file_system.ResourceUriResolver(resourceProvider));
-        return new SourceFactory(resolvers);
-      }
-    }
-
-    UriResolver packageUriResolver;
-
-    if (options.packageRootPath != null) {
-      ContextBuilderOptions builderOptions = new ContextBuilderOptions();
-      builderOptions.defaultPackagesDirectoryPath = options.packageRootPath;
-      ContextBuilder builder = new ContextBuilder(resourceProvider, null, null,
-          options: builderOptions);
-      packageUriResolver = new PackageMapUriResolver(resourceProvider,
-          builder.convertPackagesToMap(builder.createPackageMap('')));
-    } else if (options.packageConfigPath == null) {
-      // TODO(pq): remove?
-      if (packageInfo.packageMap == null) {
-        // Fall back to pub list-package-dirs.
-        PubPackageMapProvider pubPackageMapProvider =
-            new PubPackageMapProvider(resourceProvider, sdk);
-        file_system.Resource cwd = resourceProvider.getResource('.');
-        PackageMapInfo packageMapInfo =
-            pubPackageMapProvider.computePackageMap(cwd);
-        Map<String, List<file_system.Folder>> packageMap =
-            packageMapInfo.packageMap;
-
-        // Only create a packageUriResolver if pub list-package-dirs succeeded.
-        // If it failed, that's not a problem; it simply means we have no way
-        // to resolve packages.
-        if (packageMapInfo.packageMap != null) {
-          packageUriResolver =
-              new PackageMapUriResolver(resourceProvider, packageMap);
-        }
-      }
-    }
-
-    // Now, build our resolver list.
-    List<UriResolver> resolvers = [];
-
-    // 'dart:' URIs come first.
-
-    // Setup embedding.
-    if (includeSdkResolver) {
-      EmbedderSdk embedderSdk = new EmbedderSdk(resourceProvider, embedderMap);
-      if (embedderSdk.libraryMap.size() == 0) {
-        // The embedder uri resolver has no mappings. Use the default Dart SDK
-        // uri resolver.
-        resolvers.add(new DartUriResolver(sdk));
-      } else {
-        // The embedder uri resolver has mappings, use it instead of the default
-        // Dart SDK uri resolver.
-        embedderSdk.analysisOptions = analysisOptions;
-        resolvers.add(new DartUriResolver(embedderSdk));
-      }
-    }
-
-    // Next SdkExts.
-    if (packageInfo.packageMap != null) {
-      resolvers.add(new SdkExtUriResolver(packageInfo.packageMap));
-    }
-
-    // Then package URIs from summaries.
-    resolvers.add(new InSummaryUriResolver(resourceProvider, summaryDataStore));
-
-    // Then package URIs.
-    if (packageUriResolver != null) {
-      resolvers.add(packageUriResolver);
-    }
-
-    // Finally files.
-    resolvers.add(new file_system.ResourceUriResolver(resourceProvider));
-
-    return new SourceFactory(resolvers, packageInfo.packages);
-  }
-
-  // TODO(devoncarew): This needs to respect analysis_options excludes.
-
   /// Collect all analyzable files at [filePath], recursively if it's a
   /// directory, ignoring links.
-  Iterable<io.File> _collectFiles(String filePath) {
-    List<io.File> files = <io.File>[];
-    io.File file = new io.File(filePath);
+  Iterable<io.File> _collectFiles(String filePath, AnalysisOptions options) {
+    var files = <io.File>[];
+    var file = io.File(filePath);
     if (file.existsSync()) {
       files.add(file);
     } else {
-      io.Directory directory = new io.Directory(filePath);
+      var directory = io.Directory(filePath);
       if (directory.existsSync()) {
-        for (io.FileSystemEntity entry
+        var pathContext = resourceProvider.pathContext;
+        for (var entry
             in directory.listSync(recursive: true, followLinks: false)) {
-          String relative = path.relative(entry.path, from: directory.path);
-          if (AnalysisEngine.isDartFileName(entry.path) &&
+          var relative = path.relative(entry.path, from: directory.path);
+          if ((file_paths.isDart(pathContext, entry.path) ||
+                  file_paths.isAndroidManifestXml(pathContext, entry.path)) &&
+              entry is io.File &&
+              !pathFilter.ignored(entry.path) &&
               !_isInHiddenDir(relative)) {
             files.add(entry);
           }
@@ -524,224 +403,18 @@ class Driver implements CommandLineStarter {
     return files;
   }
 
-  /// Convert the given [sourcePath] (which may be relative to the current
-  /// working directory) to a [Source] object that can be fed to the analysis
-  /// context.
-  Source _computeLibrarySource(String sourcePath) {
-    sourcePath = _normalizeSourcePath(sourcePath);
-    File sourceFile = resourceProvider.getFile(sourcePath);
-    Source source = sdk.fromFileUri(sourceFile.toUri());
-    if (source != null) {
-      return source;
-    }
-    source = new FileSource(sourceFile, sourceFile.toUri());
-    Uri uri = _context.sourceFactory.restoreUri(source);
-    if (uri == null) {
-      return source;
-    }
-    return new FileSource(sourceFile, uri);
-  }
-
-  /// Create an analysis context that is prepared to analyze sources according
-  /// to the given [options], and store it in [_context].
-  void _createAnalysisContext(CommandLineOptions options) {
-    if (_canContextBeReused(options)) {
-      return;
-    }
-    _previousOptions = options;
-
-    // Save stats from previous context before clobbering it.
-    if (_context != null) {
-      _analyzedFileCount += _context.sources.length;
-    }
-
-    // Find package info.
-    _PackageInfo packageInfo = _findPackages(options);
-
-    // Process embedders.
-    Map<file_system.Folder, YamlMap> embedderMap =
-        new EmbedderYamlLocator(packageInfo.packageMap).embedderYamls;
-
-    // Scan for SDK extenders.
-    bool hasSdkExt = _hasSdkExt(packageInfo.packageMap?.values);
-
-    // No summaries in the presence of embedders or extenders.
-    bool useSummaries = embedderMap.isEmpty && !hasSdkExt;
-
-    if (!useSummaries && options.buildSummaryInputs.isNotEmpty) {
-      throw new _DriverError(
-          'Summaries are not yet supported when using Flutter.');
-    }
-
-    // Read any input summaries.
-    SummaryDataStore summaryDataStore = new SummaryDataStore(
-        useSummaries ? options.buildSummaryInputs : <String>[]);
-
-    AnalysisOptionsImpl analysisOptions =
-        createAnalysisOptionsForCommandLineOptions(resourceProvider, options);
-    analysisOptions.analyzeFunctionBodiesPredicate =
-        _chooseDietParsingPolicy(options);
-
-    // Once options and embedders are processed, setup the SDK.
-    _setupSdk(options, useSummaries, analysisOptions);
-
-    PackageBundle sdkBundle = sdk.getLinkedBundle();
-    if (sdkBundle != null) {
-      summaryDataStore.addBundle(null, sdkBundle);
-    }
-
-    // Choose a package resolution policy and a diet parsing policy based on
-    // the command-line options.
-    SourceFactory sourceFactory = _chooseUriResolutionPolicy(options,
-        embedderMap, packageInfo, summaryDataStore, true, analysisOptions);
-
-    // Create a context.
-    _context = AnalysisEngine.instance.createAnalysisContext();
-    setupAnalysisContext(_context, options, analysisOptions);
-    _context.sourceFactory = sourceFactory;
-
-    if (options.enableNewAnalysisDriver) {
-      PerformanceLog log = new PerformanceLog(null);
-      AnalysisDriverScheduler scheduler = new AnalysisDriverScheduler(log);
-      analysisDriver = new AnalysisDriver(
-          scheduler,
-          log,
-          resourceProvider,
-          analysisDriverMemoryByteStore,
-          new FileContentOverlay(),
-          null,
-          context.sourceFactory,
-          context.analysisOptions);
-      analysisDriver.results.listen((_) {});
-      analysisDriver.exceptions.listen((_) {});
-      scheduler.start();
-    } else {
-      if (sdkBundle != null) {
-        _context.resultProvider =
-            new InputPackagesResultProvider(_context, summaryDataStore);
-      }
-    }
-  }
-
-  /// Return discovered packagespec, or `null` if none is found.
-  Packages _discoverPackagespec(Uri root) {
-    try {
-      Packages packages = pkg_discovery.findPackagesFromFile(root);
-      if (packages != Packages.noPackages) {
-        return packages;
-      }
-    } catch (_) {
-      // Ignore and fall through to null.
-    }
-
-    return null;
-  }
-
-  _PackageInfo _findPackages(CommandLineOptions options) {
-    if (packageResolverProvider != null) {
-      // The resolver provider will do all the work later.
-      return new _PackageInfo(null, null);
-    }
-
-    Packages packages;
-    Map<String, List<file_system.Folder>> packageMap;
-
-    if (options.packageConfigPath != null) {
-      String packageConfigPath = options.packageConfigPath;
-      Uri fileUri = new Uri.file(packageConfigPath);
-      try {
-        io.File configFile = new io.File.fromUri(fileUri).absolute;
-        List<int> bytes = configFile.readAsBytesSync();
-        Map<String, Uri> map = pkgfile.parse(bytes, configFile.uri);
-        packages = new MapPackages(map);
-        packageMap = _getPackageMap(packages);
-      } catch (e) {
-        printAndFail(
-            'Unable to read package config data from $packageConfigPath: $e');
-      }
-    } else if (options.packageRootPath != null) {
-      packageMap = _PackageRootPackageMapBuilder
-          .buildPackageMap(options.packageRootPath);
-    } else {
-      file_system.Resource cwd = resourceProvider.getResource('.');
-      // Look for .packages.
-      packages = _discoverPackagespec(new Uri.directory(cwd.path));
-      packageMap = _getPackageMap(packages);
-    }
-
-    return new _PackageInfo(packages, packageMap);
-  }
-
-  Map<String, List<file_system.Folder>> _getPackageMap(Packages packages) {
-    if (packages == null) {
-      return null;
-    }
-
-    Map<String, List<file_system.Folder>> folderMap =
-        new Map<String, List<file_system.Folder>>();
-    packages.asMap().forEach((String packagePath, Uri uri) {
-      folderMap[packagePath] = [resourceProvider.getFolder(path.fromUri(uri))];
-    });
-    return folderMap;
-  }
-
-  bool _hasSdkExt(Iterable<List<file_system.Folder>> folders) {
-    if (folders != null) {
-      //TODO: ideally share this traversal with SdkExtUriResolver
-      for (Iterable<file_system.Folder> libDirs in folders) {
-        if (libDirs.any((file_system.Folder libDir) =>
-            libDir.getChild(SdkExtUriResolver.SDK_EXT_NAME).exists)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
   /// Returns `true` if this relative path is a hidden directory.
   bool _isInHiddenDir(String relative) =>
-      path.split(relative).any((part) => part.startsWith("."));
-
-  void _processPlugins() {
-    List<Plugin> plugins = <Plugin>[];
-    plugins.addAll(AnalysisEngine.instance.requiredPlugins);
-    plugins.addAll(_userDefinedPlugins);
-
-    ExtensionManager manager = new ExtensionManager();
-    manager.processPlugins(plugins);
-
-    linter.registerLintRules();
-  }
+      path.split(relative).any((part) => part.startsWith('.'));
 
   /// Analyze a single source.
   Future<ErrorSeverity> _runAnalyzer(
-      Source source, CommandLineOptions options, ErrorFormatter formatter) {
-    int startTime = currentTimeMillis;
-    AnalyzerImpl analyzer = new AnalyzerImpl(_context.analysisOptions, _context,
-        analysisDriver, source, options, stats, startTime);
+      FileState file, CommandLineOptions options, ErrorFormatter formatter) {
+    var startTime = currentTimeMillis;
+    final analysisDriver = this.analysisDriver!;
+    var analyzer = AnalyzerImpl(analysisDriver.analysisOptions, analysisDriver,
+        file, options, stats, startTime);
     return analyzer.analyze(formatter);
-  }
-
-  void _setupSdk(CommandLineOptions options, bool useSummaries,
-      AnalysisOptions analysisOptions) {
-    if (sdk == null) {
-      if (options.dartSdkSummaryPath != null) {
-        sdk = new SummaryBasedDartSdk(
-            options.dartSdkSummaryPath, options.strongMode);
-      } else {
-        String dartSdkPath = options.dartSdkPath;
-        FolderBasedDartSdk dartSdk = new FolderBasedDartSdk(resourceProvider,
-            resourceProvider.getFolder(dartSdkPath), options.strongMode);
-        dartSdk.useSummary = useSummaries &&
-            options.sourceFiles.every((String sourcePath) {
-              sourcePath = path.absolute(sourcePath);
-              sourcePath = path.normalize(sourcePath);
-              return !path.isWithin(dartSdkPath, sourcePath);
-            });
-        dartSdk.analysisOptions = analysisOptions;
-        sdk = dartSdk;
-      }
-    }
   }
 
   bool _shouldBeFatal(ErrorSeverity severity, CommandLineOptions options) {
@@ -757,76 +430,37 @@ class Driver implements CommandLineStarter {
     }
   }
 
-  static AnalysisOptionsImpl createAnalysisOptionsForCommandLineOptions(
-      ResourceProvider resourceProvider, CommandLineOptions options) {
-    if (options.analysisOptionsFile != null) {
-      file_system.File file =
-          resourceProvider.getFile(options.analysisOptionsFile);
-      if (!file.exists) {
-        printAndFail('Options file not found: ${options.analysisOptionsFile}',
+  void _verifyAnalysisOptionsFileExists(CommandLineOptions options) {
+    var path = options.defaultAnalysisOptionsPath;
+    if (path != null) {
+      if (!resourceProvider.getFile(path).exists) {
+        printAndFail('Options file not found: $path',
             exitCode: ErrorSeverity.ERROR.ordinal);
       }
     }
-
-    String contextRoot;
-    if (options.sourceFiles.isEmpty) {
-      contextRoot = path.current;
-    } else {
-      contextRoot = options.sourceFiles[0];
-      if (!path.isAbsolute(contextRoot)) {
-        contextRoot = path.absolute(contextRoot);
-      }
-    }
-
-    void verbosePrint(String text) {
-      outSink.writeln(text);
-    }
-
-    AnalysisOptionsImpl contextOptions = new ContextBuilder(
-            resourceProvider, null, null,
-            options: options.contextBuilderOptions)
-        .getAnalysisOptions(contextRoot,
-            verbosePrint: options.verbose ? verbosePrint : null);
-
-    contextOptions.trackCacheDependencies = false;
-    contextOptions.disableCacheFlushing = options.disableCacheFlushing;
-    contextOptions.hint = !options.disableHints;
-    contextOptions.generateImplicitErrors = options.showPackageWarnings;
-    contextOptions.generateSdkErrors = options.showSdkWarnings;
-    if (options.enableAssertInitializer != null) {
-      contextOptions.enableAssertInitializer = options.enableAssertInitializer;
-    }
-
-    return contextOptions;
   }
 
-  static void setAnalysisContextOptions(
-      file_system.ResourceProvider resourceProvider,
-      AnalysisContext context,
-      CommandLineOptions options,
-      void configureContextOptions(AnalysisOptionsImpl contextOptions)) {
-    AnalysisOptionsImpl analysisOptions =
-        createAnalysisOptionsForCommandLineOptions(resourceProvider, options);
-    configureContextOptions(analysisOptions);
-    setupAnalysisContext(context, options, analysisOptions);
+  static void verbosePrint(String text) {
+    outSink.writeln(text);
   }
 
-  static void setupAnalysisContext(AnalysisContext context,
-      CommandLineOptions options, AnalysisOptionsImpl analysisOptions) {
-    Map<String, String> definedVariables = options.definedVariables;
-    if (definedVariables.isNotEmpty) {
-      DeclaredVariables declaredVariables = context.declaredVariables;
-      definedVariables.forEach((String variableName, String value) {
-        declaredVariables.define(variableName, value);
-      });
-    }
-
-    if (options.log) {
-      AnalysisEngine.instance.logger = new StdLogger();
-    }
-
-    // Set context options.
-    context.analysisOptions = analysisOptions;
+  /// Return whether the [newOptions] are equal to the [previous].
+  static bool _equalCommandLineOptions(
+      CommandLineOptions? previous, CommandLineOptions newOptions) {
+    return previous != null &&
+        newOptions.defaultPackagesPath == previous.defaultPackagesPath &&
+        _equalMaps(newOptions.declaredVariables, previous.declaredVariables) &&
+        newOptions.log == previous.log &&
+        newOptions.disableHints == previous.disableHints &&
+        newOptions.showPackageWarnings == previous.showPackageWarnings &&
+        newOptions.showPackageWarningsPrefix ==
+            previous.showPackageWarningsPrefix &&
+        newOptions.showSdkWarnings == previous.showSdkWarnings &&
+        newOptions.lints == previous.lints &&
+        newOptions.defaultLanguageVersion == previous.defaultLanguageVersion &&
+        newOptions.disableCacheFlushing == previous.disableCacheFlushing &&
+        _equalLists(
+            newOptions.enabledExperiments!, previous.enabledExperiments!);
   }
 
   /// Perform a deep comparison of two string lists.
@@ -834,7 +468,7 @@ class Driver implements CommandLineStarter {
     if (l1.length != l2.length) {
       return false;
     }
-    for (int i = 0; i < l1.length; i++) {
+    for (var i = 0; i < l1.length; i++) {
       if (l1[i] != l2[i]) {
         return false;
       }
@@ -847,52 +481,109 @@ class Driver implements CommandLineStarter {
     if (m1.length != m2.length) {
       return false;
     }
-    for (String key in m1.keys) {
+    for (var key in m1.keys) {
       if (!m2.containsKey(key) || m1[key] != m2[key]) {
         return false;
       }
     }
     return true;
   }
-
-  /// Convert [sourcePath] into an absolute path.
-  static String _normalizeSourcePath(String sourcePath) =>
-      path.normalize(new io.File(sourcePath).absolute.path);
 }
 
-class _DriverError implements Exception {
-  String msg;
-  _DriverError(this.msg);
-}
+class _AnalysisContextProvider {
+  final ResourceProvider _resourceProvider;
+  final FileContentCache _fileContentCache;
 
-class _PackageInfo {
-  Packages packages;
-  Map<String, List<file_system.Folder>> packageMap;
-  _PackageInfo(this.packages, this.packageMap);
-}
+  CommandLineOptions? _commandLineOptions;
+  late List<String> _pathList;
 
-/// [SdkExtUriResolver] needs a Map from package name to folder. In the case
-/// that the analyzer is invoked with a --package-root option, we need to
-/// manually create this mapping. Given [packageRootPath],
-/// [_PackageRootPackageMapBuilder] creates a simple mapping from package name
-/// to full path on disk (resolving any symbolic links).
-class _PackageRootPackageMapBuilder {
-  static Map<String, List<file_system.Folder>> buildPackageMap(
-      String packageRootPath) {
-    var packageRoot = new io.Directory(packageRootPath);
-    if (!packageRoot.existsSync()) {
-      throw new _DriverError(
-          'Package root directory ($packageRootPath) does not exist.');
+  final Map<Folder, DriverBasedAnalysisContext?> _folderContexts = {};
+  AnalysisContextCollectionImpl? _collection;
+  DriverBasedAnalysisContext? _analysisContext;
+
+  _AnalysisContextProvider(this._resourceProvider)
+      : _fileContentCache = FileContentCache(_resourceProvider);
+
+  DriverBasedAnalysisContext? get analysisContext {
+    return _analysisContext;
+  }
+
+  AnalysisDriver get analysisDriver {
+    return _analysisContext!.driver;
+  }
+
+  /// TODO(scheglov) Use analyzedFiles()
+  PathFilter get pathFilter {
+    var contextRoot = analysisContext!.contextRoot;
+    var optionsFile = contextRoot.optionsFile;
+
+    // If there is no options file, there can be no excludes.
+    if (optionsFile == null) {
+      return PathFilter(contextRoot.root.path, contextRoot.root.path, []);
     }
-    var packages = packageRoot.listSync(followLinks: false);
-    var result = new Map<String, List<file_system.Folder>>();
-    for (var package in packages) {
-      var packageName = path.basename(package.path);
-      var realPath = package.resolveSymbolicLinksSync();
-      result[packageName] = [
-        PhysicalResourceProvider.INSTANCE.getFolder(realPath)
-      ];
+
+    // Exclude patterns are relative to the directory with the options file.
+    return PathFilter(contextRoot.root.path, optionsFile.parent2.path,
+        analysisContext!.analysisOptions.excludePatterns);
+  }
+
+  void configureForPath(String path) {
+    var folder = _resourceProvider.getFolder(path);
+    if (!folder.exists) {
+      folder = _resourceProvider.getFile(path).parent2;
     }
-    return result;
+
+    // In batch mode we are given separate file paths to analyze.
+    // All files of a folder have the same configuration.
+    // So, reuse the corresponding analysis context.
+    _analysisContext = _folderContexts[folder];
+    if (_analysisContext != null) {
+      return;
+    }
+
+    if (_collection != null) {
+      try {
+        _setContextForPath(path);
+        return;
+      } on StateError {
+        // The previous collection cannot analyze the path.
+        _collection = null;
+      }
+    }
+
+    _collection = AnalysisContextCollectionImpl(
+      byteStore: Driver.analysisDriverMemoryByteStore,
+      includedPaths: _pathList,
+      optionsFile: _commandLineOptions!.defaultAnalysisOptionsPath,
+      packagesFile: _commandLineOptions!.defaultPackagesPath,
+      resourceProvider: _resourceProvider,
+      sdkPath: _commandLineOptions!.dartSdkPath,
+      updateAnalysisOptions: _updateAnalysisOptions,
+      fileContentCache: _fileContentCache,
+    );
+
+    _setContextForPath(path);
+    _folderContexts[folder] = _analysisContext;
+  }
+
+  void setCommandLineOptions(
+    CommandLineOptions options,
+    List<String> pathList,
+  ) {
+    if (!Driver._equalCommandLineOptions(_commandLineOptions, options)) {
+      _folderContexts.clear();
+      _collection = null;
+      _analysisContext = null;
+    }
+    _commandLineOptions = options;
+    _pathList = pathList;
+  }
+
+  void _setContextForPath(String path) {
+    _analysisContext = _collection!.contextFor(path);
+  }
+
+  void _updateAnalysisOptions(AnalysisOptionsImpl analysisOptions) {
+    _commandLineOptions!.updateAnalysisOptions(analysisOptions);
   }
 }

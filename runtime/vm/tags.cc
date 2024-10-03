@@ -7,10 +7,13 @@
 #include "vm/isolate.h"
 #include "vm/json_stream.h"
 #include "vm/native_entry.h"
-#include "vm/runtime_entry.h"
 #include "vm/object.h"
+#include "vm/runtime_entry.h"
 
 namespace dart {
+
+MallocGrowableArray<const char*> UserTags::subscribed_tags_(4);
+Mutex* UserTags::subscribed_tags_lock_ = nullptr;
 
 const char* VMTag::TagName(uword tag) {
   if (IsNativeEntryTag(tag)) {
@@ -31,60 +34,45 @@ const char* VMTag::TagName(uword tag) {
   return entry.name;
 }
 
-
 bool VMTag::IsNativeEntryTag(uword tag) {
   return (tag > kLastTagId) && !IsRuntimeEntryTag(tag);
 }
 
-
 bool VMTag::IsDartTag(uword id) {
-  return id == kDartTagId;
+  return (id == kDartTagId);
 }
-
 
 bool VMTag::IsExitFrameTag(uword id) {
   return (id != 0) && !IsDartTag(id) && (id != kIdleTagId) &&
          (id != kVMTagId) && (id != kEmbedderTagId);
 }
 
-
-static RuntimeEntry* runtime_entry_list = NULL;
-
-
 bool VMTag::IsRuntimeEntryTag(uword id) {
-  const RuntimeEntry* current = runtime_entry_list;
-  while (current != NULL) {
-    if (reinterpret_cast<uword>(current->function()) == id) {
-      return true;
-    }
-    current = current->next();
-  }
-  return false;
+  return RuntimeEntryTagName(id) != nullptr;
 }
-
 
 const char* VMTag::RuntimeEntryTagName(uword id) {
-  const RuntimeEntry* current = runtime_entry_list;
-  while (current != NULL) {
-    if (reinterpret_cast<uword>(current->function()) == id) {
-      return current->name();
-    }
-    current = current->next();
-  }
-  return NULL;
+  void* address = reinterpret_cast<void*>(id);
+
+#define CHECK_RUNTIME_ADDRESS(n)                                               \
+  if (address == k##n##RuntimeEntry.function())                                \
+    return k##n##RuntimeEntry.name();
+  RUNTIME_ENTRY_LIST(CHECK_RUNTIME_ADDRESS)
+#undef CHECK_RUNTIME_ADDRESS
+
+#define CHECK_LEAF_RUNTIME_ADDRESS(type, n, ...)                               \
+  if (address == k##n##RuntimeEntry.function())                                \
+    return k##n##RuntimeEntry.name();
+  LEAF_RUNTIME_ENTRY_LIST(CHECK_LEAF_RUNTIME_ADDRESS)
+#undef CHECK_LEAF_RUNTIME_ADDRESS
+
+  return nullptr;
 }
 
-
-void VMTag::RegisterRuntimeEntry(RuntimeEntry* runtime_entry) {
-  ASSERT(runtime_entry != NULL);
-  runtime_entry->set_next(runtime_entry_list);
-  runtime_entry_list = runtime_entry;
-}
-
-
-VMTag::TagEntry VMTag::entries_[] = {
+const VMTag::TagEntry VMTag::entries_[] = {
     {
-        "InvalidTag", kInvalidTagId,
+        "InvalidTag",
+        kInvalidTagId,
     },
 #define DEFINE_VM_TAG_ENTRY(tag) {"" #tag, k##tag##TagId},
     VM_TAG_LIST(DEFINE_VM_TAG_ENTRY)
@@ -92,29 +80,29 @@ VMTag::TagEntry VMTag::entries_[] = {
         {"kNumVMTags", kNumVMTags},
 };
 
-
 VMTagScope::VMTagScope(Thread* thread, uword tag, bool conditional_set)
-    : StackResource(thread) {
-  ASSERT(isolate() != NULL);
-  previous_tag_ = thread->vm_tag();
-  if (conditional_set) {
-    thread->set_vm_tag(tag);
+    : ThreadStackResource(thread) {
+  if (thread != NULL) {
+    ASSERT(isolate_group() != NULL);
+    previous_tag_ = thread->vm_tag();
+    if (conditional_set) {
+      thread->set_vm_tag(tag);
+    }
   }
 }
 
-
 VMTagScope::~VMTagScope() {
-  ASSERT(isolate() != NULL);
-  thread()->set_vm_tag(previous_tag_);
+  if (thread() != NULL) {
+    ASSERT(isolate_group() != NULL);
+    thread()->set_vm_tag(previous_tag_);
+  }
 }
-
 
 VMTagCounters::VMTagCounters() {
   for (intptr_t i = 0; i < VMTag::kNumVMTags; i++) {
     counters_[i] = 0;
   }
 }
-
 
 void VMTagCounters::Increment(uword tag) {
   if (VMTag::IsRuntimeEntryTag(tag)) {
@@ -130,19 +118,14 @@ void VMTagCounters::Increment(uword tag) {
   counters_[tag]++;
 }
 
-
 int64_t VMTagCounters::count(uword tag) {
   ASSERT(tag != VMTag::kInvalidTagId);
   ASSERT(tag < VMTag::kNumVMTags);
   return counters_[tag];
 }
 
-
 #ifndef PRODUCT
 void VMTagCounters::PrintToJSONObject(JSONObject* obj) {
-  if (!FLAG_support_service) {
-    return;
-  }
   {
     JSONArray arr(obj, "names");
     for (intptr_t i = 1; i < VMTag::kNumVMTags; i++) {
@@ -158,7 +141,6 @@ void VMTagCounters::PrintToJSONObject(JSONObject* obj) {
 }
 #endif  // !PRODUCT
 
-
 const char* UserTags::TagName(uword tag_id) {
   ASSERT(tag_id >= kUserTagIdOffset);
   ASSERT(tag_id < kUserTagIdOffset + kMaxUserTags);
@@ -169,5 +151,55 @@ const char* UserTags::TagName(uword tag_id) {
   return label.ToCString();
 }
 
+void UserTags::AddStreamableTagName(const char* tag) {
+  MutexLocker ml(subscribed_tags_lock_);
+  // Check this tag isn't already in the subscription list.
+  for (intptr_t i = 0; i < subscribed_tags_.length(); ++i) {
+    if (strcmp(tag, subscribed_tags_.At(i)) == 0) {
+      return;
+    }
+  }
+  subscribed_tags_.Add(strdup(tag));
+}
+
+void UserTags::RemoveStreamableTagName(const char* tag) {
+  MutexLocker ml(subscribed_tags_lock_);
+  bool found = false;
+  for (intptr_t i = 0; i < subscribed_tags_.length(); ++i) {
+    if (strcmp(tag, subscribed_tags_.At(i)) == 0) {
+      free(const_cast<char*>(subscribed_tags_.At(i)));
+      subscribed_tags_.RemoveAt(i);
+      found = true;
+      break;
+    }
+  }
+  ASSERT(found);
+}
+
+bool UserTags::IsTagNameStreamable(const char* tag) {
+  MutexLocker ml(subscribed_tags_lock_);
+  for (intptr_t i = 0; i < subscribed_tags_.length(); ++i) {
+    if (strcmp(tag, subscribed_tags_.At(i)) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void UserTags::Init() {
+  subscribed_tags_lock_ = new Mutex();
+}
+
+void UserTags::Cleanup() {
+  {
+    MutexLocker ml(subscribed_tags_lock_);
+    for (intptr_t i = 0; i < subscribed_tags_.length(); ++i) {
+      free(const_cast<char*>(subscribed_tags_.At(i)));
+    }
+    subscribed_tags_.Clear();
+  }
+  delete subscribed_tags_lock_;
+  subscribed_tags_lock_ = nullptr;
+}
 
 }  // namespace dart

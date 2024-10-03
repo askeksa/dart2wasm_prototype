@@ -13,12 +13,6 @@ import 'package:expect/expect.dart';
 
 import 'dart:async';
 
-check(value) {
-  try {} finally {
-    return value;
-  }
-}
-
 fail() {
   try {
     Expect.isTrue(false);

@@ -12,19 +12,19 @@ namespace bin {
 class Thread;
 class Mutex;
 class Monitor;
-}
-}
+}  // namespace bin
+}  // namespace dart
 
 // Declare the OS-specific types ahead of defining the generic classes.
-#if defined(HOST_OS_ANDROID)
+#if defined(DART_HOST_OS_ANDROID)
 #include "bin/thread_android.h"
-#elif defined(HOST_OS_FUCHSIA)
+#elif defined(DART_HOST_OS_FUCHSIA)
 #include "bin/thread_fuchsia.h"
-#elif defined(HOST_OS_LINUX)
+#elif defined(DART_HOST_OS_LINUX)
 #include "bin/thread_linux.h"
-#elif defined(HOST_OS_MACOS)
+#elif defined(DART_HOST_OS_MACOS)
 #include "bin/thread_macos.h"
-#elif defined(HOST_OS_WINDOWS)
+#elif defined(DART_HOST_OS_WINDOWS)
 #include "bin/thread_win.h"
 #else
 #error Unknown target os.
@@ -43,7 +43,9 @@ class Thread {
   // Start a thread running the specified function. Returns 0 if the
   // thread started successfuly and a system specific error code if
   // the thread failed to start.
-  static int Start(ThreadStartFunction function, uword parameters);
+  static int Start(const char* name,
+                   ThreadStartFunction function,
+                   uword parameters);
 
   static ThreadLocalKey CreateThreadLocal();
   static void DeleteThreadLocal(ThreadLocalKey key);
@@ -63,7 +65,6 @@ class Thread {
   DISALLOW_IMPLICIT_CONSTRUCTORS(Thread);
 };
 
-
 class Mutex {
  public:
   Mutex();
@@ -78,7 +79,6 @@ class Mutex {
 
   DISALLOW_COPY_AND_ASSIGN(Mutex);
 };
-
 
 class Monitor {
  public:
@@ -108,6 +108,5 @@ class Monitor {
 
 }  // namespace bin
 }  // namespace dart
-
 
 #endif  // RUNTIME_BIN_THREAD_H_

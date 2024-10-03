@@ -8,8 +8,8 @@
 #include "vm/debugger.h"
 
 #include "vm/code_patcher.h"
+#include "vm/compiler/assembler/disassembler.h"
 #include "vm/cpu.h"
-#include "vm/disassembler.h"
 #include "vm/object.h"
 #include "vm/os.h"
 #include "vm/stack_frame.h"
@@ -19,27 +19,31 @@ namespace dart {
 
 #ifndef PRODUCT
 
-RawCode* CodeBreakpoint::OrigStubAddress() const {
+CodePtr CodeBreakpoint::OrigStubAddress() const {
   return saved_value_;
 }
 
-
 void CodeBreakpoint::PatchCode() {
-  ASSERT(!is_enabled_);
-  const Code& code = Code::Handle(code_);
-  const Instructions& instrs = Instructions::Handle(code.instructions());
-  Code& stub_target = Code::Handle();
-  {
+  ASSERT(!IsEnabled());
+  auto thread = Thread::Current();
+  auto zone = thread->zone();
+  const Code& code = Code::Handle(zone, code_);
+  const Instructions& instrs = Instructions::Handle(zone, code.instructions());
+  Code& stub_target = Code::Handle(zone);
+  thread->isolate_group()->RunWithStoppedMutators([&]() {
     WritableInstructionsScope writable(instrs.PayloadStart(), instrs.Size());
     switch (breakpoint_kind_) {
-      case RawPcDescriptors::kIcCall:
-      case RawPcDescriptors::kUnoptStaticCall: {
-        stub_target = StubCode::ICCallBreakpoint_entry()->code();
+      case UntaggedPcDescriptors::kIcCall: {
+        stub_target = StubCode::ICCallBreakpoint().ptr();
         break;
       }
-      case RawPcDescriptors::kRuntimeCall: {
+      case UntaggedPcDescriptors::kUnoptStaticCall: {
+        stub_target = StubCode::UnoptStaticCallBreakpoint().ptr();
+        break;
+      }
+      case UntaggedPcDescriptors::kRuntimeCall: {
         saved_value_ = CodePatcher::GetStaticCallTargetAt(pc_, code);
-        stub_target = StubCode::RuntimeCallBreakpoint_entry()->code();
+        stub_target = StubCode::RuntimeCallBreakpoint().ptr();
         break;
       }
       default:
@@ -47,29 +51,28 @@ void CodeBreakpoint::PatchCode() {
     }
     saved_value_ = CodePatcher::GetStaticCallTargetAt(pc_, code);
     CodePatcher::PatchStaticCallAt(pc_, code, stub_target);
-  }
-  is_enabled_ = true;
+  });
 }
 
-
 void CodeBreakpoint::RestoreCode() {
-  ASSERT(is_enabled_);
-  const Code& code = Code::Handle(code_);
-  const Instructions& instrs = Instructions::Handle(code.instructions());
-  {
+  ASSERT(IsEnabled());
+  auto thread = Thread::Current();
+  auto zone = thread->zone();
+  const Code& code = Code::Handle(zone, code_);
+  const Instructions& instrs = Instructions::Handle(zone, code.instructions());
+  thread->isolate_group()->RunWithStoppedMutators([&]() {
     WritableInstructionsScope writable(instrs.PayloadStart(), instrs.Size());
     switch (breakpoint_kind_) {
-      case RawPcDescriptors::kIcCall:
-      case RawPcDescriptors::kUnoptStaticCall:
-      case RawPcDescriptors::kRuntimeCall: {
+      case UntaggedPcDescriptors::kIcCall:
+      case UntaggedPcDescriptors::kUnoptStaticCall:
+      case UntaggedPcDescriptors::kRuntimeCall: {
         CodePatcher::PatchStaticCallAt(pc_, code, Code::Handle(saved_value_));
         break;
       }
       default:
         UNREACHABLE();
     }
-  }
-  is_enabled_ = false;
+  });
 }
 
 #endif  // !PRODUCT

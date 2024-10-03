@@ -5,7 +5,7 @@
 #include "vm/globals.h"
 #if defined(TARGET_ARCH_X64)
 
-#include "vm/assembler.h"
+#include "vm/compiler/assembler/assembler.h"
 #include "vm/instructions.h"
 #include "vm/stub_code.h"
 #include "vm/unit_test.h"
@@ -15,25 +15,22 @@ namespace dart {
 #define __ assembler->
 
 ASSEMBLER_TEST_GENERATE(Call, assembler) {
-  __ Call(*StubCode::InvokeDartCode_entry());
+  __ Call(StubCode::InvokeDartCode());
   __ ret();
 }
 
-
 static intptr_t prologue_code_size = -1;
-
 
 ASSEMBLER_TEST_GENERATE(Jump, assembler) {
   ASSERT(assembler->CodeSize() == 0);
   __ pushq(PP);
   __ LoadPoolPointer();
   prologue_code_size = assembler->CodeSize();
-  __ JmpPatchable(*StubCode::InvokeDartCode_entry(), PP);
-  __ JmpPatchable(*StubCode::AllocateArray_entry(), PP);
+  __ JmpPatchable(StubCode::InvokeDartCode(), PP);
+  __ JmpPatchable(StubCode::AllocateArray(), PP);
   __ popq(PP);
   __ ret();
 }
-
 
 }  // namespace dart
 

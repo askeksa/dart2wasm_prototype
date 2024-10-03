@@ -27,8 +27,19 @@ abstract class TypeLike implements Printable {
   /// Prints `this` as valid Dart code for a Type.
   void writeType(StringBuffer buffer);
 
-  /// Whether this instance uses T in some way.
+  /// Whether this type uses T in some way.
   bool get usesT;
+
+  /// Whether this type uses T in a return (covariant) position.
+  ///
+  /// For example: `T`, `List<T>`, `T Function()`, or `Function(Function(T))`.
+  bool get returnsT;
+
+  /// Whether this type uses T in a parameter (contravariant) position.
+  ///
+  /// For example, `Function(T)`, `Function(List<T>)`, or
+  /// `Function(T Function())`.
+  bool get takesT;
 }
 
 /// Provides a unique integer for every parameter in a function.
@@ -37,7 +48,7 @@ int parameterNameCounter = 0;
 /// Whether `T` should be replaced with `int`.
 bool shouldReplaceTWithInt = false;
 
-class Parameter implements Printable {
+class Parameter implements TypeLike {
   final TypeLike type;
   final String name;
 
@@ -68,7 +79,7 @@ class Parameter implements Printable {
     }
   }
 
-  void writeInFunction(StringBuffer buffer) {
+  void writeInFunction(StringBuffer buffer, {bool optional}) {
     assert(type != null || name != null);
     if (name == null) {
       type.writeType(buffer);
@@ -81,6 +92,27 @@ class Parameter implements Printable {
       buffer.write(" ");
       buffer.write(name);
     }
+
+    // Write a default value for optional parameters to avoid nullability
+    // errors.
+    if (optional) {
+      buffer.write(" = ");
+
+      var nominalType = type as NominalType;
+      const baseTypes = {
+        "int": "-1",
+        "Function": "_voidFunction",
+        "List": "const []",
+      };
+
+      if (baseTypes.containsKey(nominalType.name)) {
+        buffer.write(baseTypes[nominalType.name]);
+      } else if (shouldReplaceTWithInt && nominalType.name == "T") {
+        buffer.write("-1");
+      } else {
+        throw UnsupportedError("No default value for $type");
+      }
+    }
   }
 
   bool operator ==(other) {
@@ -91,7 +123,9 @@ class Parameter implements Printable {
     return ((name.hashCode * 37) ^ type.hashCode) & 0xFFFFFFFF;
   }
 
-  bool get usesT => type?.usesT == true;
+  bool get usesT => type?.usesT ?? false;
+  bool get takesT => type?.takesT ?? false;
+  bool get returnsT => type?.returnsT ?? false;
 }
 
 class GenericParameter implements TypeLike {
@@ -131,9 +165,9 @@ class GenericParameter implements TypeLike {
     return ((name.hashCode * 23) ^ bound.hashCode) & 0xFFFFFFFF;
   }
 
-  bool get usesT {
-    return bound?.usesT == true;
-  }
+  bool get usesT => bound?.usesT ?? false;
+  bool get takesT => bound?.takesT ?? false;
+  bool get returnsT => bound?.returnsT ?? false;
 }
 
 void _describeList(StringBuffer buffer, List<Printable> list) {
@@ -160,6 +194,11 @@ void _writeTypes(StringBuffer buffer, List<TypeLike> list,
   buffer.write(postfix);
 }
 
+/// Write the parameters in [list] to [buffer]. If [inFunction] is true then
+/// the output are the formal parameters of a function signature (where
+/// optionals will have default values), and if [inFunction] is false then the
+/// output are formal parameter types of a function type (where default values
+/// and names of positional parameters are omitted).
 void _writeParameters(
     StringBuffer buffer, List<Parameter> list, bool inFunction,
     [String prefix = "", String postfix = ""]) {
@@ -168,7 +207,7 @@ void _writeParameters(
   for (int i = 0; i < list.length; i++) {
     if (i != 0) buffer.write(", ");
     if (inFunction) {
-      list[i].writeInFunction(buffer);
+      list[i].writeInFunction(buffer, optional: prefix != "");
     } else {
       list[i].writeType(buffer);
     }
@@ -236,15 +275,15 @@ class FunctionType implements TypeLike {
     buffer.write("Function");
     if (generic != null) _writeTypes(buffer, generic, "<", ">");
     buffer.write("(");
-    bool notInFunction = true;
-    _writeParameters(buffer, required, notInFunction);
+    bool inFunction = false;
+    _writeParameters(buffer, required, inFunction);
     if ((optional != null || named != null) &&
         required != null &&
         required.isNotEmpty) {
       buffer.write(", ");
     }
-    _writeParameters(buffer, optional, notInFunction, "[", "]");
-    _writeParameters(buffer, named, notInFunction, "{", "}");
+    _writeParameters(buffer, optional, inFunction, "[", "]");
+    _writeParameters(buffer, named, inFunction, "{", "}");
     buffer.write(")");
   }
 
@@ -270,7 +309,7 @@ class FunctionType implements TypeLike {
     }
     _writeParameters(buffer, optional, inFunction, "[", "]");
     _writeParameters(buffer, named, inFunction, "{", "}");
-    buffer.write(") => null;");
+    buffer.write(") => throw 'uncalled';");
 
     shouldReplaceTWithInt = false;
   }
@@ -293,8 +332,24 @@ class FunctionType implements TypeLike {
   }
 
   bool get usesT {
-    return returnType?.usesT == true ||
+    return (returnType?.usesT ?? false) ||
         [generic, required, optional, named].any(_listUsesT);
+  }
+
+  bool get returnsT {
+    return (returnType?.returnsT ?? false) ||
+        [generic, required, optional, named]
+            .any((l) => l?.any((p) => p.takesT) ?? false);
+  }
+
+  bool get takesT {
+    return (returnType?.takesT ?? false) ||
+        [generic, required, optional, named]
+            .any((l) => l?.any((p) => p.returnsT) ?? false);
+  }
+
+  bool get reifiedTypeUsesT {
+    return returnType?.usesT ?? returnsT;
   }
 }
 
@@ -336,9 +391,13 @@ class NominalType implements TypeLike {
   }
 
   bool get usesT => name == "T" || _listUsesT(generic);
+
+  bool get returnsT => name == "T" || generic?.any((t) => t.returnsT) ?? false;
+
+  bool get takesT => generic?.any((t) => t.takesT) ?? false;
 }
 
-List<FunctionType> buildFunctionTypes() {
+List<TypeLike> buildFunctionTypes() {
   List<GenericParameter> as = [
     new GenericParameter("A"),
     // new GenericParameter("A", new NominalType("int")),
@@ -538,12 +597,11 @@ import 'dart:core';
 import 'dart:core' as core;
 import 'package:expect/expect.dart';
 
-@NoInline()
-@AssumeDynamic()
+@pragma('dart2js:noInline')
+@pragma('dart2js:assumeDynamic')
 confuse(f) => f;
 
-final bool inCheckedMode =
-    (() { bool result = false; assert(result = true); return result; })();
+void _voidFunction() {}
 """;
 
 class Unit {
@@ -599,21 +657,21 @@ final TEST_METHOD_HEADER = """
 
 // Tests that apply for every type.
 final COMMON_TESTS_TEMPLATE = """
-    Expect.isTrue(#staticFunName is #typeName);
-    Expect.isTrue(confuse(#staticFunName) is #typeName);
+    Expect.isTrue(#staticFunName is #typeName<int>);
+    Expect.isTrue(confuse(#staticFunName) is #typeName<int>);
     // In checked mode, verifies the type.
     #typeCode #localName;
     // The static function #staticFunName sets `T` to `int`.
-    if (!tIsBool) {
+    if (tIsInt) {
       #fieldName = #staticFunName as dynamic;
       #localName = #staticFunName as dynamic;
       #fieldName = confuse(#staticFunName);
       #localName = confuse(#staticFunName);
     }
 
-    Expect.isTrue(#methodFunName is #typeName);
+    Expect.isTrue(#methodFunName is #typeName<T>);
     Expect.isTrue(#methodFunName is #typeCode);
-    Expect.isTrue(confuse(#methodFunName) is #typeName);
+    Expect.isTrue(confuse(#methodFunName) is #typeName<T>);
     // In checked mode, verifies the type.
     #fieldName = #methodFunName;
     #localName = #methodFunName;
@@ -634,26 +692,24 @@ final COMMON_TESTS_TEMPLATE = """
 //      f(List<T> x) {}
 //   }
 final TYPEDEF_T_TESTS_TEMPLATE = """
-    if (!tIsBool) {
-      Expect.isTrue(#staticFunName is #typeName<int>);
-      Expect.isFalse(#staticFunName is #typeName<bool>);
-      Expect.isTrue(confuse(#staticFunName) is #typeName<int>);
-      Expect.isFalse(confuse(#staticFunName) is #typeName<bool>);
-      Expect.equals(tIsDynamic, #methodFunName is #typeName<bool>);
-      Expect.equals(tIsDynamic, confuse(#methodFunName) is #typeName<bool>);
-    } else {
-      if (inCheckedMode) {
-        Expect.throws(() { #fieldName = (#staticFunName as dynamic); });
-        Expect.throws(() { #fieldName = confuse(#staticFunName); });
-        #typeCode #localName;
-        Expect.throws(() { #localName = (#staticFunName as dynamic); });
-        Expect.throws(() { #localName = confuse(#staticFunName); });
-      }
-      #typeCode #localName = #methodFunName;
-      // In checked mode, verifies the type.
-      #fieldName = #methodFunName;
-      #fieldName = confuse(#methodFunName);
-    }""";
+    // The static function has its T always set to int.
+    Expect.isTrue(#staticFunName is #typeName<int>);
+    Expect.isFalse(#staticFunName is #typeName<bool>);
+    Expect.isTrue(confuse(#staticFunName) is #typeName<int>);
+    Expect.isFalse(confuse(#staticFunName) is #typeName<bool>);
+    if (tIsBool) {
+      Expect.throws(() { #fieldName = (#staticFunName as dynamic); });
+      Expect.throws(() { #fieldName = confuse(#staticFunName); });
+      Expect.throws(() { #localName = (#staticFunName as dynamic); });
+      Expect.throws(() { #localName = confuse(#staticFunName); });
+    }
+    if (tIsInt || tIsBool) {
+      Expect.equals(#isIntValue, #methodFunName is #typeName<int>);
+      Expect.equals(#isBoolValue, #methodFunName is #typeName<bool>);
+      Expect.equals(#isIntValue, confuse(#methodFunName) is #typeName<int>);
+      Expect.equals(#isBoolValue, confuse(#methodFunName) is #typeName<bool>);
+    }
+""";
 
 final TEST_METHOD_FOOTER = "  }";
 
@@ -683,6 +739,9 @@ String createMethodFunCode(FunctionType type, int id) {
 }
 
 String createTestMethodFunCode(FunctionType type, String typeCode, int id) {
+  var tIsInt = type.reifiedTypeUsesT ? 'tIsInt' : 'true';
+  var tIsBool = type.reifiedTypeUsesT ? 'tIsBool' : 'true';
+
   String fillTemplate(String template, int id) {
     var result = template
         .replaceAll("#typeName", createTypeName(id))
@@ -691,7 +750,9 @@ String createTestMethodFunCode(FunctionType type, String typeCode, int id) {
         .replaceAll("#fieldName", createFieldName(id))
         .replaceAll("#localName", createLocalName(id))
         .replaceAll("#testName", createTestName(id))
-        .replaceAll("#typeCode", typeCode);
+        .replaceAll("#typeCode", typeCode)
+        .replaceAll("#isIntValue", tIsInt)
+        .replaceAll("#isBoolValue", tIsBool);
     assert(!result.contains("#"));
     return result;
   }
@@ -720,7 +781,7 @@ void generateTests() {
   var types = buildFunctionTypes();
 
   int unitCounter = 0;
-  types.forEach((FunctionType type) {
+  for (var type in types) {
     Unit unit = units[unitCounter % units.length];
     unitCounter++;
     int typeCounter = unit.typeCounter++;
@@ -737,11 +798,12 @@ void generateTests() {
 
     unit.typedefs.writeln("typedef $typeName<T> = $typeCode;");
     unit.globals.writeln(staticFunCode);
-    unit.fields.writeln("  $typeCode $fieldName;");
+    // Mark all fields 'late' to avoid uninitialized field errors.
+    unit.fields.writeln("  late $typeCode $fieldName;");
     unit.methods.writeln("  $methodFunCode");
     unit.testMethods.writeln("$testMethodCode");
     unit.tests.writeln("    $testName();");
-  });
+  }
 
   for (int i = 0; i < units.length; i++) {
     var unit = units[i];

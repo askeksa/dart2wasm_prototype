@@ -17,25 +17,10 @@
 
 namespace dart {
 
-DEFINE_FLAG(bool, verify_handles, false, "Verify handles.");
-
-
-VMHandles::~VMHandles() {
-  if (FLAG_trace_handles) {
-    OS::PrintErr("***   Handle Counts for 0x(%" Px "):Zone = %d,Scoped = %d\n",
-                 reinterpret_cast<intptr_t>(this), CountZoneHandles(),
-                 CountScopedHandles());
-    OS::PrintErr("*** Deleting VM handle block 0x%" Px "\n",
-                 reinterpret_cast<intptr_t>(this));
-  }
-}
-
-
 void VMHandles::VisitObjectPointers(ObjectPointerVisitor* visitor) {
   return Handles<kVMHandleSizeInWords, kVMHandlesPerChunk,
                  kOffsetOfRawPtr>::VisitObjectPointers(visitor);
 }
-
 
 #if defined(DEBUG)
 static bool IsCurrentApiNativeScope(Zone* zone) {
@@ -44,13 +29,11 @@ static bool IsCurrentApiNativeScope(Zone* zone) {
 }
 #endif  // DEBUG
 
-
 uword VMHandles::AllocateHandle(Zone* zone) {
   DEBUG_ASSERT(!IsCurrentApiNativeScope(zone));
   return Handles<kVMHandleSizeInWords, kVMHandlesPerChunk,
                  kOffsetOfRawPtr>::AllocateHandle(zone);
 }
-
 
 uword VMHandles::AllocateZoneHandle(Zone* zone) {
   DEBUG_ASSERT(!IsCurrentApiNativeScope(zone));
@@ -58,12 +41,10 @@ uword VMHandles::AllocateZoneHandle(Zone* zone) {
                  kOffsetOfRawPtr>::AllocateZoneHandle(zone);
 }
 
-
 bool VMHandles::IsZoneHandle(uword handle) {
   return Handles<kVMHandleSizeInWords, kVMHandlesPerChunk,
                  kOffsetOfRawPtr>::IsZoneHandle(handle);
 }
-
 
 int VMHandles::ScopedHandleCount() {
   Thread* thread = Thread::Current();
@@ -72,7 +53,6 @@ int VMHandles::ScopedHandleCount() {
   return handles->CountScopedHandles();
 }
 
-
 int VMHandles::ZoneHandleCount() {
   Thread* thread = Thread::Current();
   ASSERT(thread->zone() != NULL);
@@ -80,9 +60,8 @@ int VMHandles::ZoneHandleCount() {
   return handles->CountZoneHandles();
 }
 
-
 void HandleScope::Initialize() {
-  ASSERT(thread()->no_handle_scope_depth() == 0);
+  ASSERT(thread()->MayAllocateHandles());
   VMHandles* handles = thread()->zone()->handles();
   ASSERT(handles != NULL);
   saved_handle_block_ = handles->scoped_blocks_;
@@ -93,11 +72,9 @@ void HandleScope::Initialize() {
 #endif
 }
 
-
-HandleScope::HandleScope(Thread* thread) : StackResource(thread) {
+HandleScope::HandleScope(ThreadState* thread) : StackResource(thread) {
   Initialize();
 }
-
 
 HandleScope::~HandleScope() {
   ASSERT(thread()->zone() != NULL);
@@ -112,17 +89,5 @@ HandleScope::~HandleScope() {
   thread()->set_top_handle_scope(link_);
 #endif
 }
-
-
-#if defined(DEBUG)
-NoHandleScope::NoHandleScope(Thread* thread) : StackResource(thread) {
-  thread->IncrementNoHandleScopeDepth();
-}
-
-
-NoHandleScope::~NoHandleScope() {
-  thread()->DecrementNoHandleScopeDepth();
-}
-#endif  // defined(DEBUG)
 
 }  // namespace dart

@@ -24,11 +24,11 @@ set EXTRA_OPTIONS=
 set EXTRA_VM_OPTIONS=
 
 if _%DART2JS_DEVELOPER_MODE%_ == _1_ (
-  set EXTRA_VM_OPTIONS=%EXTRA_VM_OPTIONS% --checked
+  set EXTRA_VM_OPTIONS=%EXTRA_VM_OPTIONS% --enable-asserts
 )
 
 if exist "%SNAPSHOT%" (
-  set EXTRA_OPTIONS=%EXTRA_OPTIONS% "--library-root=%SDK_DIR%"
+  set EXTRA_OPTIONS=%EXTRA_OPTIONS% "--libraries-spec=%SDK_DIR%\lib\libraries.json"
 )
 
 rem We allow extra vm options to be passed in through an environment variable.
@@ -47,7 +47,7 @@ setlocal
 for %%i in (%1) do set result=%%~fi
 set current=
 for /f "usebackq tokens=2 delims=[]" %%i in (`dir /a:l "%~dp1" 2^>nul ^
-                                             ^| find ">     %~n1 [" 2^>nul`) do (
+                                             ^| %SystemRoot%\System32\find.exe ">     %~n1 [" 2^>nul`) do (
   set current=%%i
 )
 if not "%current%"=="" call :follow_links "%current%", result

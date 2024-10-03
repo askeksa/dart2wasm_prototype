@@ -5,8 +5,8 @@
 #include "vm/globals.h"
 #if defined(TARGET_ARCH_IA32)
 
-#include "vm/assembler.h"
 #include "vm/code_patcher.h"
+#include "vm/compiler/assembler/assembler.h"
 #include "vm/dart_entry.h"
 #include "vm/instructions.h"
 #include "vm/native_entry.h"
@@ -28,26 +28,28 @@ ASSEMBLER_TEST_GENERATE(IcDataAccess, assembler) {
       Library::Handle(), class_name, script, TokenPosition::kNoSource));
   const String& function_name =
       String::Handle(Symbols::New(thread, "callerFunction"));
+  const FunctionType& signature = FunctionType::ZoneHandle(FunctionType::New());
   const Function& function = Function::Handle(Function::New(
-      function_name, RawFunction::kRegularFunction, true, false, false, false,
-      false, owner_class, TokenPosition::kNoSource));
+      signature, function_name, UntaggedFunction::kRegularFunction, true, false,
+      false, false, false, owner_class, TokenPosition::kNoSource));
 
-  const String& target_name = String::Handle(String::New("targetFunction"));
+  const String& target_name =
+      String::Handle(Symbols::New(thread, "targetFunction"));
   const intptr_t kTypeArgsLen = 0;
   const intptr_t kNumArgs = 1;
-  const Array& args_descriptor = Array::Handle(
-      ArgumentsDescriptor::New(kTypeArgsLen, kNumArgs, Object::null_array()));
-  const ICData& ic_data = ICData::ZoneHandle(
-      ICData::New(function, target_name, args_descriptor, 15, 1, false));
+  const Array& args_descriptor = Array::Handle(ArgumentsDescriptor::NewBoxed(
+      kTypeArgsLen, kNumArgs, Object::null_array()));
+  const ICData& ic_data = ICData::ZoneHandle(ICData::New(
+      function, target_name, args_descriptor, 15, 1, ICData::kInstance));
 
   __ LoadObject(ECX, ic_data);
-  __ Call(*StubCode::OneArgCheckInlineCache_entry());
+  __ Call(StubCode::OneArgCheckInlineCache());
   __ ret();
 }
 
-
 ASSEMBLER_TEST_RUN(IcDataAccess, test) {
-  uword return_address = test->entry() + CodePatcher::InstanceCallSizeInBytes();
+  uword end = test->payload_start() + test->code().Size();
+  uword return_address = end - 1;  // sizeof(ret)
   ICData& ic_data = ICData::Handle();
   CodePatcher::GetInstanceCallAt(return_address, test->code(), &ic_data);
   EXPECT_STREQ("targetFunction",

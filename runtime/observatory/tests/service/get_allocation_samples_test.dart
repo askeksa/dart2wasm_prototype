@@ -1,13 +1,12 @@
 // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override
 
 import 'dart:developer';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/service_io.dart';
-import 'package:observatory/cpu_profile.dart';
-import 'package:unittest/unittest.dart';
+import 'package:observatory/sample_profile.dart';
+import 'package:test/test.dart';
 import 'service_test_common.dart';
 import 'test_helper.dart';
 
@@ -27,13 +26,13 @@ void test() {
   debugger();
 }
 
-var tests = [
+var tests = <IsolateTest>[
   hasStoppedAtBreakpoint,
 
   // Initial.
   (Isolate isolate) async {
     // Verify initial state of 'Foo'.
-    var fooClass = await getClassFromRootLib(isolate, 'Foo');
+    var fooClass = await getClassFromRootLib(isolate, 'Foo') as Class;
     expect(fooClass, isNotNull);
     expect(fooClass.name, equals('Foo'));
     print(fooClass.id);
@@ -52,31 +51,30 @@ var tests = [
 
   // Allocation profile.
   (Isolate isolate) async {
-    var fooClass = await getClassFromRootLib(isolate, 'Foo');
+    var fooClass = await getClassFromRootLib(isolate, 'Foo') as Class;
     await fooClass.reload();
     expect(fooClass.traceAllocations, isTrue);
-    var profileResponse = await fooClass.getAllocationSamples();
+    dynamic profileResponse = await fooClass.getAllocationTraces();
     expect(profileResponse, isNotNull);
-    expect(profileResponse['type'], equals('_CpuProfile'));
+    //expect(profileResponse['type'], equals('_CpuProfile'));
     await fooClass.setTraceAllocations(false);
     await fooClass.reload();
     expect(fooClass.traceAllocations, isFalse);
-    CpuProfile cpuProfile = new CpuProfile();
+    SampleProfile cpuProfile = new SampleProfile();
     await cpuProfile.load(isolate, profileResponse);
     cpuProfile.buildCodeCallerAndCallees();
     cpuProfile.buildFunctionCallerAndCallees();
     var tree = cpuProfile.loadCodeTree(M.ProfileTreeDirection.exclusive);
-    var node = tree.root;
+    CodeCallTreeNode? node = tree.root;
     var expected = [
       'Root',
-      'DRT_AllocateObject',
-      '[Stub] Allocate Foo',
-      'test',
-      'test',
-      '_Closure.call'
+      '[Unoptimized] test',
+      '[Unoptimized] test',
+      '[Unoptimized] _Closure.call',
+      '[Unoptimized] _ServiceTesteeRunner.run',
     ];
     for (var i = 0; i < expected.length; i++) {
-      expect(node.profileCode.code.name, equals(expected[i]));
+      expect(node!.profileCode.code.name, equals(expected[i]));
       // Depth first traversal.
       if (node.children.length == 0) {
         node = null;

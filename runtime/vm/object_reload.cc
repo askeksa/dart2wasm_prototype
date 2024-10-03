@@ -4,111 +4,194 @@
 
 #include "vm/object.h"
 
+#include "platform/unaligned.h"
+#include "vm/code_patcher.h"
+#include "vm/dart_entry.h"
 #include "vm/hash_table.h"
 #include "vm/isolate_reload.h"
 #include "vm/log.h"
+#include "vm/object_store.h"
 #include "vm/resolver.h"
+#include "vm/stub_code.h"
 #include "vm/symbols.h"
 
 namespace dart {
 
-#ifndef PRODUCT
+#if !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
 
 DECLARE_FLAG(bool, trace_reload);
 DECLARE_FLAG(bool, trace_reload_verbose);
 DECLARE_FLAG(bool, two_args_smi_icd);
 
-
-class ObjectReloadUtils : public AllStatic {
-  static void DumpLibraryDictionary(const Library& lib) {
-    DictionaryIterator it(lib);
-    Object& entry = Object::Handle();
-    String& name = String::Handle();
-    TIR_Print("Dumping dictionary for %s\n", lib.ToCString());
-    while (it.HasNext()) {
-      entry = it.GetNext();
-      name = entry.DictionaryName();
-      TIR_Print("%s -> %s\n", name.ToCString(), entry.ToCString());
-    }
-  }
-};
-
-
-void Function::Reparent(const Class& new_cls) const {
-  set_owner(new_cls);
-}
-
-
-void Function::ZeroEdgeCounters() const {
-  const Array& saved_ic_data = Array::Handle(ic_data_array());
-  if (saved_ic_data.IsNull()) {
+void CallSiteResetter::ZeroEdgeCounters(const Function& function) {
+  ic_data_array_ = function.ic_data_array();
+  if (ic_data_array_.IsNull()) {
     return;
   }
-  const intptr_t saved_ic_datalength = saved_ic_data.Length();
-  ASSERT(saved_ic_datalength > 0);
-  const Array& edge_counters_array =
-      Array::Handle(Array::RawCast(saved_ic_data.At(0)));
-  ASSERT(!edge_counters_array.IsNull());
+  ASSERT(ic_data_array_.Length() > 0);
+  edge_counters_ ^=
+      ic_data_array_.At(Function::ICDataArrayIndices::kEdgeCounters);
+  if (edge_counters_.IsNull()) {
+    return;
+  }
   // Fill edge counters array with zeros.
-  const Smi& zero = Smi::Handle(Smi::New(0));
-  for (intptr_t i = 0; i < edge_counters_array.Length(); i++) {
-    edge_counters_array.SetAt(i, zero);
+  for (intptr_t i = 0; i < edge_counters_.Length(); i++) {
+    edge_counters_.SetAt(i, Object::smi_zero());
   }
 }
 
+CallSiteResetter::CallSiteResetter(Zone* zone)
+    : zone_(zone),
+      instrs_(Instructions::Handle(zone)),
+      pool_(ObjectPool::Handle(zone)),
+      object_(Object::Handle(zone)),
+      name_(String::Handle(zone)),
+      new_cls_(Class::Handle(zone)),
+      new_lib_(Library::Handle(zone)),
+      new_function_(Function::Handle(zone)),
+      new_field_(Field::Handle(zone)),
+      entries_(Array::Handle(zone)),
+      old_target_(Function::Handle(zone)),
+      new_target_(Function::Handle(zone)),
+      caller_(Function::Handle(zone)),
+      args_desc_array_(Array::Handle(zone)),
+      ic_data_array_(Array::Handle(zone)),
+      edge_counters_(Array::Handle(zone)),
+      descriptors_(PcDescriptors::Handle(zone)),
+      ic_data_(ICData::Handle(zone)) {}
 
-void Code::ResetICDatas(Zone* zone) const {
-// Iterate over the Code's object pool and reset all ICDatas.
+void CallSiteResetter::ResetCaches(const Code& code) {
+  // Iterate over the Code's object pool and reset all ICDatas.
+  // SubtypeTestCaches are reset during the same heap traversal as type
+  // testing stub deoptimization.
 #ifdef TARGET_ARCH_IA32
   // IA32 does not have an object pool, but, we can iterate over all
   // embedded objects by using the variable length data section.
-  if (!is_alive()) {
+  if (!code.is_alive()) {
     return;
   }
-  const Instructions& instrs = Instructions::Handle(zone, instructions());
-  ASSERT(!instrs.IsNull());
-  uword base_address = instrs.PayloadStart();
-  Object& object = Object::Handle(zone);
-  intptr_t offsets_length = pointer_offsets_length();
-  const int32_t* offsets = raw_ptr()->data();
+  instrs_ = code.instructions();
+  ASSERT(!instrs_.IsNull());
+  uword base_address = instrs_.PayloadStart();
+  intptr_t offsets_length = code.pointer_offsets_length();
+  const int32_t* offsets = code.untag()->data();
   for (intptr_t i = 0; i < offsets_length; i++) {
     int32_t offset = offsets[i];
-    RawObject** object_ptr =
-        reinterpret_cast<RawObject**>(base_address + offset);
-    RawObject* raw_object = *object_ptr;
+    ObjectPtr* object_ptr = reinterpret_cast<ObjectPtr*>(base_address + offset);
+    ObjectPtr raw_object = LoadUnaligned(object_ptr);
     if (!raw_object->IsHeapObject()) {
       continue;
     }
-    object = raw_object;
-    if (object.IsICData()) {
-      ICData::Cast(object).Reset(zone);
+    object_ = raw_object;
+    if (object_.IsICData()) {
+      Reset(ICData::Cast(object_));
     }
   }
 #else
-  const ObjectPool& pool = ObjectPool::Handle(zone, object_pool());
-  Object& object = Object::Handle(zone);
-  ASSERT(!pool.IsNull());
-  for (intptr_t i = 0; i < pool.Length(); i++) {
-    ObjectPool::EntryType entry_type = pool.InfoAt(i);
-    if (entry_type != ObjectPool::kTaggedObject) {
-      continue;
-    }
-    object = pool.ObjectAt(i);
-    if (object.IsICData()) {
-      ICData::Cast(object).Reset(zone);
-    }
-  }
+  pool_ = code.object_pool();
+  ASSERT(!pool_.IsNull());
+  ResetCaches(pool_);
 #endif
 }
 
+static void FindICData(const Array& ic_data_array,
+                       intptr_t deopt_id,
+                       ICData* ic_data) {
+  // ic_data_array is sorted because of how it is constructed in
+  // Function::SaveICDataMap.
+  intptr_t lo = Function::ICDataArrayIndices::kFirstICData;
+  intptr_t hi = ic_data_array.Length() - 1;
+  while (lo <= hi) {
+    intptr_t mid = (hi - lo + 1) / 2 + lo;
+    ASSERT(mid >= lo);
+    ASSERT(mid <= hi);
+    *ic_data ^= ic_data_array.At(mid);
+    if (ic_data->deopt_id() == deopt_id) {
+      return;
+    } else if (ic_data->deopt_id() > deopt_id) {
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  FATAL1("Missing deopt id %" Pd "\n", deopt_id);
+}
 
-void Class::CopyStaticFieldValues(const Class& old_cls) const {
-  // We only update values for non-enum classes.
-  const bool update_values = !is_enum_class();
+void CallSiteResetter::ResetSwitchableCalls(const Code& code) {
+  if (code.is_optimized()) {
+    return;  // No switchable calls in optimized code.
+  }
 
-  IsolateReloadContext* reload_context = Isolate::Current()->reload_context();
-  ASSERT(reload_context != NULL);
+  object_ = code.owner();
+  if (!object_.IsFunction()) {
+    return;  // No switchable calls in stub code.
+  }
+  const Function& function = Function::Cast(object_);
 
+  if (function.kind() == UntaggedFunction::kIrregexpFunction) {
+    // Regex matchers do not support breakpoints or stepping, and they only call
+    // core library functions that cannot change due to reload. As a performance
+    // optimization, avoid this matching of ICData to PCs for these functions'
+    // large number of instance calls.
+    ASSERT(!function.is_debuggable());
+    return;
+  }
+
+  ic_data_array_ = function.ic_data_array();
+  if (ic_data_array_.IsNull()) {
+    // The megamorphic miss stub and some recognized function doesn't populate
+    // their ic_data_array. Check this only happens for functions without IC
+    // calls.
+#if defined(DEBUG)
+    descriptors_ = code.pc_descriptors();
+    PcDescriptors::Iterator iter(descriptors_, UntaggedPcDescriptors::kIcCall);
+    while (iter.MoveNext()) {
+      FATAL1("%s has IC calls but no ic_data_array\n", object_.ToCString());
+    }
+#endif
+    return;
+  }
+
+  descriptors_ = code.pc_descriptors();
+  PcDescriptors::Iterator iter(descriptors_, UntaggedPcDescriptors::kIcCall);
+  while (iter.MoveNext()) {
+    uword pc = code.PayloadStart() + iter.PcOffset();
+    CodePatcher::GetInstanceCallAt(pc, code, &object_);
+    // This check both avoids unnecessary patching to reduce log spam and
+    // prevents patching over breakpoint stubs.
+    if (!object_.IsICData()) {
+      FindICData(ic_data_array_, iter.DeoptId(), &ic_data_);
+      ASSERT(ic_data_.rebind_rule() == ICData::kInstance);
+      ASSERT(ic_data_.NumArgsTested() == 1);
+      const Code& stub =
+          ic_data_.is_tracking_exactness()
+              ? StubCode::OneArgCheckInlineCacheWithExactnessCheck()
+              : StubCode::OneArgCheckInlineCache();
+      CodePatcher::PatchInstanceCallAt(pc, code, ic_data_, stub);
+      if (FLAG_trace_ic) {
+        OS::PrintErr("Instance call at %" Px
+                     " resetting to polymorphic dispatch, %s\n",
+                     pc, ic_data_.ToCString());
+      }
+    }
+  }
+}
+
+void CallSiteResetter::ResetCaches(const ObjectPool& pool) {
+  for (intptr_t i = 0; i < pool.Length(); i++) {
+    ObjectPool::EntryType entry_type = pool.TypeAt(i);
+    if (entry_type != ObjectPool::EntryType::kTaggedObject) {
+      continue;
+    }
+    object_ = pool.ObjectAt(i);
+    if (object_.IsICData()) {
+      Reset(ICData::Cast(object_));
+    }
+  }
+}
+
+void Class::CopyStaticFieldValues(ProgramReloadContext* reload_context,
+                                  const Class& old_cls) const {
   const Array& old_field_list = Array::Handle(old_cls.fields());
   Field& old_field = Field::Handle();
   String& old_name = String::Handle();
@@ -117,30 +200,36 @@ void Class::CopyStaticFieldValues(const Class& old_cls) const {
   Field& field = Field::Handle();
   String& name = String::Handle();
 
-  Instance& value = Instance::Handle();
   for (intptr_t i = 0; i < field_list.Length(); i++) {
     field = Field::RawCast(field_list.At(i));
     name = field.name();
-    if (field.is_static()) {
-      // Find the corresponding old field, if it exists, and migrate
-      // over the field value.
-      for (intptr_t j = 0; j < old_field_list.Length(); j++) {
-        old_field = Field::RawCast(old_field_list.At(j));
-        old_name = old_field.name();
-        if (name.Equals(old_name)) {
+    // Find the corresponding old field, if it exists, and migrate
+    // over the field value.
+    for (intptr_t j = 0; j < old_field_list.Length(); j++) {
+      old_field = Field::RawCast(old_field_list.At(j));
+      old_name = old_field.name();
+      if (name.Equals(old_name)) {
+        if (field.is_static()) {
           // We only copy values if requested and if the field is not a const
           // field. We let const fields be updated with a reload.
-          if (update_values && !field.is_const()) {
-            value = old_field.StaticValue();
-            field.SetStaticValue(value);
+          if (!field.is_const()) {
+            // Make new field point to the old field value so that both
+            // old and new code see and update same value.
+            reload_context->isolate_group()->FreeStaticField(field);
+            field.set_field_id_unsafe(old_field.field_id());
           }
           reload_context->AddStaticFieldMapping(old_field, field);
+        } else {
+          if (old_field.needs_load_guard()) {
+            ASSERT(!old_field.is_unboxing_candidate());
+            field.set_needs_load_guard(true);
+            field.set_is_unboxing_candidate_unsafe(false);
+          }
         }
       }
     }
   }
 }
-
 
 void Class::CopyCanonicalConstants(const Class& old_cls) const {
   if (is_enum_class()) {
@@ -152,7 +241,7 @@ void Class::CopyCanonicalConstants(const Class& old_cls) const {
   {
     // Class has no canonical constants allocated.
     const Array& my_constants = Array::Handle(constants());
-    ASSERT(my_constants.Length() == 0);
+    ASSERT(my_constants.IsNull() || my_constants.Length() == 0);
   }
 #endif  // defined(DEBUG).
   // Copy old constants into new class.
@@ -165,15 +254,13 @@ void Class::CopyCanonicalConstants(const Class& old_cls) const {
   set_constants(old_constants);
 }
 
-
-void Class::CopyCanonicalType(const Class& old_cls) const {
-  const Type& old_canonical_type = Type::Handle(old_cls.canonical_type());
-  if (old_canonical_type.IsNull()) {
+void Class::CopyDeclarationType(const Class& old_cls) const {
+  const Type& old_declaration_type = Type::Handle(old_cls.declaration_type());
+  if (old_declaration_type.IsNull()) {
     return;
   }
-  set_canonical_type(old_canonical_type);
+  set_declaration_type(old_declaration_type);
 }
-
 
 class EnumMapTraits {
  public:
@@ -181,7 +268,7 @@ class EnumMapTraits {
   static const char* Name() { return "EnumMapTraits"; }
 
   static bool IsMatch(const Object& a, const Object& b) {
-    return a.raw() == b.raw();
+    return a.ptr() == b.ptr();
   }
 
   static uword Hash(const Object& obj) {
@@ -189,7 +276,6 @@ class EnumMapTraits {
     return String::Cast(obj).Hash();
   }
 };
-
 
 // Given an old enum class, add become mappings from old values to new values.
 // Some notes about how we reload enums below:
@@ -208,7 +294,8 @@ class EnumMapTraits {
 //   When an enum value is deleted, we 'become' all references to the 'deleted'
 //   sentinel value. The index value is -1.
 //
-void Class::ReplaceEnum(const Class& old_enum) const {
+void Class::ReplaceEnum(ProgramReloadContext* reload_context,
+                        const Class& old_enum) const {
   // We only do this for finalized enum classes.
   ASSERT(is_enum_class());
   ASSERT(old_enum.is_enum_class());
@@ -217,18 +304,16 @@ void Class::ReplaceEnum(const Class& old_enum) const {
 
   Thread* thread = Thread::Current();
   Zone* zone = thread->zone();
-  IsolateReloadContext* reload_context = Isolate::Current()->reload_context();
-  ASSERT(reload_context != NULL);
+  ObjectStore* object_store = thread->isolate_group()->object_store();
 
-  Array& enum_fields = Array::Handle(zone);
   Field& field = Field::Handle(zone);
   String& enum_ident = String::Handle();
   Instance& old_enum_value = Instance::Handle(zone);
   Instance& enum_value = Instance::Handle(zone);
   // The E.values array.
-  Instance& old_enum_values = Instance::Handle(zone);
+  Array& old_enum_values = Array::Handle(zone);
   // The E.values array.
-  Instance& enum_values = Instance::Handle(zone);
+  Array& enum_values = Array::Handle(zone);
   // The E._deleted_enum_sentinel instance.
   Instance& old_deleted_enum_sentinel = Instance::Handle(zone);
   // The E._deleted_enum_sentinel instance.
@@ -240,28 +325,29 @@ void Class::ReplaceEnum(const Class& old_enum) const {
   TIR_Print("Replacing enum `%s`\n", String::Handle(Name()).ToCString());
 
   {
-    UnorderedHashMap<EnumMapTraits> enum_map(enum_map_storage.raw());
+    field = old_enum.LookupStaticField(Symbols::Values());
+    if (!field.IsNull()) {
+      ASSERT(field.is_static() && field.is_const());
+      old_enum_values ^= field.StaticConstFieldValue();
+      ASSERT(!old_enum_values.IsNull());
+    } else {
+      old_enum_values = Array::empty_array().ptr();
+    }
+
+    field = old_enum.LookupStaticField(Symbols::_DeletedEnumSentinel());
+    ASSERT(!field.IsNull() && field.is_static() && field.is_const());
+    old_deleted_enum_sentinel ^= field.StaticConstFieldValue();
+    ASSERT(!old_deleted_enum_sentinel.IsNull());
+
+    field = object_store->enum_name_field();
+    ASSERT(!field.IsNull());
+
+    UnorderedHashMap<EnumMapTraits> enum_map(enum_map_storage.ptr());
     // Build a map of all enum name -> old enum instance.
-    enum_fields = old_enum.fields();
-    for (intptr_t i = 0; i < enum_fields.Length(); i++) {
-      field = Field::RawCast(enum_fields.At(i));
-      enum_ident = field.name();
-      if (!field.is_static()) {
-        // Enum instances are only held in static fields.
-        continue;
-      }
-      if (enum_ident.Equals(Symbols::Values())) {
-        old_enum_values = field.StaticValue();
-        // Non-enum instance.
-        continue;
-      }
-      if (enum_ident.Equals(Symbols::_DeletedEnumSentinel())) {
-        old_deleted_enum_sentinel = field.StaticValue();
-        // Non-enum instance.
-        continue;
-      }
-      old_enum_value = field.StaticValue();
+    for (intptr_t i = 0, n = old_enum_values.Length(); i < n; ++i) {
+      old_enum_value ^= old_enum_values.At(i);
       ASSERT(!old_enum_value.IsNull());
+      enum_ident ^= old_enum_value.GetField(field);
       VTIR_Print("Element %s being added to mapping\n", enum_ident.ToCString());
       bool update = enum_map.UpdateOrInsert(enum_ident, old_enum_value);
       VTIR_Print("Element %s added to mapping\n", enum_ident.ToCString());
@@ -269,33 +355,35 @@ void Class::ReplaceEnum(const Class& old_enum) const {
     }
     // The storage given to the map may have been reallocated, remember the new
     // address.
-    enum_map_storage = enum_map.Release().raw();
+    enum_map_storage = enum_map.Release().ptr();
   }
 
   bool enums_deleted = false;
   {
-    UnorderedHashMap<EnumMapTraits> enum_map(enum_map_storage.raw());
+    field = LookupStaticField(Symbols::Values());
+    if (!field.IsNull()) {
+      ASSERT(field.is_static() && field.is_const());
+      enum_values ^= field.StaticConstFieldValue();
+      ASSERT(!enum_values.IsNull());
+    } else {
+      enum_values = Array::empty_array().ptr();
+    }
+
+    field = LookupStaticField(Symbols::_DeletedEnumSentinel());
+    ASSERT(!field.IsNull() && field.is_static() && field.is_const());
+    deleted_enum_sentinel ^= field.StaticConstFieldValue();
+    ASSERT(!deleted_enum_sentinel.IsNull());
+
+    field = object_store->enum_name_field();
+    ASSERT(!field.IsNull());
+
+    UnorderedHashMap<EnumMapTraits> enum_map(enum_map_storage.ptr());
     // Add a become mapping from the old instances to the new instances.
-    enum_fields = fields();
-    for (intptr_t i = 0; i < enum_fields.Length(); i++) {
-      field = Field::RawCast(enum_fields.At(i));
-      enum_ident = field.name();
-      if (!field.is_static()) {
-        // Enum instances are only held in static fields.
-        continue;
-      }
-      if (enum_ident.Equals(Symbols::Values())) {
-        enum_values = field.StaticValue();
-        // Non-enum instance.
-        continue;
-      }
-      if (enum_ident.Equals(Symbols::_DeletedEnumSentinel())) {
-        deleted_enum_sentinel = field.StaticValue();
-        // Non-enum instance.
-        continue;
-      }
-      enum_value = field.StaticValue();
+    for (intptr_t i = 0, n = enum_values.Length(); i < n; ++i) {
+      enum_value ^= enum_values.At(i);
       ASSERT(!enum_value.IsNull());
+      enum_ident ^= enum_value.GetField(field);
+
       old_enum_value ^= enum_map.GetOrNull(enum_ident);
       if (old_enum_value.IsNull()) {
         VTIR_Print("New element %s was not found in mapping\n",
@@ -305,25 +393,21 @@ void Class::ReplaceEnum(const Class& old_enum) const {
                    enum_ident.ToCString());
         bool removed = enum_map.Remove(enum_ident);
         ASSERT(removed);
-        reload_context->AddEnumBecomeMapping(old_enum_value, enum_value);
+        reload_context->AddBecomeMapping(old_enum_value, enum_value);
       }
     }
     enums_deleted = enum_map.NumOccupied() > 0;
     // The storage given to the map may have been reallocated, remember the new
     // address.
-    enum_map_storage = enum_map.Release().raw();
+    enum_map_storage = enum_map.Release().ptr();
   }
 
   // Map the old E.values array to the new E.values array.
-  ASSERT(!old_enum_values.IsNull());
-  ASSERT(!enum_values.IsNull());
-  reload_context->AddEnumBecomeMapping(old_enum_values, enum_values);
+  reload_context->AddBecomeMapping(old_enum_values, enum_values);
 
   // Map the old E._deleted_enum_sentinel to the new E._deleted_enum_sentinel.
-  ASSERT(!old_deleted_enum_sentinel.IsNull());
-  ASSERT(!deleted_enum_sentinel.IsNull());
-  reload_context->AddEnumBecomeMapping(old_deleted_enum_sentinel,
-                                       deleted_enum_sentinel);
+  reload_context->AddBecomeMapping(old_deleted_enum_sentinel,
+                                   deleted_enum_sentinel);
 
   if (enums_deleted) {
     // Map all deleted enums to the deleted enum sentinel value.
@@ -332,7 +416,7 @@ void Class::ReplaceEnum(const Class& old_enum) const {
         "The following enum values were deleted from %s and will become the "
         "deleted enum sentinel:\n",
         old_enum.ToCString());
-    UnorderedHashMap<EnumMapTraits> enum_map(enum_map_storage.raw());
+    UnorderedHashMap<EnumMapTraits> enum_map(enum_map_storage.ptr());
     UnorderedHashMap<EnumMapTraits>::Iterator it(&enum_map);
     while (it.MoveNext()) {
       const intptr_t entry = it.Current();
@@ -340,13 +424,11 @@ void Class::ReplaceEnum(const Class& old_enum) const {
       ASSERT(!enum_ident.IsNull());
       old_enum_value ^= enum_map.GetOrNull(enum_ident);
       VTIR_Print("Element `%s` was deleted\n", enum_ident.ToCString());
-      reload_context->AddEnumBecomeMapping(old_enum_value,
-                                           deleted_enum_sentinel);
+      reload_context->AddBecomeMapping(old_enum_value, deleted_enum_sentinel);
     }
     enum_map.Release();
   }
 }
-
 
 void Class::PatchFieldsAndFunctions() const {
   // Move all old functions and fields to a patch class so that they
@@ -354,8 +436,11 @@ void Class::PatchFieldsAndFunctions() const {
   const PatchClass& patch =
       PatchClass::Handle(PatchClass::New(*this, Script::Handle(script())));
   ASSERT(!patch.IsNull());
+  const Library& lib = Library::Handle(library());
+  patch.set_library_kernel_data(ExternalTypedData::Handle(lib.kernel_data()));
+  patch.set_library_kernel_offset(lib.kernel_offset());
 
-  const Array& funcs = Array::Handle(functions());
+  const Array& funcs = Array::Handle(current_functions());
   Function& func = Function::Handle();
   Object& owner = Object::Handle();
   for (intptr_t i = 0; i < funcs.Length(); i++) {
@@ -373,11 +458,13 @@ void Class::PatchFieldsAndFunctions() const {
     owner = func.RawOwner();
     ASSERT(!owner.IsNull());
     if (!owner.IsPatchClass()) {
-      ASSERT(owner.raw() == this->raw());
+      ASSERT(owner.ptr() == this->ptr());
       func.set_owner(patch);
     }
   }
 
+  Thread* thread = Thread::Current();
+  SafepointWriteRwLocker ml(thread, thread->isolate_group()->program_lock());
   const Array& field_list = Array::Handle(fields());
   Field& field = Field::Handle();
   for (intptr_t i = 0; i < field_list.Length(); i++) {
@@ -385,27 +472,27 @@ void Class::PatchFieldsAndFunctions() const {
     owner = field.RawOwner();
     ASSERT(!owner.IsNull());
     if (!owner.IsPatchClass()) {
-      ASSERT(owner.raw() == this->raw());
+      ASSERT(owner.ptr() == this->ptr());
       field.set_owner(patch);
     }
     field.ForceDynamicGuardedCidAndLength();
   }
 }
 
-
-void Class::MigrateImplicitStaticClosures(IsolateReloadContext* irc,
+void Class::MigrateImplicitStaticClosures(ProgramReloadContext* irc,
                                           const Class& new_cls) const {
-  const Array& funcs = Array::Handle(functions());
+  const Array& funcs = Array::Handle(current_functions());
+  Thread* thread = Thread::Current();
   Function& old_func = Function::Handle();
   String& selector = String::Handle();
   Function& new_func = Function::Handle();
-  Instance& old_closure = Instance::Handle();
-  Instance& new_closure = Instance::Handle();
+  Closure& old_closure = Closure::Handle();
+  Closure& new_closure = Closure::Handle();
   for (intptr_t i = 0; i < funcs.Length(); i++) {
     old_func ^= funcs.At(i);
     if (old_func.is_static() && old_func.HasImplicitClosureFunction()) {
       selector = old_func.name();
-      new_func = new_cls.LookupFunction(selector);
+      new_func = Resolver::ResolveFunction(thread->zone(), new_cls, selector);
       if (!new_func.IsNull() && new_func.is_static()) {
         old_func = old_func.ImplicitClosureFunction();
         old_closure = old_func.ImplicitStaticClosure();
@@ -420,13 +507,12 @@ void Class::MigrateImplicitStaticClosures(IsolateReloadContext* irc,
   }
 }
 
-
 class EnumClassConflict : public ClassReasonForCancelling {
  public:
   EnumClassConflict(Zone* zone, const Class& from, const Class& to)
       : ClassReasonForCancelling(zone, from, to) {}
 
-  RawString* ToString() {
+  StringPtr ToString() {
     return String::NewFormatted(
         from_.is_enum_class()
             ? "Enum class cannot be redefined to be a non-enum class: %s"
@@ -434,7 +520,6 @@ class EnumClassConflict : public ClassReasonForCancelling {
         from_.ToCString());
   }
 };
-
 
 class EnsureFinalizedError : public ClassReasonForCancelling {
  public:
@@ -447,11 +532,34 @@ class EnsureFinalizedError : public ClassReasonForCancelling {
  private:
   const Error& error_;
 
-  RawError* ToError() { return error_.raw(); }
+  ErrorPtr ToError() { return error_.ptr(); }
 
-  RawString* ToString() { return String::New(error_.ToErrorCString()); }
+  StringPtr ToString() { return String::New(error_.ToErrorCString()); }
 };
 
+class ConstToNonConstClass : public ClassReasonForCancelling {
+ public:
+  ConstToNonConstClass(Zone* zone, const Class& from, const Class& to)
+      : ClassReasonForCancelling(zone, from, to) {}
+
+ private:
+  StringPtr ToString() {
+    return String::NewFormatted("Const class cannot become non-const: %s",
+                                from_.ToCString());
+  }
+};
+
+class ConstClassFieldRemoved : public ClassReasonForCancelling {
+ public:
+  ConstClassFieldRemoved(Zone* zone, const Class& from, const Class& to)
+      : ClassReasonForCancelling(zone, from, to) {}
+
+ private:
+  StringPtr ToString() {
+    return String::NewFormatted("Const class cannot remove fields: %s",
+                                from_.ToCString());
+  }
+};
 
 class NativeFieldsConflict : public ClassReasonForCancelling {
  public:
@@ -459,19 +567,18 @@ class NativeFieldsConflict : public ClassReasonForCancelling {
       : ClassReasonForCancelling(zone, from, to) {}
 
  private:
-  RawString* ToString() {
+  StringPtr ToString() {
     return String::NewFormatted("Number of native fields changed in %s",
                                 from_.ToCString());
   }
 };
-
 
 class TypeParametersChanged : public ClassReasonForCancelling {
  public:
   TypeParametersChanged(Zone* zone, const Class& from, const Class& to)
       : ClassReasonForCancelling(zone, from, to) {}
 
-  RawString* ToString() {
+  StringPtr ToString() {
     return String::NewFormatted(
         "Limitation: type parameters have changed for %s", from_.ToCString());
   }
@@ -487,14 +594,13 @@ class TypeParametersChanged : public ClassReasonForCancelling {
   }
 };
 
-
 class PreFinalizedConflict : public ClassReasonForCancelling {
  public:
   PreFinalizedConflict(Zone* zone, const Class& from, const Class& to)
       : ClassReasonForCancelling(zone, from, to) {}
 
  private:
-  RawString* ToString() {
+  StringPtr ToString() {
     return String::NewFormatted(
         "Original class ('%s') is prefinalized and replacement class "
         "('%s') is not ",
@@ -502,65 +608,60 @@ class PreFinalizedConflict : public ClassReasonForCancelling {
   }
 };
 
-
 class InstanceSizeConflict : public ClassReasonForCancelling {
  public:
   InstanceSizeConflict(Zone* zone, const Class& from, const Class& to)
       : ClassReasonForCancelling(zone, from, to) {}
 
  private:
-  RawString* ToString() {
+  StringPtr ToString() {
     return String::NewFormatted("Instance size mismatch between '%s' (%" Pd
                                 ") and replacement "
                                 "'%s' ( %" Pd ")",
-                                from_.ToCString(), from_.instance_size(),
-                                to_.ToCString(), to_.instance_size());
+                                from_.ToCString(), from_.host_instance_size(),
+                                to_.ToCString(), to_.host_instance_size());
   }
 };
-
-
-class UnimplementedDeferredLibrary : public ReasonForCancelling {
- public:
-  UnimplementedDeferredLibrary(Zone* zone,
-                               const Library& from,
-                               const Library& to,
-                               const String& name)
-      : ReasonForCancelling(zone), from_(from), to_(to), name_(name) {}
-
- private:
-  const Library& from_;
-  const Library& to_;
-  const String& name_;
-
-  RawString* ToString() {
-    const String& lib_url = String::Handle(to_.url());
-    from_.ToCString();
-    return String::NewFormatted(
-        "Reloading support for deferred loading has not yet been implemented:"
-        " library '%s' has deferred import '%s'",
-        lib_url.ToCString(), name_.ToCString());
-  }
-};
-
 
 // This is executed before iterating over the instances.
 void Class::CheckReload(const Class& replacement,
-                        IsolateReloadContext* context) const {
-  ASSERT(IsolateReloadContext::IsSameClass(*this, replacement));
+                        ProgramReloadContext* context) const {
+  ASSERT(ProgramReloadContext::IsSameClass(*this, replacement));
+
+  if (!is_declaration_loaded()) {
+    // The old class hasn't been used in any meaningful way, so the VM is okay
+    // with any change.
+    return;
+  }
+
+  // Ensure is_enum_class etc have been set.
+  replacement.EnsureDeclarationLoaded();
 
   // Class cannot change enum property.
   if (is_enum_class() != replacement.is_enum_class()) {
-    context->AddReasonForCancelling(new (context->zone()) EnumClassConflict(
-        context->zone(), *this, replacement));
+    context->group_reload_context()->AddReasonForCancelling(
+        new (context->zone())
+            EnumClassConflict(context->zone(), *this, replacement));
     return;
   }
 
   if (is_finalized()) {
+    // Make sure the declaration types parameter count matches for the two
+    // classes.
+    // ex. class A<int,B> {} cannot be replace with class A<B> {}.
+    auto group_context = context->group_reload_context();
+    if (NumTypeParameters() != replacement.NumTypeParameters()) {
+      group_context->AddReasonForCancelling(
+          new (context->zone())
+              TypeParametersChanged(context->zone(), *this, replacement));
+      return;
+    }
+
     // Ensure the replacement class is also finalized.
     const Error& error =
         Error::Handle(replacement.EnsureIsFinalized(Thread::Current()));
     if (!error.IsNull()) {
-      context->AddReasonForCancelling(
+      context->group_reload_context()->AddReasonForCancelling(
           new (context->zone())
               EnsureFinalizedError(context->zone(), *this, replacement, error));
       return;  // No reason to check other properties.
@@ -569,10 +670,58 @@ void Class::CheckReload(const Class& replacement,
     TIR_Print("Finalized replacement class for %s\n", ToCString());
   }
 
+  if (is_finalized() && is_const() && (constants() != Array::null()) &&
+      (Array::LengthOf(constants()) > 0)) {
+    // Consts can't become non-consts.
+    if (!replacement.is_const()) {
+      context->group_reload_context()->AddReasonForCancelling(
+          new (context->zone())
+              ConstToNonConstClass(context->zone(), *this, replacement));
+      return;
+    }
+
+    // Consts can't lose fields.
+    bool field_removed = false;
+    const Array& old_fields =
+        Array::Handle(OffsetToFieldMap(true /* original classes */));
+    const Array& new_fields = Array::Handle(replacement.OffsetToFieldMap());
+    if (new_fields.Length() < old_fields.Length()) {
+      field_removed = true;
+    } else {
+      Field& old_field = Field::Handle();
+      Field& new_field = Field::Handle();
+      String& old_name = String::Handle();
+      String& new_name = String::Handle();
+      for (intptr_t i = 0, n = old_fields.Length(); i < n; i++) {
+        old_field ^= old_fields.At(i);
+        new_field ^= new_fields.At(i);
+        if (old_field.IsNull() != new_field.IsNull()) {
+          field_removed = true;
+          break;
+        }
+        if (!old_field.IsNull()) {
+          old_name = old_field.name();
+          new_name = new_field.name();
+          if (!old_name.Equals(new_name)) {
+            field_removed = true;
+            break;
+          }
+        }
+      }
+    }
+    if (field_removed) {
+      context->group_reload_context()->AddReasonForCancelling(
+          new (context->zone())
+              ConstClassFieldRemoved(context->zone(), *this, replacement));
+      return;
+    }
+  }
+
   // Native field count cannot change.
   if (num_native_fields() != replacement.num_native_fields()) {
-    context->AddReasonForCancelling(new (context->zone()) NativeFieldsConflict(
-        context->zone(), *this, replacement));
+    context->group_reload_context()->AddReasonForCancelling(
+        new (context->zone())
+            NativeFieldsConflict(context->zone(), *this, replacement));
     return;
   }
 
@@ -586,11 +735,9 @@ void Class::CheckReload(const Class& replacement,
   if (is_prefinalized()) {
     if (!CanReloadPreFinalized(replacement, context)) return;
   }
-  ASSERT(is_finalized() == replacement.is_finalized());
   TIR_Print("Class `%s` can be reloaded (%" Pd " and %" Pd ")\n", ToCString(),
             id(), replacement.id());
 }
-
 
 bool Class::RequiresInstanceMorphing(const Class& replacement) const {
   // Get the field maps for both classes. These field maps walk the class
@@ -606,7 +753,9 @@ bool Class::RequiresInstanceMorphing(const Class& replacement) const {
   // Check that we have the same next field offset. This check is not
   // redundant with the one above because the instance OffsetToFieldMap
   // array length is based on the instance size (which may be aligned up).
-  if (next_field_offset() != replacement.next_field_offset()) return true;
+  if (host_next_field_offset() != replacement.host_next_field_offset()) {
+    return true;
+  }
 
   // Verify that field names / offsets match across the entire hierarchy.
   Field& field = Field::Handle();
@@ -628,145 +777,163 @@ bool Class::RequiresInstanceMorphing(const Class& replacement) const {
   return false;
 }
 
-
 bool Class::CanReloadFinalized(const Class& replacement,
-                               IsolateReloadContext* context) const {
-  // Make sure the declaration types matches for the two classes.
+                               ProgramReloadContext* context) const {
+  // Make sure the declaration types argument count matches for the two classes.
   // ex. class A<int,B> {} cannot be replace with class A<B> {}.
-
-  const AbstractType& dt = AbstractType::Handle(DeclarationType());
-  const AbstractType& replacement_dt =
-      AbstractType::Handle(replacement.DeclarationType());
-  if (!dt.Equals(replacement_dt)) {
-    context->AddReasonForCancelling(new (context->zone()) TypeParametersChanged(
-        context->zone(), *this, replacement));
+  auto group_context = context->group_reload_context();
+  auto shared_class_table =
+      group_context->isolate_group()->shared_class_table();
+  if (NumTypeArguments() != replacement.NumTypeArguments()) {
+    group_context->AddReasonForCancelling(
+        new (context->zone())
+            TypeParametersChanged(context->zone(), *this, replacement));
     return false;
   }
   if (RequiresInstanceMorphing(replacement)) {
-    context->AddInstanceMorpher(new (context->zone()) InstanceMorpher(
-        context->zone(), *this, replacement));
+    ASSERT(id() == replacement.id());
+    const classid_t cid = id();
+    // We unconditionally create an instance morpher. As a side effect of
+    // building the morpher, we will mark all new fields as late.
+    auto instance_morpher = InstanceMorpher::CreateFromClassDescriptors(
+        context->zone(), shared_class_table, *this, replacement);
+    group_context->EnsureHasInstanceMorpherFor(cid, instance_morpher);
   }
   return true;
 }
 
-
 bool Class::CanReloadPreFinalized(const Class& replacement,
-                                  IsolateReloadContext* context) const {
+                                  ProgramReloadContext* context) const {
   // The replacement class must also prefinalized.
   if (!replacement.is_prefinalized()) {
-    context->AddReasonForCancelling(new (context->zone()) PreFinalizedConflict(
-        context->zone(), *this, replacement));
+    context->group_reload_context()->AddReasonForCancelling(
+        new (context->zone())
+            PreFinalizedConflict(context->zone(), *this, replacement));
     return false;
   }
   // Check the instance sizes are equal.
-  if (instance_size() != replacement.instance_size()) {
-    context->AddReasonForCancelling(new (context->zone()) InstanceSizeConflict(
-        context->zone(), *this, replacement));
+  if (host_instance_size() != replacement.host_instance_size()) {
+    context->group_reload_context()->AddReasonForCancelling(
+        new (context->zone())
+            InstanceSizeConflict(context->zone(), *this, replacement));
     return false;
   }
   return true;
 }
 
-
 void Library::CheckReload(const Library& replacement,
-                          IsolateReloadContext* context) const {
-  // TODO(26878): If the replacement library uses deferred loading,
-  // reject it.  We do not yet support reloading deferred libraries.
+                          ProgramReloadContext* context) const {
+  // Carry over the loaded bit of any deferred prefixes.
+  Object& object = Object::Handle();
   LibraryPrefix& prefix = LibraryPrefix::Handle();
-  LibraryPrefixIterator it(replacement);
+  LibraryPrefix& original_prefix = LibraryPrefix::Handle();
+  String& name = String::Handle();
+  String& original_name = String::Handle();
+  DictionaryIterator it(replacement);
   while (it.HasNext()) {
-    prefix = it.GetNext();
-    if (prefix.is_deferred_load()) {
-      const String& prefix_name = String::Handle(prefix.name());
-      context->AddReasonForCancelling(
-          new (context->zone()) UnimplementedDeferredLibrary(
-              context->zone(), *this, replacement, prefix_name));
-      return;
+    object = it.GetNext();
+    if (!object.IsLibraryPrefix()) continue;
+    prefix ^= object.ptr();
+    if (!prefix.is_deferred_load()) continue;
+
+    name = prefix.name();
+    DictionaryIterator original_it(*this);
+    while (original_it.HasNext()) {
+      object = original_it.GetNext();
+      if (!object.IsLibraryPrefix()) continue;
+      original_prefix ^= object.ptr();
+      if (!original_prefix.is_deferred_load()) continue;
+      original_name = original_prefix.name();
+      if (!name.Equals(original_name)) continue;
+
+      // The replacement of the old prefix with the new prefix
+      // in Isolate::loaded_prefixes_set_ implicitly carried
+      // the loaded state over to the new prefix.
+      context->AddBecomeMapping(original_prefix, prefix);
     }
   }
 }
 
-
-static const Function* static_call_target = NULL;
-
-
-void ICData::Reset(Zone* zone) const {
-  if (is_static_call()) {
-    const Function& old_target = Function::Handle(zone, GetTargetAt(0));
-    if (old_target.IsNull()) {
+void CallSiteResetter::Reset(const ICData& ic) {
+  ICData::RebindRule rule = ic.rebind_rule();
+  if (rule == ICData::kInstance) {
+    const intptr_t num_args = ic.NumArgsTested();
+    const bool tracking_exactness = ic.is_tracking_exactness();
+    const intptr_t len = ic.Length();
+    // We need at least one non-sentinel entry to require a check
+    // for the smi fast path case.
+    if (num_args == 2 && len >= 2) {
+      if (ic.IsImmutable()) {
+        return;
+      }
+      name_ = ic.target_name();
+      const Class& smi_class = Class::Handle(zone_, Smi::Class());
+      const Function& smi_op_target = Function::Handle(
+          zone_, Resolver::ResolveDynamicAnyArgs(zone_, smi_class, name_));
+      GrowableArray<intptr_t> class_ids(2);
+      Function& target = Function::Handle(zone_);
+      ic.GetCheckAt(0, &class_ids, &target);
+      if ((target.ptr() == smi_op_target.ptr()) && (class_ids[0] == kSmiCid) &&
+          (class_ids[1] == kSmiCid)) {
+        // The smi fast path case, preserve the initial entry but reset the
+        // count.
+        ic.ClearCountAt(0, *this);
+        ic.WriteSentinelAt(1, *this);
+        entries_ = ic.entries();
+        entries_.Truncate(2 * ic.TestEntryLength());
+        return;
+      }
+      // Fall back to the normal behavior with cached empty ICData arrays.
+    }
+    entries_ = ICData::CachedEmptyICDataArray(num_args, tracking_exactness);
+    ic.set_entries(entries_);
+    ic.set_is_megamorphic(false);
+    return;
+  } else if (rule == ICData::kNoRebind || rule == ICData::kNSMDispatch) {
+    // TODO(30877) we should account for addition/removal of NSM.
+    // Don't rebind dispatchers.
+    return;
+  } else if (rule == ICData::kStatic || rule == ICData::kSuper) {
+    old_target_ = ic.GetTargetAt(0);
+    if (old_target_.IsNull()) {
       FATAL("old_target is NULL.\n");
     }
-    static_call_target = &old_target;
+    name_ = old_target_.name();
 
-    const String& selector = String::Handle(zone, old_target.name());
-    Function& new_target = Function::Handle(zone);
-    if (!old_target.is_static()) {
-      if (old_target.kind() == RawFunction::kConstructor) {
-        return;  // Super constructor call.
-      }
-      Function& caller = Function::Handle(zone);
-      caller ^= Owner();
-      ASSERT(!caller.is_static());
-      Class& cls = Class::Handle(zone, caller.Owner());
-      if (cls.raw() == old_target.Owner()) {
-        // Dispatcher.
-        if (caller.IsImplicitClosureFunction()) {
-          return;  // Tear-off.
-        }
-        if (caller.kind() == RawFunction::kNoSuchMethodDispatcher) {
-          // TODO(rmacnak): noSuchMethod might have been redefined.
-          return;
-        }
-        const Function& caller_parent =
-            Function::Handle(zone, caller.parent_function());
-        if (!caller_parent.IsNull()) {
-          if (caller_parent.kind() == RawFunction::kInvokeFieldDispatcher) {
-            return;  // Call-through-getter.
-          }
-        }
-        FATAL2("Unexpected dispatcher-like call site: %s from %s\n",
-               selector.ToCString(), caller.ToQualifiedCString());
-      }
-      // Super call.
-      cls = cls.SuperClass();
-      while (!cls.IsNull()) {
-        // TODO(rmacnak): Should use Resolver::ResolveDynamicAnyArgs to handle
-        // method-extractors and call-through-getters, but we're in a no
-        // safepoint scope here.
-        new_target = cls.LookupDynamicFunction(selector);
-        if (!new_target.IsNull()) {
-          break;
-        }
-        cls = cls.SuperClass();
+    if (rule == ICData::kStatic) {
+      ASSERT(old_target_.is_static() ||
+             old_target_.kind() == UntaggedFunction::kConstructor);
+      // This can be incorrect if the call site was an unqualified invocation.
+      new_cls_ = old_target_.Owner();
+      new_target_ = Resolver::ResolveFunction(zone_, new_cls_, name_);
+      if (new_target_.kind() != old_target_.kind()) {
+        new_target_ = Function::null();
       }
     } else {
-      // This can be incorrect if the call site was an unqualified invocation.
-      const Class& cls = Class::Handle(zone, old_target.Owner());
-      new_target = cls.LookupStaticFunction(selector);
+      // Super call.
+      caller_ = ic.Owner();
+      ASSERT(!caller_.is_static());
+      new_cls_ = caller_.Owner();
+      new_cls_ = new_cls_.SuperClass();
+      new_target_ = Resolver::ResolveDynamicAnyArgs(zone_, new_cls_, name_,
+                                                    /*allow_add=*/true);
     }
-
-    const Array& args_desc_array = Array::Handle(zone, arguments_descriptor());
-    ArgumentsDescriptor args_desc(args_desc_array);
-    if (new_target.IsNull() || !new_target.AreValidArguments(args_desc, NULL)) {
+    args_desc_array_ = ic.arguments_descriptor();
+    ArgumentsDescriptor args_desc(args_desc_array_);
+    if (new_target_.IsNull() ||
+        !new_target_.AreValidArguments(args_desc, NULL)) {
       // TODO(rmacnak): Patch to a NSME stub.
       VTIR_Print("Cannot rebind static call to %s from %s\n",
-                 old_target.ToCString(),
-                 Object::Handle(zone, Owner()).ToCString());
+                 old_target_.ToCString(),
+                 Object::Handle(zone_, ic.Owner()).ToCString());
       return;
     }
-    ClearAndSetStaticTarget(new_target);
+    ic.ClearAndSetStaticTarget(new_target_, *this);
   } else {
-    intptr_t num_args = NumArgsTested();
-    if (num_args == 2) {
-      ClearWithSentinel();
-    } else {
-      const Array& data_array =
-          Array::Handle(zone, CachedEmptyICDataArray(num_args));
-      set_ic_data_array(data_array);
-    }
+    FATAL("Unexpected rebind rule.");
   }
 }
 
-#endif  // !PRODUCT
+#endif  // !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
 
-}  // namespace dart.
+}  // namespace dart

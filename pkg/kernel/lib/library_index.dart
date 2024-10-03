@@ -1,6 +1,7 @@
 // Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
+
 library kernel.library_index;
 
 import 'ast.dart';
@@ -12,6 +13,7 @@ import 'ast.dart';
 class LibraryIndex {
   static const String getterPrefix = 'get:';
   static const String setterPrefix = 'set:';
+  static const String tearoffPrefix = 'get#';
 
   /// A special class name that can be used to access the top-level members
   /// of a library.
@@ -20,43 +22,46 @@ class LibraryIndex {
   final Map<String, _ClassTable> _libraries = <String, _ClassTable>{};
 
   /// Indexes the libraries with the URIs given in [libraryUris].
-  LibraryIndex(Program program, Iterable<String> libraryUris) {
-    for (var uri in libraryUris) {
-      _libraries[uri] = new _ClassTable();
-    }
-    for (var library in program.libraries) {
-      var index = _libraries['${library.importUri}'];
-      if (index != null) {
-        index.build(library);
+  LibraryIndex(Component component, Iterable<String> libraryUris)
+      : this.fromLibraries(component.libraries, libraryUris);
+
+  /// Indexes the libraries with the URIs given in [libraryUris].
+  LibraryIndex.fromLibraries(
+      Iterable<Library> libraries, Iterable<String> libraryUris) {
+    Set<String> libraryUriSet = libraryUris.toSet();
+    for (Library library in libraries) {
+      String uri = '${library.importUri}';
+      if (libraryUriSet.contains(uri)) {
+        _libraries[uri] = new _ClassTable(library);
       }
     }
   }
 
   /// Indexes the libraries with the URIs given in [libraryUris].
-  LibraryIndex.byUri(Program program, Iterable<Uri> libraryUris)
-      : this(program, libraryUris.map((uri) => '$uri'));
+  LibraryIndex.byUri(Component component, Iterable<Uri> libraryUris)
+      : this(component, libraryUris.map((uri) => '$uri'));
 
-  /// Indexes the libraries with the URIs given in [libraryUris].
-  LibraryIndex.coreLibraries(Program program) {
-    for (var library in program.libraries) {
-      if (library.importUri.scheme == 'dart') {
-        _libraries['${library.importUri}'] = new _ClassTable()..build(library);
+  /// Indexes `dart:` libraries.
+  LibraryIndex.coreLibraries(Component component) {
+    for (Library library in component.libraries) {
+      if (library.importUri.isScheme('dart')) {
+        _libraries['${library.importUri}'] = new _ClassTable(library);
       }
     }
   }
 
-  /// Indexes the entire program.
+  /// Indexes the entire component.
   ///
   /// Consider using another constructor to only index the libraries that
   /// are needed.
-  LibraryIndex.all(Program program) {
-    for (var library in program.libraries) {
-      _libraries['${library.importUri}'] = new _ClassTable()..build(library);
+  LibraryIndex.all(Component component) {
+    for (Library library in component.libraries) {
+      _libraries['${library.importUri}'] = new _ClassTable(library);
     }
   }
 
   _ClassTable _getLibraryIndex(String uri) {
-    _ClassTable libraryIndex = _libraries[uri];
+    _ClassTable? libraryIndex = _libraries[uri];
     if (libraryIndex == null) {
       throw "The library '$uri' has not been indexed";
     }
@@ -69,7 +74,7 @@ class LibraryIndex {
   Library getLibrary(String uri) => _getLibraryIndex(uri).library;
 
   /// Like [getLibrary] but returns `null` if not found.
-  Library tryGetLibrary(String uri) => _libraries[uri]?.library;
+  Library? tryGetLibrary(String uri) => _libraries[uri]?.library;
 
   /// True if the library with the given URI exists and was indexed.
   bool containsLibrary(String uri) => _libraries.containsKey(uri);
@@ -82,7 +87,7 @@ class LibraryIndex {
   }
 
   /// Like [getClass] but returns `null` if not found.
-  Class tryGetClass(String library, String className) {
+  Class? tryGetClass(String library, String className) {
     return _libraries[library]?.tryGetClass(className);
   }
 
@@ -104,8 +109,21 @@ class LibraryIndex {
   }
 
   /// Like [getMember] but returns `null` if not found.
-  Member tryGetMember(String library, String className, String memberName) {
+  Member? tryGetMember(String library, String className, String memberName) {
     return _libraries[library]?.tryGetMember(className, memberName);
+  }
+
+  Constructor getConstructor(
+      String library, String className, String memberName) {
+    return _getLibraryIndex(library).getConstructor(className, memberName);
+  }
+
+  Procedure getProcedure(String library, String className, String memberName) {
+    return _getLibraryIndex(library).getProcedure(className, memberName);
+  }
+
+  Field getField(String library, String className, String memberName) {
+    return _getLibraryIndex(library).getField(className, memberName);
   }
 
   /// Returns the top-level member with the given name, in the given library.
@@ -123,36 +141,56 @@ class LibraryIndex {
   }
 
   /// Like [getTopLevelMember] but returns `null` if not found.
-  Member tryGetTopLevelMember(
+  Member? tryGetTopLevelMember(
       String library, String className, String memberName) {
     return tryGetMember(library, topLevel, memberName);
+  }
+
+  Procedure getTopLevelProcedure(String library, String memberName) {
+    return getProcedure(library, topLevel, memberName);
+  }
+
+  Field getTopLevelField(String library, String memberName) {
+    return getField(library, topLevel, memberName);
   }
 }
 
 class _ClassTable {
-  Library library;
-  final Map<String, _MemberTable> classes = <String, _MemberTable>{};
+  final Library library;
 
-  void build(Library library) {
-    this.library = library;
-    classes[LibraryIndex.topLevel] = new _MemberTable.topLevel(this);
-    for (var class_ in library.classes) {
-      classes[class_.name] = new _MemberTable(this, class_);
+  Map<String, _MemberTable>? _classes;
+
+  _ClassTable(this.library);
+
+  Map<String, _MemberTable> get classes {
+    if (_classes == null) {
+      _classes = <String, _MemberTable>{};
+      _classes![LibraryIndex.topLevel] = new _MemberTable.topLevel(this);
+      for (Class class_ in library.classes) {
+        _classes![class_.name] = new _MemberTable.fromClass(this, class_);
+      }
+      for (Extension extension_ in library.extensions) {
+        _classes![extension_.name] =
+            new _MemberTable.fromExtension(this, extension_);
+      }
+      for (Reference reference in library.additionalExports) {
+        NamedNode? node = reference.node;
+        if (node is Class) {
+          _classes![node.name] = new _MemberTable.fromClass(this, node);
+        } else if (node is Extension) {
+          _classes![node.name] = new _MemberTable.fromExtension(this, node);
+        }
+      }
     }
+    return _classes!;
   }
 
   String get containerName {
-    // For useful error messages, it can be helpful to indicate if the library
-    // is external.  If a class or member was not found in an external library,
-    // it might be that it exists in the actual library, but its interface was
-    // not included in this build unit.
-    return library.isExternal
-        ? "external library '${library.importUri}'"
-        : "library '${library.importUri}'";
+    return "library '${library.importUri}'";
   }
 
   _MemberTable _getClassIndex(String name) {
-    var indexer = classes[name];
+    _MemberTable? indexer = classes[name];
     if (indexer == null) {
       throw "Class '$name' not found in $containerName";
     }
@@ -160,10 +198,10 @@ class _ClassTable {
   }
 
   Class getClass(String name) {
-    return _getClassIndex(name).class_;
+    return _getClassIndex(name).class_!;
   }
 
-  Class tryGetClass(String name) {
+  Class? tryGetClass(String name) {
     return classes[name]?.class_;
   }
 
@@ -171,61 +209,116 @@ class _ClassTable {
     return _getClassIndex(className).getMember(memberName);
   }
 
-  Member tryGetMember(String className, String memberName) {
+  Member? tryGetMember(String className, String memberName) {
     return classes[className]?.tryGetMember(memberName);
+  }
+
+  Constructor getConstructor(String className, String memberName) {
+    return _getClassIndex(className).getConstructor(memberName);
+  }
+
+  Procedure getProcedure(String className, String memberName) {
+    return _getClassIndex(className).getProcedure(memberName);
+  }
+
+  Field getField(String className, String memberName) {
+    return _getClassIndex(className).getField(memberName);
   }
 }
 
 class _MemberTable {
   final _ClassTable parent;
-  final Class class_; // Null for top-level.
-  final Map<String, Member> members = <String, Member>{};
+  final Class? class_; // Null for top-level or extension.
+  final Extension? extension_; // Null for top-level or class.
+  Map<String, Member>? _members;
 
   Library get library => parent.library;
 
-  _MemberTable(this.parent, this.class_) {
-    class_.procedures.forEach(addMember);
-    class_.fields.forEach(addMember);
-    class_.constructors.forEach(addMember);
-  }
+  _MemberTable.fromClass(this.parent, this.class_) : extension_ = null;
+  _MemberTable.fromExtension(this.parent, this.extension_) : class_ = null;
+  _MemberTable.topLevel(this.parent)
+      : class_ = null,
+        extension_ = null;
 
-  _MemberTable.topLevel(this.parent) : class_ = null {
-    library.procedures.forEach(addMember);
-    library.fields.forEach(addMember);
+  Map<String, Member> get members {
+    if (_members == null) {
+      _members = <String, Member>{};
+      if (class_ != null) {
+        class_!.procedures.forEach(_addMember);
+        class_!.fields.forEach(_addMember);
+        class_!.constructors.forEach(_addMember);
+      } else if (extension_ != null) {
+        extension_!.members.forEach(_addExtensionMember);
+      } else {
+        library.procedures.forEach(_addMember);
+        library.fields.forEach(_addMember);
+      }
+    }
+    return _members!;
   }
 
   String getDisambiguatedName(Member member) {
     if (member is Procedure) {
-      if (member.isGetter) return LibraryIndex.getterPrefix + member.name.name;
-      if (member.isSetter) return LibraryIndex.setterPrefix + member.name.name;
+      if (member.isGetter) return LibraryIndex.getterPrefix + member.name.text;
+      if (member.isSetter) return LibraryIndex.setterPrefix + member.name.text;
     }
-    return member.name.name;
+    return member.name.text;
   }
 
-  void addMember(Member member) {
+  void _addMember(Member member) {
     if (member.name.isPrivate && member.name.library != library) {
       // Members whose name is private to other libraries cannot currently
       // be found with the LibraryIndex class.
       return;
     }
-    members[getDisambiguatedName(member)] = member;
+    _members![getDisambiguatedName(member)] = member;
+  }
+
+  String getDisambiguatedExtensionName(
+      ExtensionMemberDescriptor extensionMember) {
+    if (extensionMember.kind == ExtensionMemberKind.TearOff) {
+      return LibraryIndex.tearoffPrefix + extensionMember.name.text;
+    }
+    if (extensionMember.kind == ExtensionMemberKind.Getter) {
+      return LibraryIndex.getterPrefix + extensionMember.name.text;
+    }
+    if (extensionMember.kind == ExtensionMemberKind.Setter) {
+      return LibraryIndex.setterPrefix + extensionMember.name.text;
+    }
+    return extensionMember.name.text;
+  }
+
+  void _addExtensionMember(ExtensionMemberDescriptor extensionMember) {
+    final NamedNode? replacement = extensionMember.member.node;
+    if (replacement is! Member) return;
+    Member member = replacement;
+    if (member.name.isPrivate && member.name.library != library) {
+      // Members whose name is private to other libraries cannot currently
+      // be found with the LibraryIndex class.
+      return;
+    }
+
+    final String name = getDisambiguatedExtensionName(extensionMember);
+    _members![name] = replacement;
   }
 
   String get containerName {
-    if (class_ == null) {
-      return "top-level of ${parent.containerName}";
+    if (class_ != null) {
+      return "class '${class_!.name}' in ${parent.containerName}";
+    } else if (extension_ != null) {
+      return "extension '${extension_!.name}' in ${parent.containerName}";
     } else {
-      return "class '${class_.name}' in ${parent.containerName}";
+      return "top-level of ${parent.containerName}";
     }
   }
 
   Member getMember(String name) {
-    var member = members[name];
+    Member? member = members[name];
     if (member == null) {
       String message = "A member with disambiguated name '$name' was not found "
           "in $containerName";
-      var getter = LibraryIndex.getterPrefix + name;
-      var setter = LibraryIndex.setterPrefix + name;
+      String getter = LibraryIndex.getterPrefix + name;
+      String setter = LibraryIndex.setterPrefix + name;
       if (members[getter] != null || members[setter] != null) {
         throw "$message. Did you mean '$getter' or '$setter'?";
       }
@@ -234,5 +327,32 @@ class _MemberTable {
     return member;
   }
 
-  Member tryGetMember(String name) => members[name];
+  Member? tryGetMember(String name) => members[name];
+
+  Constructor getConstructor(String name) {
+    Member member = getMember(name);
+    if (member is! Constructor) {
+      throw "Member '$name' in $containerName is not a Constructor: "
+          "${member} (${member.runtimeType}).";
+    }
+    return member;
+  }
+
+  Procedure getProcedure(String name) {
+    Member member = getMember(name);
+    if (member is! Procedure) {
+      throw "Member '$name' in $containerName is not a Procedure: "
+          "${member} (${member.runtimeType}).";
+    }
+    return member;
+  }
+
+  Field getField(String name) {
+    Member member = getMember(name);
+    if (member is! Field) {
+      throw "Member '$name' in $containerName is not a Field: "
+          "${member} (${member.runtimeType}).";
+    }
+    return member;
+  }
 }

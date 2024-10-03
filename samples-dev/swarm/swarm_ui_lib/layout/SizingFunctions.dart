@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of layout;
 
 // This file has classes representing the grid sizing functions
@@ -41,9 +43,7 @@ class FixedSizing extends SizingFunction {
   // we need to correctly track whether we're content sized during a layout
   bool _contentSized;
 
-  FixedSizing(this.length, [this.units = 'px'])
-      : super(),
-        _contentSized = false {
+  FixedSizing(this.length, [this.units = 'px']) : _contentSized = false {
     if (units != 'px' && units != '%') {
       // TODO(jmesserly): support other unit types
       throw new UnsupportedError('Units other than px and %');
@@ -80,7 +80,7 @@ class FixedSizing extends SizingFunction {
  */
 class FractionSizing extends SizingFunction {
   final num fractionValue;
-  FractionSizing(this.fractionValue) : super() {}
+  FractionSizing(this.fractionValue);
 
   bool get isFraction => true;
 
@@ -88,7 +88,7 @@ class FractionSizing extends SizingFunction {
 }
 
 class MinContentSizing extends SizingFunction {
-  const MinContentSizing() : super();
+  const MinContentSizing();
 
   bool get isMinContentSized => true;
 
@@ -96,7 +96,7 @@ class MinContentSizing extends SizingFunction {
 }
 
 class MaxContentSizing extends SizingFunction {
-  const MaxContentSizing() : super();
+  const MaxContentSizing();
 
   bool get isMaxContentSized {
     return true;

@@ -66,7 +66,7 @@ _resumeMainIsolateIfPaused() async {
 Future _sendMessage(String method, [Map args = const {}]) {
   var id = _requestId++;
   _pendingResponses[id] = new Completer();
-  socket.add(JSON.encode({
+  socket.add(jsonEncode({
     'jsonrpc': '2.0',
     'id': '$id',
     'method': '$method',
@@ -76,8 +76,8 @@ Future _sendMessage(String method, [Map args = const {}]) {
 }
 
 /// Handle all responses
-_handleResponse(String s) {
-  var json = JSON.decode(s);
+void _handleResponse(Object s) {
+  var json = jsonDecode(s);
   if (json['method'] != 'streamNotify') {
     var id = json['id'];
     if (id is String) id = int.parse(id);
@@ -151,8 +151,8 @@ _showProgress(newUsed, newCapacity, oldUsed, oldCapacity) {
       color: true);
 
   sb.write(' | ');
-  var maxUsed = max(lastMaxUsed, newUsed + oldUsed);
-  var maxCapacity = max(lastMaxCapacity, newCapacity + oldCapacity);
+  int maxUsed = max(lastMaxUsed, newUsed + oldUsed);
+  int maxCapacity = max(lastMaxCapacity, newCapacity + oldCapacity);
   _writeNumber(sb, lastMaxUsed, maxUsed);
   _writeNumber(sb, lastMaxCapacity, maxCapacity, color: true);
   stdout.write('$sb');
@@ -167,14 +167,19 @@ _showProgress(newUsed, newCapacity, oldUsed, oldCapacity) {
 
 const mega = 1024 * 1024;
 _writeNumber(sb, before, now, {color: false}) {
-  if (color) sb.write(before < now ? _RED : before > now ? _GREEN : '');
+  if (color)
+    sb.write(before < now
+        ? _RED
+        : before > now
+            ? _GREEN
+            : '');
   var string;
   if (now < 1024) {
     string = ' ${now}b';
   } else if (now < mega) {
-    string = ' ${(now/1024).toStringAsFixed(0)}K';
+    string = ' ${(now / 1024).toStringAsFixed(0)}K';
   } else {
-    string = ' ${(now/mega).toStringAsFixed(1)}M';
+    string = ' ${(now / mega).toStringAsFixed(1)}M';
   }
   if (string.length < 10) string = '${' ' * (8 - string.length)}$string';
   sb.write(string);

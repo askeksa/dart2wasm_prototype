@@ -4,12 +4,14 @@
 
 // Patch file for dart:developer library.
 
-import 'dart:_js_helper' show patch, ForceInline;
+import 'dart:_js_helper' show patch;
 import 'dart:_foreign_helper' show JS;
+import 'dart:async' show Zone;
+import 'dart:isolate';
 
 @patch
-@ForceInline()
-bool debugger({bool when: true, String message}) {
+@pragma('dart2js:tryInline')
+bool debugger({bool when = true, String? message}) {
   if (when) {
     JS('', 'debugger');
   }
@@ -17,26 +19,26 @@ bool debugger({bool when: true, String message}) {
 }
 
 @patch
-Object inspect(Object object) {
+Object? inspect(Object? object) {
   return object;
 }
 
 @patch
 void log(String message,
-    {DateTime time,
-    int sequenceNumber,
-    int level: 0,
-    String name: '',
-    Zone zone,
-    Object error,
-    StackTrace stackTrace}) {
+    {DateTime? time,
+    int? sequenceNumber,
+    int level = 0,
+    String name = '',
+    Zone? zone,
+    Object? error,
+    StackTrace? stackTrace}) {
   // TODO.
 }
 
-final _extensions = new Map<String, ServiceExtensionHandler>();
+final _extensions = <String, ServiceExtensionHandler>{};
 
 @patch
-ServiceExtensionHandler _lookupExtension(String method) {
+ServiceExtensionHandler? _lookupExtension(String method) {
   return _extensions[method];
 }
 
@@ -64,19 +66,13 @@ int _getTraceClock() {
 int _clockValue = 0;
 
 @patch
-int _getThreadCpuClock() {
-  return -1;
-}
-
-@patch
-void _reportCompleteEvent(int start, int startCpu, String category, String name,
-    String argumentsAsJson) {
+void _reportFlowEvent(
+    String category, String name, int type, int id, String argumentsAsJson) {
   // TODO.
 }
 
 @patch
-void _reportInstantEvent(
-    int start, String category, String name, String argumentsAsJson) {
+void _reportInstantEvent(String category, String name, String argumentsAsJson) {
   // TODO.
 }
 
@@ -86,13 +82,8 @@ int _getNextAsyncId() {
 }
 
 @patch
-int _getIsolateNum() {
-  return 0;
-}
-
-@patch
-void _reportTaskEvent(int start, int taskId, String phase, String category,
-    String name, String argumentsAsJson) {
+void _reportTaskEvent(int taskId, String phase, String category, String name,
+    String argumentsAsJson) {
   // TODO.
 }
 
@@ -112,12 +103,12 @@ void _getServerInfo(SendPort sendPort) {
 }
 
 @patch
-void _webServerControl(SendPort sendPort, bool enable) {
+void _webServerControl(SendPort sendPort, bool enable, bool? silenceOutput) {
   sendPort.send(null);
 }
 
 @patch
-String _getIsolateIDFromSendPort(SendPort sendPort) {
+String? _getIsolateIDFromSendPort(SendPort sendPort) {
   return null;
 }
 
@@ -131,7 +122,7 @@ class UserTag {
 }
 
 class _FakeUserTag implements UserTag {
-  static Map _instances = {};
+  static final _instances = <String, _FakeUserTag>{};
 
   _FakeUserTag.real(this.label);
 
@@ -143,13 +134,10 @@ class _FakeUserTag implements UserTag {
     }
     // Throw an exception if we've reached the maximum number of user tags.
     if (_instances.length == UserTag.MAX_USER_TAGS) {
-      throw new UnsupportedError(
+      throw UnsupportedError(
           'UserTag instance limit (${UserTag.MAX_USER_TAGS}) reached.');
     }
-    // Create a new instance and add it to the instance map.
-    var instance = new _FakeUserTag.real(label);
-    _instances[label] = instance;
-    return instance;
+    return _instances[label] = _FakeUserTag.real(label);
   }
 
   final String label;

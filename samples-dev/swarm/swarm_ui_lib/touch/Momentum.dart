@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of touch;
 
 /**
@@ -112,7 +114,7 @@ class _Move {
  * class at all.
  */
 class Solver {
-  static num solve(num fn(num), num targetY, num startX,
+  static num solve(num Function(num) fn, num targetY, num startX,
       [int maxIterations = 50]) {
     num lastX = 0;
     num lastY = fn(lastX);

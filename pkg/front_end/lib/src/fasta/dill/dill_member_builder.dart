@@ -5,61 +5,308 @@
 library fasta.dill_member_builder;
 
 import 'package:kernel/ast.dart'
-    show Constructor, Field, Member, Procedure, ProcedureKind;
+    show Constructor, Field, FunctionNode, Member, Procedure, ProcedureKind;
 
-import '../errors.dart' show internalError;
+import '../builder/builder.dart';
+import '../builder/constructor_builder.dart';
+import '../builder/field_builder.dart';
+import '../builder/member_builder.dart';
 
-import '../kernel/kernel_builder.dart'
-    show
-        Builder,
-        MemberBuilder,
-        isRedirectingGenerativeConstructorImplementation;
+import '../builder/procedure_builder.dart';
+import '../kernel/hierarchy/class_member.dart' show ClassMember;
+import '../kernel/hierarchy/members_builder.dart' show ClassMembersBuilder;
+import '../kernel/member_covariance.dart';
 
 import '../modifier.dart'
-    show abstractMask, constMask, externalMask, finalMask, staticMask;
+    show abstractMask, constMask, externalMask, finalMask, lateMask, staticMask;
 
-class DillMemberBuilder extends MemberBuilder {
+import '../problems.dart' show unhandled;
+
+abstract class DillMemberBuilder extends MemberBuilderImpl {
+  @override
   final int modifiers;
-
-  final Member member;
 
   DillMemberBuilder(Member member, Builder parent)
       : modifiers = computeModifiers(member),
-        member = member,
-        super(parent, member.fileOffset);
+        super(parent, member.fileOffset, member.fileUri);
 
-  Member get target => member;
+  @override
+  Member get member;
 
-  String get name => member.name.name;
+  @override
+  Iterable<Member> get exportedMembers => [member];
 
+  @override
+  String get debugName => "DillMemberBuilder";
+
+  @override
+  String get name => member.name.text;
+
+  @override
   bool get isConstructor => member is Constructor;
 
-  ProcedureKind get kind {
-    final member = this.member;
+  @override
+  ProcedureKind? get kind {
+    final Member member = this.member;
     return member is Procedure ? member.kind : null;
   }
 
+  @override
   bool get isRegularMethod => identical(ProcedureKind.Method, kind);
 
+  @override
   bool get isGetter => identical(ProcedureKind.Getter, kind);
 
+  @override
   bool get isSetter => identical(ProcedureKind.Setter, kind);
 
+  @override
   bool get isOperator => identical(ProcedureKind.Operator, kind);
 
+  @override
   bool get isFactory => identical(ProcedureKind.Factory, kind);
 
-  bool get isRedirectingGenerativeConstructor {
-    return isConstructor &&
-        isRedirectingGenerativeConstructorImplementation(member);
+  @override
+  bool get isSynthetic {
+    final Member member = this.member;
+    return member is Constructor && member.isSynthetic;
   }
 
-  bool get isSynthetic {
-    // TODO(ahe): Kernel should eventually support a synthetic bit.
-    return isConstructor &&
-        name == "" &&
-        (charOffset == parent.charOffset || charOffset == -1);
+  @override
+  bool get isAssignable => false;
+
+  List<ClassMember>? _localMembers;
+  List<ClassMember>? _localSetters;
+
+  @override
+  List<ClassMember> get localMembers => _localMembers ??= isSetter
+      ? const <ClassMember>[]
+      : <ClassMember>[new DillClassMember(this, forSetter: false)];
+
+  @override
+  List<ClassMember> get localSetters =>
+      _localSetters ??= isSetter || member is Field && member.hasSetter
+          ? <ClassMember>[new DillClassMember(this, forSetter: true)]
+          : const <ClassMember>[];
+}
+
+class DillFieldBuilder extends DillMemberBuilder implements FieldBuilder {
+  @override
+  final Field field;
+
+  DillFieldBuilder(this.field, Builder parent) : super(field, parent);
+
+  @override
+  Member get member => field;
+
+  @override
+  Member? get readTarget => field;
+
+  @override
+  Member? get writeTarget => isAssignable ? field : null;
+
+  @override
+  Member? get invokeTarget => field;
+
+  @override
+  bool get isField => true;
+
+  @override
+  bool get isAssignable => field.hasSetter;
+}
+
+abstract class DillProcedureBuilder extends DillMemberBuilder
+    implements ProcedureBuilder {
+  @override
+  final Procedure procedure;
+
+  DillProcedureBuilder(this.procedure, Builder parent)
+      : super(procedure, parent);
+
+  @override
+  ProcedureKind get kind => procedure.kind;
+
+  @override
+  FunctionNode get function => procedure.function;
+}
+
+class DillGetterBuilder extends DillProcedureBuilder {
+  DillGetterBuilder(Procedure procedure, Builder parent)
+      : assert(procedure.kind == ProcedureKind.Getter),
+        super(procedure, parent);
+
+  @override
+  Member get member => procedure;
+
+  @override
+  Member get readTarget => procedure;
+
+  @override
+  Member? get writeTarget => null;
+
+  @override
+  Member get invokeTarget => procedure;
+}
+
+class DillSetterBuilder extends DillProcedureBuilder {
+  DillSetterBuilder(Procedure procedure, Builder parent)
+      : assert(procedure.kind == ProcedureKind.Setter),
+        super(procedure, parent);
+
+  @override
+  Member get member => procedure;
+
+  @override
+  Member? get readTarget => null;
+
+  @override
+  Member get writeTarget => procedure;
+
+  @override
+  Member? get invokeTarget => null;
+}
+
+class DillMethodBuilder extends DillProcedureBuilder {
+  DillMethodBuilder(Procedure procedure, Builder parent)
+      : assert(procedure.kind == ProcedureKind.Method),
+        super(procedure, parent);
+
+  @override
+  Member get member => procedure;
+
+  @override
+  Member get readTarget => procedure;
+
+  @override
+  Member? get writeTarget => null;
+
+  @override
+  Member get invokeTarget => procedure;
+}
+
+class DillOperatorBuilder extends DillProcedureBuilder {
+  DillOperatorBuilder(Procedure procedure, Builder parent)
+      : assert(procedure.kind == ProcedureKind.Operator),
+        super(procedure, parent);
+
+  @override
+  Member get member => procedure;
+
+  @override
+  Member? get readTarget => null;
+
+  @override
+  Member? get writeTarget => null;
+
+  @override
+  Member get invokeTarget => procedure;
+}
+
+class DillFactoryBuilder extends DillProcedureBuilder {
+  final Procedure? _factoryTearOff;
+
+  DillFactoryBuilder(Procedure procedure, this._factoryTearOff, Builder parent)
+      : super(procedure, parent);
+
+  @override
+  Member get member => procedure;
+
+  @override
+  Member? get readTarget => _factoryTearOff ?? procedure;
+
+  @override
+  Member? get writeTarget => null;
+
+  @override
+  Member get invokeTarget => procedure;
+}
+
+class DillConstructorBuilder extends DillMemberBuilder
+    implements ConstructorBuilder {
+  @override
+  final Constructor constructor;
+  final Procedure? _constructorTearOff;
+
+  DillConstructorBuilder(
+      this.constructor, this._constructorTearOff, Builder parent)
+      : super(constructor, parent);
+
+  @override
+  FunctionNode get function => constructor.function;
+
+  @override
+  Constructor get member => constructor;
+
+  @override
+  Member? get readTarget => _constructorTearOff ?? constructor;
+
+  @override
+  Member? get writeTarget => null;
+
+  @override
+  Constructor get invokeTarget => constructor;
+}
+
+class DillClassMember extends BuilderClassMember {
+  @override
+  final DillMemberBuilder memberBuilder;
+
+  Covariance? _covariance;
+
+  @override
+  final bool forSetter;
+
+  DillClassMember(this.memberBuilder, {required this.forSetter})
+      // ignore: unnecessary_null_comparison
+      : assert(forSetter != null);
+
+  @override
+  bool get isSourceDeclaration => false;
+
+  @override
+  bool get isInternalImplementation {
+    Member member = memberBuilder.member;
+    return member is Field && member.isInternalImplementation;
   }
+
+  @override
+  bool get isProperty =>
+      memberBuilder.kind == null ||
+      memberBuilder.kind == ProcedureKind.Getter ||
+      memberBuilder.kind == ProcedureKind.Setter;
+
+  @override
+  bool get isSynthesized {
+    Member member = memberBuilder.member;
+    return member is Procedure && member.isSynthetic;
+  }
+
+  @override
+  Member getMember(ClassMembersBuilder membersBuilder) => memberBuilder.member;
+
+  @override
+  Covariance getCovariance(ClassMembersBuilder membersBuilder) {
+    return _covariance ??=
+        new Covariance.fromMember(memberBuilder.member, forSetter: forSetter);
+  }
+
+  @override
+  void inferType(ClassMembersBuilder hierarchy) {
+    // Do nothing; this is only for source members.
+  }
+
+  @override
+  void registerOverrideDependency(Set<ClassMember> overriddenMembers) {
+    // Do nothing; this is only for source members.
+  }
+
+  @override
+  bool isSameDeclaration(ClassMember other) {
+    return other is DillClassMember && memberBuilder == other.memberBuilder;
+  }
+
+  @override
+  String toString() => 'DillClassMember($memberBuilder,forSetter=${forSetter})';
 }
 
 int computeModifiers(Member member) {
@@ -68,6 +315,7 @@ int computeModifiers(Member member) {
   if (member is Field) {
     modifier |= member.isConst ? constMask : 0;
     modifier |= member.isFinal ? finalMask : 0;
+    modifier |= member.isLate ? lateMask : 0;
     modifier |= member.isStatic ? staticMask : 0;
   } else if (member is Procedure) {
     modifier |= member.isConst ? constMask : 0;
@@ -75,7 +323,9 @@ int computeModifiers(Member member) {
   } else if (member is Constructor) {
     modifier |= member.isConst ? constMask : 0;
   } else {
-    internalError("Unhandled: ${member.runtimeType}");
+    dynamic parent = member.parent;
+    unhandled("${member.runtimeType}", "computeModifiers", member.fileOffset,
+        Uri.base.resolve(parent.fileUri));
   }
   return modifier;
 }

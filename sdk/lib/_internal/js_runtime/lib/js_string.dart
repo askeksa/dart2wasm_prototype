@@ -4,16 +4,14 @@
 
 part of _interceptors;
 
-/**
- * The interceptor class for [String]. The compiler recognizes this
- * class as an interceptor, and changes references to [:this:] to
- * actually use the receiver of the method, which is generated as an extra
- * argument added to each member.
- */
+/// The interceptor class for [String]. The compiler recognizes this
+/// class as an interceptor, and changes references to [:this:] to
+/// actually use the receiver of the method, which is generated as an extra
+/// argument added to each member.
 class JSString extends Interceptor implements String, JSIndexable {
   const JSString();
 
-  @NoInline()
+  @pragma('dart2js:noInline')
   int codeUnitAt(int index) {
     if (index is! int) throw diagnoseIndexError(this, index);
     if (index < 0) throw diagnoseIndexError(this, index);
@@ -34,7 +32,7 @@ class JSString extends Interceptor implements String, JSIndexable {
     return allMatchesInStringUnchecked(this, string, start);
   }
 
-  Match matchAsPrefix(String string, [int start = 0]) {
+  Match? matchAsPrefix(String string, [int start = 0]) {
     if (start < 0 || start > string.length) {
       throw new RangeError.range(start, 0, string.length);
     }
@@ -61,16 +59,15 @@ class JSString extends Interceptor implements String, JSIndexable {
   }
 
   String replaceAll(Pattern from, String to) {
-    checkString(to);
-    return stringReplaceAllUnchecked(this, from, to);
+    return stringReplaceAllUnchecked(this, from, checkString(to));
   }
 
-  String replaceAllMapped(Pattern from, String convert(Match match)) {
+  String replaceAllMapped(Pattern from, String Function(Match) convert) {
     return this.splitMapJoin(from, onMatch: convert);
   }
 
   String splitMapJoin(Pattern from,
-      {String onMatch(Match match), String onNonMatch(String nonMatch)}) {
+      {String Function(Match)? onMatch, String Function(String)? onNonMatch}) {
     return stringReplaceAllFuncUnchecked(this, from, onMatch, onNonMatch);
   }
 
@@ -92,21 +89,21 @@ class JSString extends Interceptor implements String, JSIndexable {
   List<String> split(Pattern pattern) {
     checkNull(pattern);
     if (pattern is String) {
-      return JS('JSExtendableArray', r'#.split(#)', this, pattern);
+      return stringSplitUnchecked(this, pattern);
     } else if (pattern is JSSyntaxRegExp && regExpCaptureCount(pattern) == 0) {
       var re = regExpGetNative(pattern);
-      return JS('JSExtendableArray', r'#.split(#)', this, re);
+      return stringSplitUnchecked(this, re);
     } else {
       return _defaultSplit(pattern);
     }
   }
 
-  String replaceRange(int start, int end, String replacement) {
+  String replaceRange(int start, int? end, String replacement) {
     checkString(replacement);
     checkInt(start);
-    end = RangeError.checkValidRange(start, end, this.length);
-    checkInt(end);
-    return stringReplaceRangeUnchecked(this, start, end, replacement);
+    var e = RangeError.checkValidRange(start, end, this.length);
+    checkInt(e);
+    return stringReplaceRangeUnchecked(this, start, e, replacement);
   }
 
   List<String> _defaultSplit(Pattern pattern) {
@@ -152,14 +149,11 @@ class JSString extends Interceptor implements String, JSIndexable {
     return pattern.matchAsPrefix(this, index) != null;
   }
 
-  String substring(int startIndex, [int endIndex]) {
-    checkInt(startIndex);
-    if (endIndex == null) endIndex = length;
-    checkInt(endIndex);
-    if (startIndex < 0) throw new RangeError.value(startIndex);
-    if (startIndex > endIndex) throw new RangeError.value(startIndex);
-    if (endIndex > length) throw new RangeError.value(endIndex);
-    return JS('String', r'#.substring(#, #)', this, startIndex, endIndex);
+  @pragma('dart2js:noInline')
+  String substring(int start, [int? end]) {
+    checkInt(start);
+    end = RangeError.checkValidRange(start, end, this.length);
+    return JS('String', r'#.substring(#, #)', this, start, end);
   }
 
   String toLowerCase() {
@@ -355,7 +349,7 @@ class JSString extends Interceptor implements String, JSIndexable {
       throw const OutOfMemoryError();
     }
     var result = '';
-    var s = this;
+    String s = this;
     while (true) {
       if (times & 1 == 1) result = s + result;
       times = JS('JSUInt31', '# >>> 1', times);
@@ -392,7 +386,7 @@ class JSString extends Interceptor implements String, JSIndexable {
     }
     if (pattern is JSSyntaxRegExp) {
       JSSyntaxRegExp re = pattern;
-      Match match = firstMatchAfter(re, this, start);
+      Match? match = firstMatchAfter(re, this, start);
       return (match == null) ? -1 : match.start;
     }
     for (int i = start; i <= this.length; i++) {
@@ -401,7 +395,7 @@ class JSString extends Interceptor implements String, JSIndexable {
     return -1;
   }
 
-  int lastIndexOf(Pattern pattern, [int start]) {
+  int lastIndexOf(Pattern pattern, [int? start]) {
     checkNull(pattern);
     if (start == null) {
       start = length;
@@ -437,29 +431,31 @@ class JSString extends Interceptor implements String, JSIndexable {
 
   int compareTo(String other) {
     if (other is! String) throw argumentErrorValue(other);
-    return this == other ? 0 : JS('bool', r'# < #', this, other) ? -1 : 1;
+    return this == other
+        ? 0
+        : JS('bool', r'# < #', this, other)
+            ? -1
+            : 1;
   }
 
   // Note: if you change this, also change the function [S].
   String toString() => this;
 
-  /**
-   * This is the [Jenkins hash function][1] but using masking to keep
-   * values in SMI range.
-   *
-   * [1]: http://en.wikipedia.org/wiki/Jenkins_hash_function
-   */
+  /// This is the [Jenkins hash function][1] but using masking to keep
+  /// values in SMI range.
+  ///
+  /// [1]: http://en.wikipedia.org/wiki/Jenkins_hash_function
   int get hashCode {
     // TODO(ahe): This method shouldn't have to use JS. Update when our
     // optimizations are smarter.
     int hash = 0;
     for (int i = 0; i < length; i++) {
-      hash = 0x1fffffff & (hash + JS('int', r'#.charCodeAt(#)', this, i));
+      hash = 0x1fffffff & (hash + JS<int>('int', r'#.charCodeAt(#)', this, i));
       hash = 0x1fffffff & (hash + ((0x0007ffff & hash) << 10));
       hash = JS('int', '# ^ (# >> 6)', hash, hash);
     }
     hash = 0x1fffffff & (hash + ((0x03ffffff & hash) << 3));
-    hash = JS('int', '# ^ (# >> 11)', hash, hash);
+    hash = JS<int>('int', '# ^ (# >> 11)', hash, hash);
     return 0x1fffffff & (hash + ((0x00003fff & hash) << 15));
   }
 
@@ -469,7 +465,8 @@ class JSString extends Interceptor implements String, JSIndexable {
 
   String operator [](int index) {
     if (index is! int) throw diagnoseIndexError(this, index);
-    if (index >= length || index < 0) throw diagnoseIndexError(this, index);
+    // This form of the range test correctly rejects NaN.
+    if (!(index >= 0 && index < length)) throw diagnoseIndexError(this, index);
     return JS('String', '#[#]', this, index);
   }
 }

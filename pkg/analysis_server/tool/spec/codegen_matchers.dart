@@ -1,75 +1,66 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-/**
- * Code generation for the file "matchers.dart".
- */
-import 'dart:convert';
-
-import 'package:analyzer/src/codegen/tools.dart';
-import 'package:front_end/src/codegen/tools.dart';
+/// Code generation for the file "matchers.dart".
+import 'package:analyzer_utilities/tools.dart';
 
 import 'api.dart';
 import 'from_html.dart';
 import 'implied_types.dart';
 import 'to_html.dart';
 
-final GeneratedFile target = new GeneratedFile(
-    'test/integration/support/protocol_matchers.dart', (String pkgPath) {
-  CodegenMatchersVisitor visitor = new CodegenMatchersVisitor(readApi(pkgPath));
+final GeneratedFile target = GeneratedFile(
+    'test/integration/support/protocol_matchers.dart', (String pkgPath) async {
+  var visitor = CodegenMatchersVisitor(readApi(pkgPath));
   return visitor.collectCode(visitor.visitApi);
 });
 
 class CodegenMatchersVisitor extends HierarchicalApiVisitor with CodeGenerator {
-  /**
-   * Visitor used to produce doc comments.
-   */
+  /// Visitor used to produce doc comments.
   final ToHtmlVisitor toHtmlVisitor;
 
-  /**
-   * Short human-readable string describing the context of the matcher being
-   * created.
-   */
-  String context;
+  /// Short human-readable string describing the context of the matcher being
+  /// created.
+  late String context;
 
   CodegenMatchersVisitor(Api api)
-      : toHtmlVisitor = new ToHtmlVisitor(api),
+      : toHtmlVisitor = ToHtmlVisitor(api),
         super(api) {
     codeGeneratorSettings.commentLineLength = 79;
+    codeGeneratorSettings.docCommentStartMarker = null;
+    codeGeneratorSettings.docCommentLineLeader = '/// ';
+    codeGeneratorSettings.docCommentEndMarker = null;
     codeGeneratorSettings.languageName = 'dart';
   }
 
-  /**
-   * Create a matcher for the part of the API called [name], optionally
-   * clarified by [nameSuffix].  The matcher should verify that its input
-   * matches the given [type].
-   */
+  /// Create a matcher for the part of the API called [name], optionally
+  /// clarified by [nameSuffix].  The matcher should verify that its input
+  /// matches the given [type].
   void makeMatcher(ImpliedType impliedType) {
     context = impliedType.humanReadableName;
+    var impliedTypeType = impliedType.type;
     docComment(toHtmlVisitor.collectHtml(() {
       toHtmlVisitor.p(() {
         toHtmlVisitor.write(context);
       });
-      if (impliedType.type != null) {
-        toHtmlVisitor.showType(null, impliedType.type);
+      if (impliedTypeType != null) {
+        toHtmlVisitor.showType(null, impliedTypeType);
       }
     }));
     write('final Matcher ${camelJoin(['is', impliedType.camelName])} = ');
-    if (impliedType.type == null) {
+    if (impliedTypeType == null) {
       write('isNull');
     } else {
-      visitTypeDecl(impliedType.type);
+      visitTypeDecl(impliedTypeType);
     }
     writeln(';');
     writeln();
   }
 
-  /**
-   * Generate a map describing the given set of fields, for use as the
-   * 'requiredFields' or 'optionalFields' argument to the [MatchesJsonObject]
-   * constructor.
-   */
+  /// Generate a map describing the given set of fields, for use as the
+  /// 'requiredFields' or 'optionalFields' argument to the [MatchesJsonObject]
+  /// constructor.
   void outputObjectFields(Iterable<TypeObjectField> fields) {
     if (fields.isEmpty) {
       write('null');
@@ -77,14 +68,14 @@ class CodegenMatchersVisitor extends HierarchicalApiVisitor with CodeGenerator {
     }
     writeln('{');
     indent(() {
-      bool commaNeeded = false;
-      for (TypeObjectField field in fields) {
+      var commaNeeded = false;
+      for (var field in fields) {
         if (commaNeeded) {
           writeln(',');
         }
-        write('${JSON.encode(field.name)}: ');
+        write("'${field.name}': ");
         if (field.value != null) {
-          write('equals(${JSON.encode(field.value)})');
+          write("equals('${field.value}')");
         } else {
           visitTypeDecl(field.type);
         }
@@ -96,34 +87,32 @@ class CodegenMatchersVisitor extends HierarchicalApiVisitor with CodeGenerator {
   }
 
   @override
-  visitApi() {
+  void visitApi() {
     outputHeader(year: '2017');
     writeln();
-    writeln('/**');
-    writeln(' * Matchers for data types defined in the analysis server API');
-    writeln(' */');
+    writeln('/// Matchers for data types defined in the analysis server API.');
     writeln("import 'package:test/test.dart';");
     writeln();
     writeln("import 'integration_tests.dart';");
     writeln();
-    List<ImpliedType> impliedTypes = computeImpliedTypes(api).values.toList();
+    var impliedTypes = computeImpliedTypes(api).values.toList();
     impliedTypes.sort((ImpliedType first, ImpliedType second) =>
         first.camelName.compareTo(second.camelName));
-    for (ImpliedType impliedType in impliedTypes) {
+    for (var impliedType in impliedTypes) {
       makeMatcher(impliedType);
     }
   }
 
   @override
-  visitTypeEnum(TypeEnum typeEnum) {
-    writeln('new MatchesEnum(${JSON.encode(context)}, [');
+  void visitTypeEnum(TypeEnum typeEnum) {
+    writeln("MatchesEnum('$context', [");
     indent(() {
-      bool commaNeeded = false;
-      for (TypeEnumValue value in typeEnum.values) {
+      var commaNeeded = false;
+      for (var value in typeEnum.values) {
         if (commaNeeded) {
           writeln(',');
         }
-        write('${JSON.encode(value.value)}');
+        write("'${value.value}'");
         commaNeeded = true;
       }
       writeln();
@@ -132,14 +121,14 @@ class CodegenMatchersVisitor extends HierarchicalApiVisitor with CodeGenerator {
   }
 
   @override
-  visitTypeList(TypeList typeList) {
+  void visitTypeList(TypeList typeList) {
     write('isListOf(');
     visitTypeDecl(typeList.itemType);
     write(')');
   }
 
   @override
-  visitTypeMap(TypeMap typeMap) {
+  void visitTypeMap(TypeMap typeMap) {
     write('isMapOf(');
     visitTypeDecl(typeMap.keyType);
     write(', ');
@@ -149,13 +138,13 @@ class CodegenMatchersVisitor extends HierarchicalApiVisitor with CodeGenerator {
 
   @override
   void visitTypeObject(TypeObject typeObject) {
-    writeln('new LazyMatcher(() => new MatchesJsonObject(');
+    writeln('LazyMatcher(() => MatchesJsonObject(');
     indent(() {
-      write('${JSON.encode(context)}, ');
-      Iterable<TypeObjectField> requiredFields =
+      write("'$context', ");
+      var requiredFields =
           typeObject.fields.where((TypeObjectField field) => !field.optional);
       outputObjectFields(requiredFields);
-      List<TypeObjectField> optionalFields = typeObject.fields
+      var optionalFields = typeObject.fields
           .where((TypeObjectField field) => field.optional)
           .toList();
       if (optionalFields.isNotEmpty) {
@@ -168,7 +157,7 @@ class CodegenMatchersVisitor extends HierarchicalApiVisitor with CodeGenerator {
 
   @override
   void visitTypeReference(TypeReference typeReference) {
-    String typeName = typeReference.typeName;
+    var typeName = typeReference.typeName;
     if (typeName == 'long') {
       typeName = 'int';
     }
@@ -177,9 +166,9 @@ class CodegenMatchersVisitor extends HierarchicalApiVisitor with CodeGenerator {
 
   @override
   void visitTypeUnion(TypeUnion typeUnion) {
-    bool commaNeeded = false;
+    var commaNeeded = false;
     write('isOneOf([');
-    for (TypeDecl choice in typeUnion.choices) {
+    for (var choice in typeUnion.choices) {
       if (commaNeeded) {
         write(', ');
       }

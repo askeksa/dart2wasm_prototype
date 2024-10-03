@@ -5,17 +5,16 @@
 library compiler.src.inferrer.node_tracer;
 
 import '../common/names.dart' show Identifiers;
-import '../compiler.dart' show Compiler;
-import '../elements/elements.dart';
-import '../types/types.dart' show ContainerTypeMask, MapTypeMask;
+import '../elements/entities.dart';
 import '../util/util.dart' show Setlet;
+import 'abstract_value_domain.dart';
 import 'debug.dart' as debug;
 import 'inferrer_engine.dart';
 import 'type_graph_nodes.dart';
 
 // A set of selectors we know do not escape the elements inside the
 // list.
-Set<String> doesNotEscapeListSet = new Set<String>.from(const <String>[
+Set<String> doesNotEscapeListSet = Set<String>.from(const <String>[
   // From Object.
   '==',
   'hashCode',
@@ -52,7 +51,32 @@ Set<String> doesNotEscapeListSet = new Set<String>.from(const <String>[
   'checkGrowable',
 ]);
 
-Set<String> doesNotEscapeMapSet = new Set<String>.from(const <String>[
+Set<String> doesNotEscapeSetSet = Set<String>.from(const <String>[
+  // From Object.
+  '==',
+  'hashCode',
+  'toString',
+  'noSuchMethod',
+  'runtimeType',
+
+  // From Iterable.
+  'isEmpty',
+  'isNotEmpty',
+  'length',
+  'contains',
+  'join',
+
+  // From Set.
+  'add',
+  'addAll',
+  'clear',
+  'containsAll',
+  'remove',
+  'removeAll',
+  'retainAll',
+]);
+
+Set<String> doesNotEscapeMapSet = Set<String>.from(const <String>[
   // From Object.
   '==',
   'hashCode',
@@ -75,30 +99,33 @@ Set<String> doesNotEscapeMapSet = new Set<String>.from(const <String>[
 abstract class TracerVisitor implements TypeInformationVisitor {
   final TypeInformation tracedType;
   final InferrerEngine inferrer;
-  final Compiler compiler;
 
   static const int MAX_ANALYSIS_COUNT =
-      const int.fromEnvironment('dart2js.tracing.limit', defaultValue: 32);
-  final Setlet<Element> analyzedElements = new Setlet<Element>();
+      int.fromEnvironment('dart2js.tracing.limit', defaultValue: 32);
+  final Setlet<MemberEntity> analyzedElements = Setlet<MemberEntity>();
 
-  TracerVisitor(this.tracedType, InferrerEngine inferrer)
-      : this.inferrer = inferrer,
-        this.compiler = inferrer.compiler;
+  TracerVisitor(this.tracedType, this.inferrer);
 
-  // Work list that gets populated with [TypeInformation] that could
-  // contain the container.
+  /// Work list that gets populated with [TypeInformation] that could
+  /// contain the container.
   final List<TypeInformation> workList = <TypeInformation>[];
 
-  // Work list of lists to analyze after analyzing the users of a
-  // [TypeInformation]. We know the [tracedType] has been stored in these
-  // lists and we must check how it escapes from these lists.
+  /// Work list of lists to analyze after analyzing the users of a
+  /// [TypeInformation]. We know the [tracedType] has been stored in these
+  /// lists and we must check how it escapes from these lists.
   final List<ListTypeInformation> listsToAnalyze = <ListTypeInformation>[];
-  // Work list of maps to analyze after analyzing the users of a
-  // [TypeInformation]. We know the [tracedType] has been stored in these
-  // maps and we must check how it escapes from these maps.
+
+  /// Work list of sets to analyze after analyzing the users of a
+  /// [TypeInformation]. We know the [tracedType] has been stored in these sets
+  /// and we must check how it escapes from these sets.
+  final List<SetTypeInformation> setsToAnalyze = <SetTypeInformation>[];
+
+  /// Work list of maps to analyze after analyzing the users of a
+  /// [TypeInformation]. We know the [tracedType] has been stored in these
+  /// maps and we must check how it escapes from these maps.
   final List<MapTypeInformation> mapsToAnalyze = <MapTypeInformation>[];
 
-  final Setlet<TypeInformation> flowsInto = new Setlet<TypeInformation>();
+  final Setlet<TypeInformation> flowsInto = Setlet<TypeInformation>();
 
   // The current [TypeInformation] in the analysis.
   TypeInformation currentUser;
@@ -140,6 +167,9 @@ abstract class TracerVisitor implements TypeInformationVisitor {
       while (!listsToAnalyze.isEmpty) {
         analyzeStoredIntoList(listsToAnalyze.removeLast());
       }
+      while (setsToAnalyze.isNotEmpty) {
+        analyzeStoredIntoSet(setsToAnalyze.removeLast());
+      }
       while (!mapsToAnalyze.isEmpty) {
         analyzeStoredIntoMap(mapsToAnalyze.removeLast());
       }
@@ -154,10 +184,12 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     continueAnalyzing = false;
   }
 
+  @override
   void visitAwaitTypeInformation(AwaitTypeInformation info) {
     bailout("Passed through await");
   }
 
+  @override
   void visitYieldTypeInformation(YieldTypeInformation info) {
     // TODO(29344): The enclosing sync*/async/async* method could have a
     // tracable TypeInformation for the Iterable / Future / Stream with an
@@ -166,50 +198,82 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     bailout("Passed through yield");
   }
 
+  @override
   void visitNarrowTypeInformation(NarrowTypeInformation info) {
     addNewEscapeInformation(info);
   }
 
+  @override
   void visitPhiElementTypeInformation(PhiElementTypeInformation info) {
     addNewEscapeInformation(info);
   }
 
+  @override
   void visitElementInContainerTypeInformation(
       ElementInContainerTypeInformation info) {
     addNewEscapeInformation(info);
   }
 
+  @override
+  void visitElementInSetTypeInformation(ElementInSetTypeInformation info) {
+    addNewEscapeInformation(info);
+  }
+
+  @override
   void visitKeyInMapTypeInformation(KeyInMapTypeInformation info) {
     // We do not track the use of keys from a map, so we have to bail.
     bailout('Used as key in Map');
   }
 
+  @override
   void visitValueInMapTypeInformation(ValueInMapTypeInformation info) {
     addNewEscapeInformation(info);
   }
 
+  @override
   void visitListTypeInformation(ListTypeInformation info) {
     listsToAnalyze.add(info);
   }
 
+  @override
+  void visitSetTypeInformation(SetTypeInformation info) {
+    setsToAnalyze.add(info);
+  }
+
+  @override
   void visitMapTypeInformation(MapTypeInformation info) {
     mapsToAnalyze.add(info);
   }
 
+  @override
   void visitConcreteTypeInformation(ConcreteTypeInformation info) {}
 
+  @override
   void visitStringLiteralTypeInformation(StringLiteralTypeInformation info) {}
 
+  @override
   void visitBoolLiteralTypeInformation(BoolLiteralTypeInformation info) {}
 
+  @override
   void visitClosureTypeInformation(ClosureTypeInformation info) {}
 
+  @override
   void visitClosureCallSiteTypeInformation(
       ClosureCallSiteTypeInformation info) {}
 
+  @override
   visitStaticCallSiteTypeInformation(StaticCallSiteTypeInformation info) {
-    Element called = info.calledElement;
-    if (inferrer.types.getInferredTypeOf(called) == currentUser) {
+    MemberEntity called = info.calledElement;
+    TypeInformation inferred = inferrer.types.getInferredTypeOfMember(called);
+    if (inferred == currentUser) {
+      addNewEscapeInformation(info);
+    }
+  }
+
+  @override
+  visitIndirectDynamicCallSiteTypeInformation(
+      IndirectDynamicCallSiteTypeInformation info) {
+    if (info.dynamicCall == currentUser) {
       addNewEscapeInformation(info);
     }
   }
@@ -219,14 +283,35 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     if (list.bailedOut) {
       bailout('Stored in a list that bailed out');
     } else {
-      list.flowsInto.forEach((flow) {
-        flow.users.forEach((user) {
-          if (user is! DynamicCallSiteTypeInformation) return;
-          if (user.receiver != flow) return;
-          if (inferrer.returnsListElementTypeSet.contains(user.selector)) {
-            addNewEscapeInformation(user);
-          } else if (!doesNotEscapeListSet.contains(user.selector.name)) {
-            bailout('Escape from a list via [${user.selector.name}]');
+      list.flowsInto.forEach((TypeInformation flow) {
+        flow.users.forEach((TypeInformation user) {
+          if (user is DynamicCallSiteTypeInformation) {
+            if (user.receiver != flow) return;
+            if (inferrer.returnsListElementTypeSet.contains(user.selector)) {
+              addNewEscapeInformation(user);
+            } else if (!doesNotEscapeListSet.contains(user.selector.name)) {
+              bailout('Escape from a list via [${user.selector.name}]');
+            }
+          }
+        });
+      });
+    }
+  }
+
+  void analyzeStoredIntoSet(SetTypeInformation set) {
+    inferrer.analyzeSetAndEnqueue(set);
+    if (set.bailedOut) {
+      bailout('Stored in a set that bailed out');
+    } else {
+      set.flowsInto.forEach((TypeInformation flow) {
+        flow.users.forEach((TypeInformation user) {
+          if (user is DynamicCallSiteTypeInformation) {
+            if (user.receiver != flow) return;
+            if (user.selector.isIndex) {
+              addNewEscapeInformation(user);
+            } else if (!doesNotEscapeSetSet.contains(user.selector.name)) {
+              bailout('Escape from a set via [${user.selector.name}]');
+            }
           }
         });
       });
@@ -238,25 +323,24 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     if (map.bailedOut) {
       bailout('Stored in a map that bailed out');
     } else {
-      map.flowsInto.forEach((flow) {
-        flow.users.forEach((user) {
-          if (user is! DynamicCallSiteTypeInformation) return;
-          if (user.receiver != flow) return;
-          if (user.selector.isIndex) {
-            addNewEscapeInformation(user);
-          } else if (!doesNotEscapeMapSet.contains(user.selector.name)) {
-            bailout('Escape from a map via [${user.selector.name}]');
+      map.flowsInto.forEach((TypeInformation flow) {
+        flow.users.forEach((TypeInformation user) {
+          if (user is DynamicCallSiteTypeInformation) {
+            if (user.receiver != flow) return;
+            if (user.selector.isIndex) {
+              addNewEscapeInformation(user);
+            } else if (!doesNotEscapeMapSet.contains(user.selector.name)) {
+              bailout('Escape from a map via [${user.selector.name}]');
+            }
           }
         });
       });
     }
   }
 
-  /**
-   * Checks whether this is a call to a list adding method. The definition of
-   * what list adding means has to stay in sync with
-   * [isParameterOfListAddingMethod].
-   */
+  /// Checks whether this is a call to a list adding method. The definition of
+  /// what list adding means has to stay in sync with
+  /// [isParameterOfListAddingMethod].
   bool mightAddToContainer(DynamicCallSiteTypeInformation info) {
     if (info.arguments == null) return false;
     if (info.arguments.named.isNotEmpty) return false;
@@ -278,28 +362,24 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     return currentUser == arguments[index];
   }
 
-  /**
-   * Checks whether the call site flows the currentUser to the key argument of
-   * an indexing setter. This must be kept in sync with
-   * [isParameterOfMapAddingMethod].
-   */
+  /// Checks whether the call site flows the currentUser to the key argument of
+  /// an indexing setter. This must be kept in sync with
+  /// [isParameterOfMapAddingMethod].
   bool isIndexSetKey(DynamicCallSiteTypeInformation info) {
     return isIndexSetArgument(info, 0);
   }
 
-  /**
-   * Checks whether the call site flows the currentUser to the value argument of
-   * an indexing setter. This must be kept in sync with
-   * [isParameterOfListAddingMethod] and [isParameterOfMapAddingMethod].
-   */
+  /// Checks whether the call site flows the currentUser to the value argument
+  /// of an indexing setter. This must be kept in sync with
+  /// [isParameterOfListAddingMethod] and [isParameterOfMapAddingMethod].
   bool isIndexSetValue(DynamicCallSiteTypeInformation info) {
     return isIndexSetArgument(info, 1);
   }
 
-  void bailoutIfReaches(bool predicate(Element e)) {
+  void bailoutIfReaches(bool predicate(ParameterTypeInformation e)) {
     for (var user in currentUser.users) {
       if (user is ParameterTypeInformation) {
-        if (predicate(user.element)) {
+        if (predicate(user)) {
           bailout('Reached suppressed parameter without precise receiver');
           break;
         }
@@ -307,33 +387,36 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     }
   }
 
+  @override
   void visitDynamicCallSiteTypeInformation(
       DynamicCallSiteTypeInformation info) {
-    void addsToContainer(ContainerTypeMask mask) {
-      if (mask.allocationNode != null) {
+    void addsToContainer(AbstractValue mask) {
+      Object allocationNode =
+          inferrer.abstractValueDomain.getAllocationNode(mask);
+      if (allocationNode != null) {
         ListTypeInformation list =
-            inferrer.types.allocatedLists[mask.allocationNode];
+            inferrer.types.allocatedLists[allocationNode];
         listsToAnalyze.add(list);
       } else {
-        // The [ContainerTypeMask] is a union of two containers, and we lose
-        // track of where these containers have been allocated at this point.
+        // The [mask] is a union of two containers, and we lose track of where
+        // these containers have been allocated at this point.
         bailout('Stored in too many containers');
       }
     }
 
-    void addsToMapValue(MapTypeMask mask) {
-      if (mask.allocationNode != null) {
-        MapTypeInformation map =
-            inferrer.types.allocatedMaps[mask.allocationNode];
+    void addsToMapValue(AbstractValue mask) {
+      Object allocationNode =
+          inferrer.abstractValueDomain.getAllocationNode(mask);
+      if (allocationNode != null) {
+        MapTypeInformation map = inferrer.types.allocatedMaps[allocationNode];
         mapsToAnalyze.add(map);
       } else {
-        // The [MapTypeMask] is a union. See comment for [ContainerTypeMask]
-        // above.
+        // The [mask] is a union. See comment for [mask] above.
         bailout('Stored in too many maps');
       }
     }
 
-    void addsToMapKey(MapTypeMask mask) {
+    void addsToMapKey(AbstractValue mask) {
       // We do not track the use of keys from a map, so we have to bail.
       bailout('Used as key in Map');
     }
@@ -341,9 +424,9 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     // "a[...] = x" could be a list (container) or map assignemnt.
     if (isIndexSetValue(info)) {
       var receiverType = info.receiver.type;
-      if (receiverType is ContainerTypeMask) {
+      if (inferrer.abstractValueDomain.isContainer(receiverType)) {
         addsToContainer(receiverType);
-      } else if (receiverType is MapTypeMask) {
+      } else if (inferrer.abstractValueDomain.isMap(receiverType)) {
         addsToMapValue(receiverType);
       } else {
         // Not a container or map, so the targets could be any methods. There
@@ -366,7 +449,7 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     // Could be:  m[x] = ...;
     if (isIndexSetKey(info)) {
       var receiverType = info.receiver.type;
-      if (receiverType is MapTypeMask) {
+      if (inferrer.abstractValueDomain.isMap(receiverType)) {
         addsToMapKey(receiverType);
       } else {
         bailoutIfReaches(isParameterOfListAddingMethod);
@@ -376,7 +459,7 @@ abstract class TracerVisitor implements TypeInformationVisitor {
 
     if (mightAddToContainer(info)) {
       var receiverType = info.receiver.type;
-      if (receiverType is ContainerTypeMask) {
+      if (inferrer.abstractValueDomain.isContainer(receiverType)) {
         addsToContainer(receiverType);
       } else {
         // Not a container, see note above.
@@ -390,44 +473,42 @@ abstract class TracerVisitor implements TypeInformationVisitor {
       bailout('Passed to noSuchMethod');
     }
 
-    Iterable<Element> inferredTargetTypes =
-        info.targets.map((MemberElement element) {
-      return inferrer.types.getInferredTypeOf(element);
+    Iterable<TypeInformation> inferredTargetTypes =
+        info.concreteTargets.map((MemberEntity entity) {
+      return inferrer.types.getInferredTypeOfMember(entity);
     });
     if (inferredTargetTypes.any((user) => user == currentUser)) {
       addNewEscapeInformation(info);
     }
   }
 
-  /**
-   * Check whether element is the parameter of a list adding method.
-   * The definition of what a list adding method is has to stay in sync with
-   * [mightAddToContainer].
-   */
-  bool isParameterOfListAddingMethod(Element element) {
-    if (!element.isRegularParameter) return false;
-    if (element.enclosingClass != compiler.commonElements.jsArrayClass) {
+  /// Check whether element is the parameter of a list adding method.
+  /// The definition of what a list adding method is has to stay in sync with
+  /// [mightAddToContainer].
+  bool isParameterOfListAddingMethod(ParameterTypeInformation parameterInfo) {
+    if (!parameterInfo.isRegularParameter) return false;
+    if (parameterInfo.method.enclosingClass !=
+        inferrer.closedWorld.commonElements.jsArrayClass) {
       return false;
     }
-    String name = element.enclosingElement.name;
+    String name = parameterInfo.method.name;
     return (name == '[]=') || (name == 'add') || (name == 'insert');
   }
 
-  /**
-   * Check whether element is the parameter of a list adding method.
-   * The definition of what a list adding method is has to stay in sync with
-   * [isIndexSetKey] and [isIndexSetValue].
-   */
-  bool isParameterOfMapAddingMethod(Element element) {
-    if (!element.isRegularParameter) return false;
-    if (element.enclosingClass != compiler.commonElements.mapLiteralClass) {
+  /// Check whether element is the parameter of a list adding method.
+  /// The definition of what a list adding method is has to stay in sync with
+  /// [isIndexSetKey] and [isIndexSetValue].
+  bool isParameterOfMapAddingMethod(ParameterTypeInformation parameterInfo) {
+    if (!parameterInfo.isRegularParameter) return false;
+    if (parameterInfo.method.enclosingClass !=
+        inferrer.closedWorld.commonElements.mapLiteralClass) {
       return false;
     }
-    String name = element.enclosingElement.name;
+    String name = parameterInfo.method.name;
     return (name == '[]=');
   }
 
-  bool isClosure(Element element) {
+  bool isClosure(MemberEntity element) {
     if (!element.isFunction) return false;
 
     /// Creating an instance of a class that implements [Function] also
@@ -438,41 +519,46 @@ abstract class TracerVisitor implements TypeInformationVisitor {
     if (element.isInstanceMember && element.name == Identifiers.call) {
       return true;
     }
-    Element outermost = element.outermostEnclosingMemberOrTopLevel;
-    return outermost.declaration != element.declaration;
+    ClassEntity cls = element.enclosingClass;
+    return cls != null && cls.isClosure;
   }
 
+  @override
   void visitMemberTypeInformation(MemberTypeInformation info) {
     if (info.isClosurized) {
       bailout('Returned from a closurized method');
     }
-    if (isClosure(info.element)) {
+    if (isClosure(info.member)) {
       bailout('Returned from a closure');
     }
-    if (info.element.isField &&
-        !inferrer.compiler.backend.canFieldBeUsedForGlobalOptimizations(
-            info.element, inferrer.closedWorld)) {
+    if (info.member.isField &&
+        !inferrer.canFieldBeUsedForGlobalOptimizations(info.member)) {
       bailout('Escape to code that has special backend treatment');
     }
     addNewEscapeInformation(info);
   }
 
+  @override
   void visitParameterTypeInformation(ParameterTypeInformation info) {
-    ParameterElement element = info.element;
-    if (inferrer.isNativeMember(element.functionDeclaration)) {
+    if (inferrer.closedWorld.nativeData.isNativeMember(info.method)) {
       bailout('Passed to a native method');
     }
-    if (!inferrer.compiler.backend
-        .canFunctionParametersBeUsedForGlobalOptimizations(
-            element.functionDeclaration, inferrer.closedWorld)) {
+    if (!inferrer
+        .canFunctionParametersBeUsedForGlobalOptimizations(info.method)) {
       bailout('Escape to code that has special backend treatment');
     }
-    if (isParameterOfListAddingMethod(element) ||
-        isParameterOfMapAddingMethod(element)) {
+    if (isParameterOfListAddingMethod(info) ||
+        isParameterOfMapAddingMethod(info)) {
       // These elements are being handled in
       // [visitDynamicCallSiteTypeInformation].
       return;
     }
+    addNewEscapeInformation(info);
+  }
+
+  @override
+  void visitIndirectParameterTypeInformation(
+      IndirectParameterTypeInformation info) {
     addNewEscapeInformation(info);
   }
 }

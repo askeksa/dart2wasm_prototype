@@ -7,11 +7,11 @@ import 'package:async_helper/async_helper.dart';
 import 'dart:async';
 
 main() {
-  Expect.identical(Zone.ROOT, Zone.current);
+  Expect.identical(Zone.root, Zone.current);
   Zone forked = Zone.current.fork();
   var f = Zone.current.bindCallback(() {
-    Expect.identical(Zone.ROOT, Zone.current);
-  }, runGuarded: false);
+    Expect.identical(Zone.root, Zone.current);
+  });
   forked.run(() {
     f();
   });

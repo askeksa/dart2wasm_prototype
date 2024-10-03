@@ -8,25 +8,15 @@ import "package:expect/expect.dart";
 
 class C {
   factory C() {
-    return 1; // Implicit result type is 'C', not int.
+    return 1; //# 01: compile-time error
+    throw "uncalled";
   }
 }
 
 class TypeTest {
   static test() {
-    int result = 0;
-    try {
-      int i = "hello"; // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result = 1;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'int'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("'i'")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:19:15"));
-    }
-    return result;
+    int i = "hello"; //# 02: compile-time error
+    return 1;
   }
 
   static testSideEffect() {
@@ -37,7 +27,7 @@ class TypeTest {
     }
 
     try {
-      List<int> a = new List<int>(1);
+      List<int> a = new List<int>.filled(1, -1);
       a[0] = 0;
       a[index()]++; // Type check succeeds, but does not create side effects.
       Expect.equals(1, a[0]);
@@ -48,92 +38,42 @@ class TypeTest {
   }
 
   static testArgument() {
-    int result = 0;
     int f(int i) {
       return i;
     }
-
-    try {
-      int i = f("hello"); // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result = 1;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'int'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("'i'")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:52:15"));
-    }
-    return result;
+    int i = f("hello"); //# 03: compile-time error
+    return 1;
   }
 
   static testReturn() {
-    int result = 0;
-    int f(String s) {
-      return s;
-    }
+    int f(String s) { //# 04: continued
+      return s; //# 04: compile-time error
+    } //# 04: continued
 
-    try {
-      int i = f("hello"); // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result = 1;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'int'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("function result")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:77:16"));
-    }
-    return result;
+    int i = f("hello"); //# 04: continued
+    return 1;
   }
 
-  static int field;
+  static late int field;
   static testField() {
-    int result = 0;
-    try {
-      field = "hello"; // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result = 1;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'int'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("'field'")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:94:15"));
-    }
-    return result;
+    field = "hello"; //# 05: compile-time error
+    return 1;
   }
 
   static testAnyFunction() {
-    int result = 0;
     Function anyFunction;
     f() {}
-    ;
     anyFunction = f; // No error.
-    try {
-      int i = f; // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result = 1;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'int'")); // dstType
-      Expect.isTrue(msg.contains("'() => dynamic'")); // srcType
-      Expect.isTrue(msg.contains("'i'")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:114:15"));
-    }
-    return result;
+    int i = f; //# 06: compile-time error
+    return 1;
   }
 
   static testVoidFunction() {
-    int result = 0;
     Function anyFunction;
-    void acceptVoidFunObj(void voidFunObj(Object obj)) {}
-    ;
-    void acceptObjFunObj(Object objFunObj(Object obj)) {}
-    ;
-    void voidFunObj(Object obj) {}
-    ;
-    Object objFunObj(Object obj) {
+    void acceptVoidFunObj(void voidFunObj(Object? obj)) {}
+    void acceptObjFunObj(Object? objFunObj(Object? obj)) {}
+    void voidFunObj(Object? obj) {}
+    Object? objFunObj(Object? obj) {
       return obj;
     }
 
@@ -143,25 +83,14 @@ class TypeTest {
     acceptVoidFunObj(voidFunObj);
     acceptVoidFunObj(objFunObj);
     acceptObjFunObj(objFunObj);
-    try {
-      acceptObjFunObj(voidFunObj); // Throws a TypeError.
-    } on TypeError catch (error) {
-      result = 1;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'(Object) => Object'")); // dstType
-      Expect.isTrue(msg.contains("'(Object) => void'")); // srcType
-      Expect.isTrue(msg.contains("'objFunObj'")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:132:33"));
-    }
-    return result;
+    acceptObjFunObj(voidFunObj);
+    return 1;
   }
 
   static testFunctionNum() {
-    int result = 0;
     Function anyFunction;
     void acceptFunNum(void funNum(num n)) {}
-    void funObj(Object obj) {}
+    void funObj(Object? obj) {}
     void funNum(num n) {}
     void funInt(int i) {}
     void funString(String s) {}
@@ -171,262 +100,74 @@ class TypeTest {
     anyFunction = funString; // No error.
     acceptFunNum(funObj); // No error.
     acceptFunNum(funNum); // No error.
-    acceptFunNum(funInt); // No error.
-    try {
-      acceptFunNum(funString); // Throws an error.
-    } on TypeError catch (error) {
-      result = 1;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'(num) => void'")); // dstType
-      Expect.isTrue(msg.contains("'(String) => void'")); // srcType
-      Expect.isTrue(msg.contains("'funNum'")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:163:28"));
-    }
-    return result;
+    acceptFunNum(funInt); //# 27: compile-time error
+    acceptFunNum(funString); //# 08: compile-time error
+    return 1;
   }
 
   static testBoolCheck() {
-    int result = 0;
-    try {
-      bool i = !"hello"; // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'bool'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("boolean expression")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:192:17"));
-    }
-    try {
-      while ("hello") {} // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'bool'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("boolean expression")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:203:14"));
-    }
-    try {
-      do {} while ("hello"); // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'bool'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("boolean expression")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:214:20"));
-    }
-    try {
-      for (; "hello";) {} // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'bool'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("boolean expression")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:225:14"));
-    }
-    try {
-      int i = "hello" ? 1 : 0; // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'bool'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("boolean expression")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:236:15"));
-    }
-    try {
-      if ("hello") {} // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'bool'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("boolean expression")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:247:11"));
-    }
-    try {
-      if ("hello" || false) {} // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'bool'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("boolean expression")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:258:11"));
-    }
-    try {
-      if (false || "hello") {} // Throws a TypeError if type checks are enabled.
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'bool'")); // dstType
-      Expect.isTrue(msg.contains("'String'")); // srcType
-      Expect.isTrue(msg.contains("boolean expression")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:269:20"));
-    }
-    try {
-      if (null) {} // Throws an AssertionError if assertions are enabled.
-    } on AssertionError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("assertion"));
-      Expect.isTrue(msg.contains("boolean expression"));
-      Expect.isTrue(msg.contains("null"));
-    }
-    return result;
+      bool i = !"hello"; //# 09: compile-time error
+      while ("hello") {} //# 10: compile-time error
+      do {} while ("hello"); //# 11: compile-time error
+      for (; "hello";) {} //# 12: compile-time error
+      int i = "hello" ? 1 : 0; //# 13: compile-time error
+      if ("hello") {} //# 14: compile-time error
+      if ("hello" || false) {} //# 15: compile-time error
+      if (false || "hello") {} //# 16: compile-time error
+      if (null as dynamic) {} //# 28: runtime error
+    return 9;
   }
 
   static int testFactory() {
-    int result = 0;
-    try {
-      var x = new C();
-    } on TypeError catch (error) {
-      result++;
-      var msg = error.toString();
-      Expect.isTrue(msg.contains("'C'")); // dstType
-      Expect.isTrue(msg.contains("'int'")); // srcType
-      Expect.isTrue(msg.contains("function result")); // dstName
-      Expect.isTrue(
-          error.stackTrace.toString().contains("type_vm_test.dart:11:12"));
-    }
-    return result;
+    var x = new C(); //# 01: continued
+    return 1;
   }
 
   static int testListAssigment() {
+    // Note: Many of these used to be runtime errors when implicit downcasts
+    // were permitted. Now these are mostly compile time errors.
     int result = 0;
     {
-      var a = new List(5);
+      var a = new List<dynamic>.filled(5, null);
       List a0 = a;
-      List<Object> ao = a;
+      List<Object?> ao = a;  // No error.
+      List<int> ai = a;  //# 30: compile-time error
+      List<num> an = a;  //# 31: compile-time error
+      List<String> as = a;  //# 32: compile-time error
+    }
+    {
+      var a = new List<Object?>.filled(5, null);
+      List a0 = a;
+      List<Object?> ao = a;
+      List<int> ai = a;  //# 33: compile-time error
+      List<num> an = a;  //# 34: compile-time error
+      List<String> as = a;  //# 35: compile-time error
+    }
+    {
+      var a = new List<int>.filled(5, -1);
+      List a0 = a;
+      List<Object?> ao = a;
       List<int> ai = a;
       List<num> an = a;
+      List<String> as = a; //# 22: compile-time error
+    }
+    {
+      var a = new List<num>.filled(5, -1);
+      List a0 = a;
+      List<Object?> ao = a;
+      List<int> ai = a;  //# 36: compile-time error
+      List<num> an = a;
+      List<String> as = a; //# 24: compile-time error
+    }
+    {
+      var a = new List<String>.filled(5, "");
+      List a0 = a;
+      List<Object?> ao = a;
+      List<int> ai = a; //# 25: compile-time error
+      List<num> an = a; //# 26: compile-time error
       List<String> as = a;
     }
-    {
-      var a = new List<Object>(5);
-      List a0 = a;
-      List<Object> ao = a;
-      try {
-        List<int> ai = a;
-      } on TypeError catch (error) {
-        result++;
-        var msg = error.toString();
-        Expect.isTrue(msg.contains("'List<int>'")); // dstType
-        Expect.isTrue(msg.contains("'List<Object>'")); // srcType
-        Expect.isTrue(msg.contains("'ai'")); // dstName
-        Expect.isTrue(
-            error.stackTrace.toString().contains("type_vm_test.dart:322:24"));
-      }
-      try {
-        List<num> an = a;
-      } on TypeError catch (error) {
-        result++;
-        var msg = error.toString();
-        Expect.isTrue(msg.contains("'List<num>'")); // dstType
-        Expect.isTrue(msg.contains("'List<Object>'")); // srcType
-        Expect.isTrue(msg.contains("'an'")); // dstName
-        Expect.isTrue(
-            error.stackTrace.toString().contains("type_vm_test.dart:333:24"));
-      }
-      try {
-        List<String> as = a;
-      } on TypeError catch (error) {
-        result++;
-        var msg = error.toString();
-        Expect.isTrue(msg.contains("'List<String>'")); // dstType
-        Expect.isTrue(msg.contains("'List<Object>'")); // srcType
-        Expect.isTrue(msg.contains("'as'")); // dstName
-        Expect.isTrue(
-            error.stackTrace.toString().contains("type_vm_test.dart:344:27"));
-      }
-    }
-    {
-      var a = new List<int>(5);
-      List a0 = a;
-      List<Object> ao = a;
-      List<int> ai = a;
-      List<num> an = a;
-      try {
-        List<String> as = a;
-      } on TypeError catch (error) {
-        result++;
-        var msg = error.toString();
-        Expect.isTrue(msg.contains("'List<String>'")); // dstType
-        Expect.isTrue(msg.contains("'List<int>'")); // srcType
-        Expect.isTrue(msg.contains("'as'")); // dstName
-        Expect.isTrue(
-            error.stackTrace.toString().contains("type_vm_test.dart:362:27"));
-      }
-    }
-    {
-      var a = new List<num>(5);
-      List a0 = a;
-      List<Object> ao = a;
-      try {
-        List<int> ai = a;
-      } on TypeError catch (error) {
-        result++;
-        var msg = error.toString();
-        Expect.isTrue(msg.contains("'List<int>'")); // dstType
-        Expect.isTrue(msg.contains("'List<num>'")); // srcType
-        Expect.isTrue(msg.contains("'ai'")); // dstName
-        Expect.isTrue(
-            error.stackTrace.toString().contains("type_vm_test.dart:378:24"));
-      }
-      List<num> an = a;
-      try {
-        List<String> as = a;
-      } on TypeError catch (error) {
-        result++;
-        var msg = error.toString();
-        Expect.isTrue(msg.contains("'List<String>'")); // dstType
-        Expect.isTrue(msg.contains("'List<num>'")); // srcType
-        Expect.isTrue(msg.contains("'as'")); // dstName
-        Expect.isTrue(
-            error.stackTrace.toString().contains("type_vm_test.dart:390:27"));
-      }
-    }
-    {
-      var a = new List<String>(5);
-      List a0 = a;
-      List<Object> ao = a;
-      try {
-        List<int> ai = a;
-      } on TypeError catch (error) {
-        result++;
-        var msg = error.toString();
-        Expect.isTrue(msg.contains("'List<int>'")); // dstType
-        Expect.isTrue(msg.contains("'List<String>'")); // srcType
-        Expect.isTrue(msg.contains("'ai'")); // dstName
-        Expect.isTrue(
-            error.stackTrace.toString().contains("type_vm_test.dart:406:24"));
-      }
-      try {
-        List<num> an = a;
-      } on TypeError catch (error) {
-        result++;
-        var msg = error.toString();
-        Expect.isTrue(msg.contains("'List<num>'")); // dstType
-        Expect.isTrue(msg.contains("'List<String>'")); // srcType
-        Expect.isTrue(msg.contains("'an'")); // dstName
-        Expect.isTrue(
-            error.stackTrace.toString().contains("type_vm_test.dart:417:24"));
-      }
-      List<String> as = a;
-    }
-    return result;
+    return 8;
   }
 
   static testMain() {

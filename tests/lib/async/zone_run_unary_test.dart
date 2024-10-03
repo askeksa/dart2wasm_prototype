@@ -11,20 +11,21 @@ main() {
   List events = [];
 
   bool shouldForward = true;
-  Expect.identical(Zone.ROOT, Zone.current);
-  Zone forked = Zone.current.fork(specification: new ZoneSpecification(
-      runUnary: (Zone self, ZoneDelegate parent, Zone origin, f(arg), arg) {
+  Expect.identical(Zone.root, Zone.current);
+  Zone forked = Zone.current.fork(specification: new ZoneSpecification(runUnary:
+      <R, T>(Zone self, ZoneDelegate parent, Zone origin, R f(T arg), T arg) {
     // The zone is still the same as when origin.run was invoked, which
     // is the root zone. (The origin zone hasn't been set yet).
-    Expect.identical(Zone.current, Zone.ROOT);
+    Expect.identical(Zone.current, Zone.root);
     events.add("forked.run1");
-    if (shouldForward) return parent.runUnary(origin, f, arg + 1);
-    return 42;
+    if (shouldForward)
+      return parent.runUnary<R, T>(origin, f, ((arg as int) + 1) as T);
+    return 42 as R;
   }));
 
   events.add("zone forked");
   Zone expectedZone = forked;
-  var result = forked.runUnary((arg) {
+  var result = forked.runUnary((dynamic arg) {
     Expect.identical(expectedZone, Zone.current);
     events.add("run closure");
     return arg + 3;
@@ -33,15 +34,16 @@ main() {
   events.add("executed run");
 
   shouldForward = false;
-  result = forked.runUnary((arg) {
+  result = forked.runUnary<int, int>((arg) {
     Expect.fail("should not be invoked");
+    return -1;
   }, 99);
   Expect.equals(42, result);
   events.add("executed run2");
 
   asyncStart();
   shouldForward = true;
-  result = forked.runUnary((arg) {
+  result = forked.runUnary((dynamic arg) {
     Expect.identical(forked, Zone.current);
     events.add("run closure 2");
     scheduleMicrotask(() {

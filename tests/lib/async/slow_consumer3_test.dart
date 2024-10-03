@@ -2,7 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-// VMOptions=--old_gen_heap_size=64
+// VMOptions=--old_gen_heap_size=64 --no-background-compilation
 
 library slow_consumer3_test;
 
@@ -14,13 +14,13 @@ const int KB = 1024;
 const int MB = KB * KB;
 const int GB = KB * KB * KB;
 
-class SlowConsumer extends StreamConsumer {
+class SlowConsumer extends StreamConsumer<List<int>> {
   int receivedCount = 0;
   final int bytesPerSecond;
   final int bufferSize;
-  final List bufferedData = [];
+  final List<List<int>?> bufferedData = [];
   int usedBufferSize = 0;
-  int finalCount;
+  late int finalCount;
 
   SlowConsumer(int this.bytesPerSecond, int this.bufferSize);
 
@@ -31,7 +31,8 @@ class SlowConsumer extends StreamConsumer {
   Future addStream(Stream stream) {
     Completer result = new Completer();
     var subscription;
-    subscription = stream.listen((List<int> data) {
+    subscription = stream.listen((dynamic _data) {
+      List<int> data = _data;
       receivedCount += data.length;
       usedBufferSize += data.length;
       bufferedData.add(data);
@@ -60,11 +61,11 @@ class SlowConsumer extends StreamConsumer {
   }
 }
 
-Stream<List> dataGenerator(int bytesTotal, int chunkSize) {
+Stream<List<int>> dataGenerator(int bytesTotal, int chunkSize) {
   int chunks = bytesTotal ~/ chunkSize;
   return new Stream.fromIterable(new Iterable.generate(chunks, (_) {
     // This assumes one byte per entry. In practice it will be more.
-    return new List<int>(chunkSize);
+    return new List<int>.filled(chunkSize, -1);
   }));
 }
 

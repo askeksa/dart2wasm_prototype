@@ -28,6 +28,6 @@ foo(n, a) {
   return k;
 }
 
-goo(a) {
+int goo(a) {
   return a.toInt();
 }

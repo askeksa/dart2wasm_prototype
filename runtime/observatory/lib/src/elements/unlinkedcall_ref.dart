@@ -6,35 +6,33 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' as M show IsolateRef, UnlinkedCallRef;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 
-class UnlinkedCallRefElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<UnlinkedCallRefElement>('unlinkedcall-ref');
-
-  RenderingScheduler<UnlinkedCallRefElement> _r;
+class UnlinkedCallRefElement extends CustomElement implements Renderable {
+  late RenderingScheduler<UnlinkedCallRefElement> _r;
 
   Stream<RenderedEvent<UnlinkedCallRefElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.UnlinkedCallRef _unlinkedcall;
+  late M.IsolateRef _isolate;
+  late M.UnlinkedCallRef _unlinkedcall;
 
   M.IsolateRef get isolate => _isolate;
   M.UnlinkedCallRef get unlinkedcall => _unlinkedcall;
 
   factory UnlinkedCallRefElement(
       M.IsolateRef isolate, M.UnlinkedCallRef unlinkedcall,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(unlinkedcall != null);
-    UnlinkedCallRefElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    UnlinkedCallRefElement e = new UnlinkedCallRefElement.created();
+    e._r = new RenderingScheduler<UnlinkedCallRefElement>(e, queue: queue);
     e._isolate = isolate;
     e._unlinkedcall = unlinkedcall;
     return e;
   }
 
-  UnlinkedCallRefElement.created() : super.created();
+  UnlinkedCallRefElement.created() : super.created('unlinkedcall-ref');
 
   @override
   void attached() {
@@ -46,13 +44,13 @@ class UnlinkedCallRefElement extends HtmlElement implements Renderable {
   void detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
   }
 
   void render() {
-    children = [
+    children = <Element>[
       new AnchorElement(href: Uris.inspect(_isolate, object: _unlinkedcall))
-        ..children = [
+        ..children = <Element>[
           new SpanElement()
             ..classes = ['emphasize']
             ..text = 'UnlinkedCall',

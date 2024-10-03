@@ -4,7 +4,7 @@
 
 import "package:expect/expect.dart";
 
-testHttpUri() {
+void testHttpUri() {
   void check(Uri uri, String expected) {
     Expect.equals(expected, uri.toString());
   }
@@ -33,9 +33,14 @@ testHttpUri() {
       new Uri.http("host", "/a/b", {"c=": "&d"}), "http://host/a/b?c%3D=%26d");
   check(new Uri.http("[::]", "a"), "http://[::]/a");
   check(new Uri.http("[::127.0.0.1]", "a"), "http://[::127.0.0.1]/a");
+  check(new Uri.http('[fe80::8eae:4c4d:fee9:8434%rename3]', ''),
+      'http://[fe80::8eae:4c4d:fee9:8434%25rename3]');
+  check(new Uri.http('[ff02::1%1%41]', ''), 'http://[ff02::1%251a]');
+  check(new Uri.http('[ff02::1%321]', ''), 'http://[ff02::1%25321]');
+  check(new Uri.http('[ff02::1%%321]', ''), 'http://[ff02::1%2521]');
 }
 
-testHttpsUri() {
+void testHttpsUri() {
   void check(Uri uri, String expected) {
     Expect.equals(expected, uri.toString());
   }
@@ -66,7 +71,7 @@ testHttpsUri() {
   check(new Uri.https("[::127.0.0.1]", "a"), "https://[::127.0.0.1]/a");
 }
 
-testResolveHttpScheme() {
+void testResolveHttpScheme() {
   String s = "//myserver:1234/path/some/thing";
   Uri uri = Uri.parse(s);
   Uri http = new Uri(scheme: "http");
@@ -75,8 +80,34 @@ testResolveHttpScheme() {
   Expect.equals("https:$s", https.resolveUri(uri).toString());
 }
 
+void testQuery() {
+  var uri = Uri.http("example.com", "a/b", <String, dynamic>{
+    "a": "b",
+    "c": ["d", "e"]
+  });
+  Expect.equals(uri.toString(), "http://example.com/a/b?a=b&c=d&c=e");
+  Expect.listEquals(uri.queryParametersAll["c"]!, ["d", "e"]);
+
+  uri = Uri.https("example.com", "a/b", <String, dynamic>{
+    "a": "b",
+    "c": ["d", "e"]
+  });
+  Expect.equals(uri.toString(), "https://example.com/a/b?a=b&c=d&c=e");
+  Expect.listEquals(uri.queryParametersAll["c"]!, ["d", "e"]);
+
+  uri = Uri.http("example.com", "a/b", {
+    "a b c": ["d e", "f g"]
+  });
+  Expect.equals(uri.toString(), "http://example.com/a/b?a+b+c=d+e&a+b+c=f+g");
+  uri = Uri.https("example.com", "a/b", {
+    "a b c": ["d e", "f g"]
+  });
+  Expect.equals(uri.toString(), "https://example.com/a/b?a+b+c=d+e&a+b+c=f+g");
+}
+
 main() {
   testHttpUri();
   testHttpsUri();
   testResolveHttpScheme();
+  testQuery();
 }

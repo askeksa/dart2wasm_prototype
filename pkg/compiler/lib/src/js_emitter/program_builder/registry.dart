@@ -5,19 +5,22 @@
 part of dart2js.js_emitter.program_builder;
 
 class LibraryContents {
-  final List<ClassEntity> classes = <ClassEntity>[];
-  final List<MemberEntity> members = <MemberEntity>[];
+  final List<ClassEntity> classes = [];
+  final List<MemberEntity> members = [];
+  final List<ClassEntity> classTypes = [];
 }
 
-/// Maps [LibraryEntity]s to their [ClassEntity]s and [MemberEntity]s.
+/// Maps [LibraryEntity]s to their classes, members, and class types.
 ///
 /// Fundamentally, this class nicely encapsulates a
-/// `Map<LibraryElement, Pair<List<ClassElement>, List<MemberElement>>>`.
+/// `Map<LibraryEntity, Tuple<classes, members, class types>>`.
+///
+/// where both classes and class types are lists of [ClassEntity] and
+/// members is a list of [MemberEntity].
 ///
 /// There exists exactly one instance per [OutputUnit].
 class LibrariesMap {
-  final Map<LibraryEntity, LibraryContents> _mapping =
-      <LibraryEntity, LibraryContents>{};
+  final Map<LibraryEntity, LibraryContents> _mapping = {};
 
   // It is very common to access the same library multiple times in a row, so
   // we cache the last access.
@@ -37,13 +40,17 @@ class LibrariesMap {
   LibraryContents _getMapping(LibraryEntity library) {
     if (_lastLibrary != library) {
       _lastLibrary = library;
-      _lastMapping = _mapping.putIfAbsent(library, () => new LibraryContents());
+      _lastMapping = _mapping.putIfAbsent(library, () => LibraryContents());
     }
     return _lastMapping;
   }
 
   void addClass(LibraryEntity library, ClassEntity element) {
     _getMapping(library).classes.add(element);
+  }
+
+  void addClassType(LibraryEntity library, ClassEntity element) {
+    _getMapping(library).classTypes.add(element);
   }
 
   void addMember(LibraryEntity library, MemberEntity element) {
@@ -54,9 +61,9 @@ class LibrariesMap {
 
   void forEach(
       void f(LibraryEntity library, List<ClassEntity> classes,
-          List<MemberEntity> members)) {
+          List<MemberEntity> members, List<ClassEntity> classTypeData)) {
     _mapping.forEach((LibraryEntity library, LibraryContents mapping) {
-      f(library, mapping.classes, mapping.members);
+      f(library, mapping.classes, mapping.members, mapping.classTypes);
     });
   }
 }
@@ -68,17 +75,14 @@ class LibrariesMap {
 ///
 /// Registered holders are assigned a name.
 class Registry {
-  final DeferredLoadTask _deferredLoadTask;
+  final OutputUnit _mainOutputUnit;
   final Sorter _sorter;
-  final Map<String, Holder> _holdersMap = <String, Holder>{};
-  final Map<OutputUnit, LibrariesMap> _deferredLibrariesMap =
-      <OutputUnit, LibrariesMap>{};
+  final Map<OutputUnit, LibrariesMap> _deferredLibrariesMap = {};
 
   /// Cache for the last seen output unit.
   OutputUnit _lastOutputUnit;
   LibrariesMap _lastLibrariesMap;
 
-  Iterable<Holder> get holders => _holdersMap.values;
   Iterable<LibrariesMap> get deferredLibrariesMap =>
       _deferredLibrariesMap.values;
 
@@ -87,9 +91,7 @@ class Registry {
 
   LibrariesMap mainLibrariesMap;
 
-  Registry(this._deferredLoadTask, this._sorter);
-
-  OutputUnit get _mainOutputUnit => _deferredLoadTask.mainOutputUnit;
+  Registry(this._mainOutputUnit, this._sorter);
 
   LibrariesMap _mapUnitToLibrariesMap(OutputUnit targetUnit) {
     if (targetUnit == _lastOutputUnit) return _lastLibrariesMap;
@@ -107,13 +109,12 @@ class Registry {
   void registerOutputUnit(OutputUnit outputUnit) {
     if (outputUnit == _mainOutputUnit) {
       assert(mainLibrariesMap == null);
-      mainLibrariesMap =
-          new LibrariesMap.main(_deferredLoadTask.mainOutputUnit);
+      mainLibrariesMap = LibrariesMap.main(_mainOutputUnit);
     } else {
       assert(!_deferredLibrariesMap.containsKey(outputUnit));
       String name = outputUnit.name;
       _deferredLibrariesMap[outputUnit] =
-          new LibrariesMap.deferred(outputUnit, name);
+          LibrariesMap.deferred(outputUnit, name);
     }
   }
 
@@ -128,6 +129,16 @@ class Registry {
 
   /// Adds all elements to their respective libraries in the correct
   /// libraries map.
+  void registerClassTypes(
+      OutputUnit outputUnit, Iterable<ClassEntity> elements) {
+    LibrariesMap targetLibrariesMap = _mapUnitToLibrariesMap(outputUnit);
+    for (ClassEntity element in _sorter.sortClasses(elements)) {
+      targetLibrariesMap.addClassType(element.library, element);
+    }
+  }
+
+  /// Adds all elements to their respective libraries in the correct
+  /// libraries map.
   void registerMembers(OutputUnit outputUnit, Iterable<MemberEntity> elements) {
     LibrariesMap targetLibrariesMap = _mapUnitToLibrariesMap(outputUnit);
     for (MemberEntity element in _sorter.sortMembers(elements)) {
@@ -137,18 +148,5 @@ class Registry {
 
   void registerConstant(OutputUnit outputUnit, ConstantValue constantValue) {
     // Ignore for now.
-  }
-
-  Holder registerHolder(String name,
-      {bool isStaticStateHolder: false, bool isConstantsHolder: false}) {
-    assert(_holdersMap[name] == null ||
-        (_holdersMap[name].isStaticStateHolder == isStaticStateHolder &&
-            _holdersMap[name].isConstantsHolder == isConstantsHolder));
-
-    return _holdersMap.putIfAbsent(name, () {
-      return new Holder(name, _holdersMap.length,
-          isStaticStateHolder: isStaticStateHolder,
-          isConstantsHolder: isConstantsHolder);
-    });
   }
 }

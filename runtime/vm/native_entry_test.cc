@@ -4,8 +4,8 @@
 
 #include "vm/native_entry_test.h"
 
-#include "vm/assembler.h"
 #include "vm/code_patcher.h"
+#include "vm/compiler/assembler/assembler.h"
 #include "vm/dart_api_impl.h"
 #include "vm/native_entry.h"
 #include "vm/object.h"
@@ -14,7 +14,6 @@
 #include "vm/unit_test.h"
 
 namespace dart {
-
 
 // A native call for test purposes.
 // Arg0: a smi.
@@ -33,7 +32,6 @@ void TestSmiSub(Dart_NativeArguments args) {
   Dart_SetReturnValue(args, Dart_NewInteger(result));
 }
 
-
 // A native call for test purposes.
 // Arg0-4: 5 smis.
 // Result: a smi representing the sum of all arguments.
@@ -51,7 +49,6 @@ void TestSmiSum(Dart_NativeArguments args) {
   Dart_SetReturnValue(args, Dart_NewInteger(result));
 }
 
-
 // Test for accepting null arguments in native function.
 // Arg0-4: 5 smis or null.
 // Result: a smi representing the sum of all non-null arguments.
@@ -65,7 +62,7 @@ void TestNonNullSmiSum(Dart_NativeArguments args) {
     Dart_Handle arg = Dart_GetNativeArgument(args, i);
     GET_NATIVE_ARGUMENT(Integer, argument, arguments->NativeArgAt(i));
     EXPECT(argument.IsInteger());                       // May be null.
-    EXPECT_EQ(Api::UnwrapHandle(arg), argument.raw());  // May be null.
+    EXPECT_EQ(Api::UnwrapHandle(arg), argument.ptr());  // May be null.
     int64_t arg_value = -1;
     if (argument.IsNull()) {
       EXPECT_ERROR(Dart_IntegerToInt64(arg, &arg_value),

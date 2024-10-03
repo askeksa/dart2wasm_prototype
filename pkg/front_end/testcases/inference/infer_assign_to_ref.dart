@@ -1,7 +1,7 @@
 // Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
+// @dart=2.9
 /*@testedFeatures=inference*/
 library test;
 
@@ -10,13 +10,9 @@ class A {
 }
 
 A a = new A();
-var /*@topType=dynamic*/ b = (/*error:TOP_LEVEL_UNSUPPORTED*/ a.f = 1);
-var /*@topType=int*/ c = 0;
-var /*@topType=dynamic*/ d = (/*error:TOP_LEVEL_UNSUPPORTED*/ c = 1);
+var c = 0;
 
 main() {
   a;
-  b;
   c;
-  d;
 }

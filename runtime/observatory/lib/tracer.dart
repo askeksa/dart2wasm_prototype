@@ -7,7 +7,6 @@ library tracer;
 import 'dart:async';
 
 import 'package:logging/logging.dart';
-import 'package:observe/observe.dart';
 
 _deepCopy(src) {
   if (src is Map) {
@@ -28,7 +27,7 @@ _deepCopy(src) {
 }
 
 class TraceEvent {
-  TraceEvent.msg(this._time, this.message, Map originalMap) {
+  TraceEvent.msg(this._time, this.message, Map? originalMap) {
     map = _deepCopy(originalMap);
   }
 
@@ -40,14 +39,14 @@ class TraceEvent {
 
   int _time;
   String message;
-  Map map;
+  Map? map;
 }
 
-class Tracer extends Observable {
+class Tracer {
   // The current global tracer.
-  static Tracer get current => _current;
+  static Tracer? get current => _current;
 
-  static Tracer _current;
+  static Tracer? _current;
 
   static void start() {
     if (_current == null) {
@@ -57,23 +56,23 @@ class Tracer extends Observable {
 
   static void stop() {
     if (_current != null) {
-      _current.cancel();
+      _current!.cancel();
       _current = null;
     }
   }
 
   // The tracer subscribes to all logging events.
-  StreamSubscription loggerSub = null;
+  StreamSubscription? loggerSub = null;
 
   // The start time for the current request.
-  Stopwatch _time;
+  Stopwatch? _time;
 
   // A list of all tracing events for thre current request.
-  ObservableList<TraceEvent> events = new ObservableList<TraceEvent>();
+  List<TraceEvent> events = <TraceEvent>[];
 
   Tracer() {
     _time = new Stopwatch();
-    _time.start();
+    _time!.start();
     loggerSub = Logger.root.onRecord.listen((LogRecord rec) {
       // Echo all log messages to the trace.
       trace('${rec.level.name}: ${rec.message}');
@@ -82,16 +81,16 @@ class Tracer extends Observable {
   }
 
   void cancel() {
-    loggerSub.cancel();
+    loggerSub!.cancel();
   }
 
   void reset() {
-    _time.reset();
+    _time!.reset();
     events.clear();
   }
 
-  TraceEvent trace(String message, {Map map: null}) {
-    var event = new TraceEvent.msg(_time.elapsedMicroseconds, message, map);
+  TraceEvent trace(String message, {Map? map}) {
+    var event = new TraceEvent.msg(_time!.elapsedMicroseconds, message, map);
     events.add(event);
     return event;
   }

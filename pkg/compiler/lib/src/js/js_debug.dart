@@ -7,24 +7,25 @@
 library js.debug;
 
 import 'package:js_ast/js_ast.dart';
+import 'package:kernel/text/indentation.dart' show Indentation, Tagging;
 
 import '../io/code_output.dart' show BufferedCodeOutput;
-import '../util/util.dart' show Indentation, Tagging;
 
 /// Unparse the JavaScript [node].
-String nodeToString(Node node) {
-  JavaScriptPrintingOptions options = new JavaScriptPrintingOptions(
-      shouldCompressOutput: true,
-      preferSemicolonToNewlineInMinifiedOutput: true);
-  LenientPrintingContext printingContext = new LenientPrintingContext();
-  new Printer(options, printingContext).visit(node);
+String nodeToString(Node node, {bool pretty = false}) {
+  JavaScriptPrintingOptions options = JavaScriptPrintingOptions(
+      shouldCompressOutput: !pretty,
+      preferSemicolonToNewlineInMinifiedOutput: !pretty);
+  LenientPrintingContext printingContext = LenientPrintingContext();
+  Printer(options, printingContext).visit(node);
   return printingContext.getText();
 }
 
 /// Visitor that creates an XML-like representation of the structure of a
 /// JavaScript [Node].
-class DebugPrinter extends BaseVisitor with Indentation, Tagging<Node> {
-  StringBuffer sb = new StringBuffer();
+class DebugPrinter extends BaseVisitorVoid with Indentation, Tagging<Node> {
+  @override
+  StringBuffer sb = StringBuffer();
 
   void visitNodeWithChildren(Node node, String type, [Map params]) {
     openNode(node, type, params);
@@ -52,11 +53,9 @@ class DebugPrinter extends BaseVisitor with Indentation, Tagging<Node> {
     openAndCloseNode(node, '${node.runtimeType}', {'value': node.value});
   }
 
-  /**
-   * Pretty-prints given node tree into string.
-   */
+  /// Pretty-prints given node tree into string.
   static String prettyPrint(Node node) {
-    var p = new DebugPrinter();
+    var p = DebugPrinter();
     node.accept(p);
     return p.sb.toString();
   }

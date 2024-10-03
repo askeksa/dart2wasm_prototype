@@ -1,12 +1,16 @@
 // Copyright (c) 2012, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
+#if !defined(DART_PRECOMPILED_RUNTIME)
 
 #include "vm/scopes.h"
 
+#include "vm/compiler/backend/slot.h"
 #include "vm/object.h"
+#include "vm/object_store.h"
 #include "vm/stack_frame.h"
 #include "vm/symbols.h"
+
 
 namespace dart {
 
@@ -22,19 +26,20 @@ int SourceLabel::FunctionLevel() const {
   return owner()->function_level();
 }
 
-
 LocalScope::LocalScope(LocalScope* parent, int function_level, int loop_level)
     : parent_(parent),
       child_(NULL),
       sibling_(NULL),
       function_level_(function_level),
       loop_level_(loop_level),
-      context_level_(LocalScope::kUnitializedContextLevel),
-      num_context_variables_(0),
-      begin_token_pos_(TokenPosition::kNoSourcePos),
-      end_token_pos_(TokenPosition::kNoSourcePos),
+      context_level_(LocalScope::kUninitializedContextLevel),
+      begin_token_pos_(TokenPosition::kNoSource),
+      end_token_pos_(TokenPosition::kNoSource),
       variables_(),
       labels_(),
+      context_variables_(),
+      context_slots_(new (Thread::Current()->zone())
+                         ZoneGrowableArray<const Slot*>()),
       referenced_() {
   // Hook this node into the children of the parent, unless the parent has a
   // different function_level, since the local scope of a nested function can
@@ -44,7 +49,6 @@ LocalScope::LocalScope(LocalScope* parent, int function_level, int loop_level)
     parent->child_ = this;
   }
 }
-
 
 bool LocalScope::IsNestedWithin(LocalScope* scope) const {
   const LocalScope* current_scope = this;
@@ -56,7 +60,6 @@ bool LocalScope::IsNestedWithin(LocalScope* scope) const {
   }
   return false;
 }
-
 
 bool LocalScope::AddVariable(LocalVariable* variable) {
   ASSERT(variable != NULL);
@@ -72,7 +75,6 @@ bool LocalScope::AddVariable(LocalVariable* variable) {
   return true;
 }
 
-
 bool LocalScope::InsertParameterAt(intptr_t pos, LocalVariable* parameter) {
   ASSERT(parameter != NULL);
   if (LocalLookupVariable(parameter->name()) != NULL) {
@@ -84,7 +86,6 @@ bool LocalScope::InsertParameterAt(intptr_t pos, LocalVariable* parameter) {
   parameter->set_owner(this);
   return true;
 }
-
 
 bool LocalScope::AddLabel(SourceLabel* label) {
   if (LocalLookupLabel(label->name()) != NULL) {
@@ -99,7 +100,6 @@ bool LocalScope::AddLabel(SourceLabel* label) {
   return true;
 }
 
-
 void LocalScope::MoveLabel(SourceLabel* label) {
   ASSERT(LocalLookupLabel(label->name()) == NULL);
   ASSERT(label->kind() == SourceLabel::kForward);
@@ -107,18 +107,16 @@ void LocalScope::MoveLabel(SourceLabel* label) {
   label->set_owner(this);
 }
 
-
 NameReference* LocalScope::FindReference(const String& name) const {
   ASSERT(name.IsSymbol());
   intptr_t num_references = referenced_.length();
   for (intptr_t i = 0; i < num_references; i++) {
-    if (name.raw() == referenced_[i]->name().raw()) {
+    if (name.ptr() == referenced_[i]->name().ptr()) {
       return referenced_[i];
     }
   }
   return NULL;
 }
-
 
 void LocalScope::AddReferencedName(TokenPosition token_pos,
                                    const String& name) {
@@ -141,7 +139,6 @@ void LocalScope::AddReferencedName(TokenPosition token_pos,
   }
 }
 
-
 TokenPosition LocalScope::PreviousReferencePos(const String& name) const {
   NameReference* ref = FindReference(name);
   if (ref != NULL) {
@@ -149,7 +146,6 @@ TokenPosition LocalScope::PreviousReferencePos(const String& name) const {
   }
   return TokenPosition::kNoSource;
 }
-
 
 void LocalScope::AllocateContextVariable(LocalVariable* variable,
                                          LocalScope** context_owner) {
@@ -159,7 +155,7 @@ void LocalScope::AllocateContextVariable(LocalVariable* variable,
   // code generation time how far to walk up the context chain in order to
   // access the variable from the current context level.
   if ((*context_owner) == NULL) {
-    ASSERT(num_context_variables_ == 0);
+    ASSERT(num_context_variables() == 0);
     // This scope becomes the current context owner.
     set_context_level(1);
     *context_owner = this;
@@ -167,7 +163,7 @@ void LocalScope::AllocateContextVariable(LocalVariable* variable,
     // The captured variable is in a child scope of the context owner and we do
     // not share contexts.
     // This scope will allocate and chain a new context.
-    ASSERT(num_context_variables_ == 0);
+    ASSERT(num_context_variables() == 0);
     // This scope becomes the current context owner.
     set_context_level((*context_owner)->context_level() + 1);
     *context_owner = this;
@@ -175,7 +171,7 @@ void LocalScope::AllocateContextVariable(LocalVariable* variable,
     ASSERT(FLAG_share_enclosing_context);
     // The captured variable is at a deeper loop level than the current context.
     // This scope will allocate and chain a new context.
-    ASSERT(num_context_variables_ == 0);
+    ASSERT(num_context_variables() == 0);
     // This scope becomes the current context owner.
     set_context_level((*context_owner)->context_level() + 1);
     *context_owner = this;
@@ -188,15 +184,23 @@ void LocalScope::AllocateContextVariable(LocalVariable* variable,
       ASSERT(context_level() == (*context_owner)->context_level());
     }
   }
-  variable->set_index((*context_owner)->num_context_variables_++);
+
+  (*context_owner)->AddContextVariable(variable);
 }
 
+void LocalScope::AddContextVariable(LocalVariable* variable) {
+  variable->set_index(VariableIndex(context_variables_.length()));
+  context_variables_.Add(variable);
+  context_slots_->Add(
+      &Slot::GetContextVariableSlotFor(Thread::Current(), *variable));
+}
 
-int LocalScope::AllocateVariables(int first_parameter_index,
-                                  int num_parameters,
-                                  int first_frame_index,
-                                  LocalScope* context_owner,
-                                  bool* found_captured_variables) {
+VariableIndex LocalScope::AllocateVariables(const Function& function,
+                                            VariableIndex first_parameter_index,
+                                            int num_parameters,
+                                            VariableIndex first_local_index,
+                                            LocalScope* context_owner,
+                                            bool* found_captured_variables) {
   // We should not allocate variables of nested functions while compiling an
   // enclosing function.
   ASSERT(function_level() == 0);
@@ -204,7 +208,83 @@ int LocalScope::AllocateVariables(int first_parameter_index,
   // Parameters must be listed first and must all appear in the top scope.
   ASSERT(num_parameters <= num_variables());
   int pos = 0;                              // Current variable position.
-  int frame_index = first_parameter_index;  // Current free frame index.
+  VariableIndex next_index =
+      first_parameter_index;  // Current free frame index.
+
+  LocalVariable* await_jump_var = nullptr;
+  LocalVariable* async_future = nullptr;
+  LocalVariable* controller = nullptr;
+  LocalVariable* chained_future = nullptr;
+  LocalVariable* is_sync = nullptr;
+  for (intptr_t i = 0; i < num_variables(); i++) {
+    LocalVariable* variable = VariableAt(i);
+    if (variable->owner() == this) {
+      if (variable->is_captured()) {
+        if (variable->name().Equals(Symbols::AwaitJumpVar())) {
+          await_jump_var = variable;
+        } else if (variable->name().Equals(Symbols::AsyncFuture())) {
+          async_future = variable;
+        } else if (variable->name().Equals(Symbols::Controller())) {
+          controller = variable;
+        } else if (variable->is_chained_future()) {
+          chained_future = variable;
+        } else if (variable->name().Equals(Symbols::is_sync())) {
+          is_sync = variable;
+        }
+      }
+    }
+  }
+  // If we are in an async/async* function, force :await_jump_var and
+  // :async_future to be at fixed locations in the slot.
+  if (await_jump_var != nullptr) {
+    AllocateContextVariable(await_jump_var, &context_owner);
+    *found_captured_variables = true;
+    ASSERT(await_jump_var->index().value() == Context::kAwaitJumpVarIndex);
+  }
+  if (async_future != nullptr) {
+    AllocateContextVariable(async_future, &context_owner);
+    *found_captured_variables = true;
+    ASSERT(async_future->index().value() == Context::kAsyncFutureIndex);
+  }
+  if (controller != nullptr) {
+    AllocateContextVariable(controller, &context_owner);
+    *found_captured_variables = true;
+    ASSERT(controller->index().value() == Context::kControllerIndex);
+  }
+  if (chained_future != nullptr) {
+    AllocateContextVariable(chained_future, &context_owner);
+    *found_captured_variables = true;
+    // Remember context indices of _future variables in _Future.timeout and
+    // Future.wait. They are used while collecting async stack traces.
+    if (function.recognized_kind() == MethodRecognizer::kFutureTimeout) {
+#ifdef DEBUG
+      auto old_value = IsolateGroup::Current()
+                           ->object_store()
+                           ->future_timeout_future_index();
+      ASSERT(old_value == Object::null() ||
+             Smi::Value(old_value) == chained_future->index().value());
+#endif  // DEBUG
+      IsolateGroup::Current()->object_store()->set_future_timeout_future_index(
+          Smi::Handle(Smi::New(chained_future->index().value())));
+    } else if (function.recognized_kind() == MethodRecognizer::kFutureWait) {
+#ifdef DEBUG
+      auto old_value =
+          IsolateGroup::Current()->object_store()->future_wait_future_index();
+      ASSERT(old_value == Object::null() ||
+             Smi::Value(old_value) == chained_future->index().value());
+#endif  // DEBUG
+      IsolateGroup::Current()->object_store()->set_future_wait_future_index(
+          Smi::Handle(Smi::New(chained_future->index().value())));
+    } else {
+      UNREACHABLE();
+    }
+  }
+  if (is_sync != nullptr) {
+    AllocateContextVariable(is_sync, &context_owner);
+    *found_captured_variables = true;
+    ASSERT(is_sync->index().value() == Context::kIsSyncIndex);
+  }
+
   while (pos < num_parameters) {
     LocalVariable* parameter = VariableAt(pos);
     pos++;
@@ -217,97 +297,114 @@ int LocalScope::AllocateVariables(int first_parameter_index,
       // A captured parameter has a slot allocated in the frame and one in the
       // context, where it gets copied to. The parameter index reflects the
       // context allocation index.
-      frame_index--;
+      next_index = VariableIndex(next_index.value() - 1);
       AllocateContextVariable(parameter, &context_owner);
       *found_captured_variables = true;
     } else {
-      parameter->set_index(frame_index--);
+      parameter->set_index(next_index);
+      next_index = VariableIndex(next_index.value() - 1);
     }
   }
   // No overlapping of parameters and locals.
-  ASSERT(frame_index >= first_frame_index);
-  frame_index = first_frame_index;
+  ASSERT(next_index.value() >= first_local_index.value());
+  next_index = first_local_index;
   while (pos < num_variables()) {
     LocalVariable* variable = VariableAt(pos);
-    pos++;
     if (variable->owner() == this) {
       if (variable->is_captured()) {
-        AllocateContextVariable(variable, &context_owner);
-        *found_captured_variables = true;
+        // Skip the variables already pre-allocated above.
+        if (variable != await_jump_var && variable != async_future &&
+            variable != controller && variable != chained_future &&
+            variable != is_sync) {
+          AllocateContextVariable(variable, &context_owner);
+          *found_captured_variables = true;
+        }
       } else {
-        variable->set_index(frame_index--);
+        variable->set_index(next_index);
+        next_index = VariableIndex(next_index.value() - 1);
       }
     }
+    pos++;
   }
   // Allocate variables of all children.
-  int min_frame_index = frame_index;  // Frame index decreases with allocations.
+  VariableIndex min_index = next_index;
   LocalScope* child = this->child();
   while (child != NULL) {
-    int const dummy_parameter_index = 0;    // Ignored, since no parameters.
-    int const num_parameters_in_child = 0;  // No parameters in children scopes.
-    int child_frame_index = child->AllocateVariables(
-        dummy_parameter_index, num_parameters_in_child, frame_index,
+    // Ignored, since no parameters.
+    const VariableIndex dummy_parameter_index(0);
+
+    // No parameters in children scopes.
+    const int num_parameters_in_child = 0;
+    VariableIndex child_next_index = child->AllocateVariables(
+        function, dummy_parameter_index, num_parameters_in_child, next_index,
         context_owner, found_captured_variables);
-    if (child_frame_index < min_frame_index) {
-      min_frame_index = child_frame_index;
+    if (child_next_index.value() < min_index.value()) {
+      min_index = child_next_index;
     }
     child = child->sibling();
   }
-  return min_frame_index;
+  return min_index;
 }
-
 
 // The parser creates internal variables that start with ":"
 static bool IsFilteredIdentifier(const String& str) {
   ASSERT(str.Length() > 0);
-  if (str.raw() == Symbols::AsyncOperation().raw()) {
+  if (str.ptr() == Symbols::AsyncOperation().ptr()) {
     // Keep :async_op for asynchronous debugging.
     return false;
   }
-  if (str.raw() == Symbols::AsyncCompleter().raw()) {
-    // Keep :async_completer for asynchronous debugging.
+  if (str.ptr() == Symbols::AsyncFuture().ptr()) {
+    // Keep :async_future for asynchronous debugging.
     return false;
   }
-  if (str.raw() == Symbols::ControllerStream().raw()) {
+  if (str.ptr() == Symbols::ControllerStream().ptr()) {
     // Keep :controller_stream for asynchronous debugging.
     return false;
   }
-  if (str.raw() == Symbols::AwaitJumpVar().raw()) {
+  if (str.ptr() == Symbols::AwaitJumpVar().ptr()) {
     // Keep :await_jump_var for asynchronous debugging.
     return false;
   }
-  if (str.raw() == Symbols::AsyncStackTraceVar().raw()) {
-    // Keep :async_stack_trace for asynchronous debugging.
+  if (str.ptr() == Symbols::is_sync().ptr()) {
+    // Keep :is_sync for asynchronous debugging.
+    return false;
+  }
+  if (str.ptr() == Symbols::FunctionTypeArgumentsVar().ptr()) {
+    // Keep :function_type_arguments for accessing type variables in debugging.
     return false;
   }
   return str.CharAt(0) == ':';
 }
 
+LocalVarDescriptorsPtr LocalScope::GetVarDescriptors(
+    const Function& func,
+    ZoneGrowableArray<intptr_t>* context_level_array) {
+  LocalVarDescriptorsBuilder vars;
+  vars.AddDeoptIdToContextLevelMappings(context_level_array);
 
-RawLocalVarDescriptors* LocalScope::GetVarDescriptors(const Function& func) {
-  GrowableArray<VarDesc> vars(8);
   // First enter all variables from scopes of outer functions.
   const ContextScope& context_scope =
       ContextScope::Handle(func.context_scope());
   if (!context_scope.IsNull()) {
-    ASSERT(func.IsLocalFunction());
+    ASSERT(func.HasParent());
     for (int i = 0; i < context_scope.num_variables(); i++) {
       String& name = String::Handle(context_scope.NameAt(i));
-      RawLocalVarDescriptors::VarInfoKind kind;
+      UntaggedLocalVarDescriptors::VarInfoKind kind;
       if (!IsFilteredIdentifier(name)) {
-        kind = RawLocalVarDescriptors::kContextVar;
+        kind = UntaggedLocalVarDescriptors::kContextVar;
       } else {
         continue;
       }
 
-      VarDesc desc;
+      LocalVarDescriptorsBuilder::VarDesc desc;
       desc.name = &name;
       desc.info.set_kind(kind);
       desc.info.scope_id = context_scope.ContextLevelAt(i);
       desc.info.declaration_pos = context_scope.DeclarationTokenIndexAt(i);
       desc.info.begin_pos = begin_token_pos();
       desc.info.end_pos = end_token_pos();
-      ASSERT(desc.info.begin_pos <= desc.info.end_pos);
+      ASSERT((desc.info.begin_pos.IsReal() != desc.info.end_pos.IsReal()) ||
+             (desc.info.begin_pos <= desc.info.end_pos));
       desc.info.set_index(context_scope.ContextIndexAt(i));
       vars.Add(desc);
     }
@@ -316,65 +413,46 @@ RawLocalVarDescriptors* LocalScope::GetVarDescriptors(const Function& func) {
   int16_t scope_id = 0;
   CollectLocalVariables(&vars, &scope_id);
 
-  if (vars.length() == 0) {
-    return Object::empty_var_descriptors().raw();
-  }
-  const LocalVarDescriptors& var_desc =
-      LocalVarDescriptors::Handle(LocalVarDescriptors::New(vars.length()));
-  for (int i = 0; i < vars.length(); i++) {
-    var_desc.SetVar(i, *(vars[i].name), &vars[i].info);
-  }
-  return var_desc.raw();
+  return vars.Done();
 }
-
 
 // Add visible variables that are declared in this scope to vars, then
 // collect visible variables of children, followed by siblings.
-void LocalScope::CollectLocalVariables(GrowableArray<VarDesc>* vars,
+void LocalScope::CollectLocalVariables(LocalVarDescriptorsBuilder* vars,
                                        int16_t* scope_id) {
   (*scope_id)++;
-  if (num_context_variables() > 0) {
-    VarDesc desc;
-    desc.name = &Symbols::Empty();  // No name.
-    desc.info.set_kind(RawLocalVarDescriptors::kContextLevel);
-    desc.info.scope_id = *scope_id;
-    desc.info.begin_pos = begin_token_pos();
-    desc.info.end_pos = end_token_pos();
-    desc.info.set_index(context_level());
-    vars->Add(desc);
-  }
   for (int i = 0; i < this->variables_.length(); i++) {
     LocalVariable* var = variables_[i];
     if ((var->owner() == this) && !var->is_invisible()) {
-      if (var->name().raw() == Symbols::CurrentContextVar().raw()) {
+      if (var->name().ptr() == Symbols::CurrentContextVar().ptr()) {
         // This is the local variable in which the function saves its
         // own context before calling a closure function.
-        VarDesc desc;
+        LocalVarDescriptorsBuilder::VarDesc desc;
         desc.name = &var->name();
-        desc.info.set_kind(RawLocalVarDescriptors::kSavedCurrentContext);
+        desc.info.set_kind(UntaggedLocalVarDescriptors::kSavedCurrentContext);
         desc.info.scope_id = 0;
         desc.info.declaration_pos = TokenPosition::kMinSource;
         desc.info.begin_pos = TokenPosition::kMinSource;
         desc.info.end_pos = TokenPosition::kMinSource;
-        desc.info.set_index(var->index());
+        desc.info.set_index(var->index().value());
         vars->Add(desc);
       } else if (!IsFilteredIdentifier(var->name())) {
         // This is a regular Dart variable, either stack-based or captured.
-        VarDesc desc;
+        LocalVarDescriptorsBuilder::VarDesc desc;
         desc.name = &var->name();
         if (var->is_captured()) {
-          desc.info.set_kind(RawLocalVarDescriptors::kContextVar);
+          desc.info.set_kind(UntaggedLocalVarDescriptors::kContextVar);
           ASSERT(var->owner() != NULL);
           ASSERT(var->owner()->context_level() >= 0);
           desc.info.scope_id = var->owner()->context_level();
         } else {
-          desc.info.set_kind(RawLocalVarDescriptors::kStackVar);
+          desc.info.set_kind(UntaggedLocalVarDescriptors::kStackVar);
           desc.info.scope_id = *scope_id;
         }
+        desc.info.set_index(var->index().value());
         desc.info.declaration_pos = var->declaration_token_pos();
         desc.info.begin_pos = var->token_pos();
         desc.info.end_pos = var->owner()->end_token_pos();
-        desc.info.set_index(var->index());
         vars->Add(desc);
       }
     }
@@ -386,31 +464,28 @@ void LocalScope::CollectLocalVariables(GrowableArray<VarDesc>* vars,
   }
 }
 
-
 SourceLabel* LocalScope::LocalLookupLabel(const String& name) const {
   ASSERT(name.IsSymbol());
   for (intptr_t i = 0; i < labels_.length(); i++) {
     SourceLabel* label = labels_[i];
-    if (label->name().raw() == name.raw()) {
+    if (label->name().ptr() == name.ptr()) {
       return label;
     }
   }
   return NULL;
 }
 
-
 LocalVariable* LocalScope::LocalLookupVariable(const String& name) const {
   ASSERT(name.IsSymbol());
   for (intptr_t i = 0; i < variables_.length(); i++) {
     LocalVariable* var = variables_[i];
     ASSERT(var->name().IsSymbol());
-    if (var->name().raw() == name.raw()) {
+    if (var->name().ptr() == name.ptr()) {
       return var;
     }
   }
   return NULL;
 }
-
 
 LocalVariable* LocalScope::LookupVariable(const String& name, bool test_only) {
   LocalScope* current_scope = this;
@@ -428,9 +503,9 @@ LocalVariable* LocalScope::LookupVariable(const String& name, bool test_only) {
   return NULL;
 }
 
-
 void LocalScope::CaptureVariable(LocalVariable* variable) {
   ASSERT(variable != NULL);
+
   // The variable must exist in an enclosing scope, not necessarily in this one.
   variable->set_is_captured();
   const int variable_function_level = variable->owner()->function_level();
@@ -454,7 +529,6 @@ void LocalScope::CaptureVariable(LocalVariable* variable) {
   }
 }
 
-
 SourceLabel* LocalScope::LookupLabel(const String& name) {
   LocalScope* current_scope = this;
   while (current_scope != NULL) {
@@ -466,7 +540,6 @@ SourceLabel* LocalScope::LookupLabel(const String& name) {
   }
   return NULL;
 }
-
 
 SourceLabel* LocalScope::LookupInnermostLabel(Token::Kind jump_kind) {
   ASSERT((jump_kind == Token::kCONTINUE) || (jump_kind == Token::kBREAK));
@@ -487,7 +560,6 @@ SourceLabel* LocalScope::LookupInnermostLabel(Token::Kind jump_kind) {
   return NULL;
 }
 
-
 LocalScope* LocalScope::LookupSwitchScope() {
   LocalScope* current_scope = this->parent();
   int this_level = this->function_level();
@@ -507,7 +579,6 @@ LocalScope* LocalScope::LookupSwitchScope() {
   return NULL;
 }
 
-
 SourceLabel* LocalScope::CheckUnresolvedLabels() {
   for (int i = 0; i < this->labels_.length(); i++) {
     SourceLabel* label = this->labels_[i];
@@ -522,7 +593,6 @@ SourceLabel* LocalScope::CheckUnresolvedLabels() {
   }
   return NULL;
 }
-
 
 int LocalScope::NumCapturedVariables() const {
   // It is not necessary to traverse parent scopes, since we are only interested
@@ -548,8 +618,7 @@ int LocalScope::NumCapturedVariables() const {
   return num_captured;
 }
 
-
-RawContextScope* LocalScope::PreserveOuterScope(
+ContextScopePtr LocalScope::PreserveOuterScope(
     int current_context_level) const {
   // Since code generation for nested functions is postponed until first
   // invocation, the function level of the closure scope can only be 1.
@@ -573,14 +642,20 @@ RawContextScope* LocalScope::PreserveOuterScope(
       context_scope.SetDeclarationTokenIndexAt(
           captured_idx, variable->declaration_token_pos());
       context_scope.SetNameAt(captured_idx, variable->name());
+      context_scope.ClearFlagsAt(captured_idx);
       context_scope.SetIsFinalAt(captured_idx, variable->is_final());
+      context_scope.SetIsLateAt(captured_idx, variable->is_late());
+      if (variable->is_late()) {
+        context_scope.SetLateInitOffsetAt(captured_idx,
+                                          variable->late_init_offset());
+      }
       context_scope.SetIsConstAt(captured_idx, variable->IsConst());
       if (variable->IsConst()) {
         context_scope.SetConstValueAt(captured_idx, *variable->ConstValue());
       } else {
         context_scope.SetTypeAt(captured_idx, variable->type());
       }
-      context_scope.SetContextIndexAt(captured_idx, variable->index());
+      context_scope.SetContextIndexAt(captured_idx, variable->index().value());
       // Adjust the context level relative to the current context level,
       // since the context of the current scope will be at level 0 when
       // compiling the nested function.
@@ -591,9 +666,8 @@ RawContextScope* LocalScope::PreserveOuterScope(
     }
   }
   ASSERT(context_scope.num_variables() == captured_idx);  // Verify count.
-  return context_scope.raw();
+  return context_scope.ptr();
 }
-
 
 LocalScope* LocalScope::RestoreOuterScope(const ContextScope& context_scope) {
   // The function level of the outer scope is one less than the function level
@@ -617,9 +691,13 @@ LocalScope* LocalScope::RestoreOuterScope(const ContextScope& context_scope) {
                             AbstractType::ZoneHandle(context_scope.TypeAt(i)));
     }
     variable->set_is_captured();
-    variable->set_index(context_scope.ContextIndexAt(i));
+    variable->set_index(VariableIndex(context_scope.ContextIndexAt(i)));
     if (context_scope.IsFinalAt(i)) {
       variable->set_is_final();
+    }
+    if (context_scope.IsLateAt(i)) {
+      variable->set_is_late();
+      variable->set_late_init_offset(context_scope.LateInitOffsetAt(i));
     }
     // Create a fake owner scope describing the index and context level of the
     // variable. Function level and loop level are unused (set to 0), since
@@ -633,7 +711,6 @@ LocalScope* LocalScope::RestoreOuterScope(const ContextScope& context_scope) {
   return outer_scope;
 }
 
-
 void LocalScope::CaptureLocalVariables(LocalScope* top_scope) {
   ASSERT(top_scope->function_level() == function_level());
   LocalScope* scope = this;
@@ -641,9 +718,11 @@ void LocalScope::CaptureLocalVariables(LocalScope* top_scope) {
     for (intptr_t i = 0; i < scope->num_variables(); i++) {
       LocalVariable* variable = scope->VariableAt(i);
       if (variable->is_forced_stack() ||
-          (variable->name().raw() == Symbols::StackTraceVar().raw()) ||
-          (variable->name().raw() == Symbols::ExceptionVar().raw()) ||
-          (variable->name().raw() == Symbols::SavedTryContextVar().raw())) {
+          (variable->name().ptr() == Symbols::ExceptionVar().ptr()) ||
+          (variable->name().ptr() == Symbols::SavedTryContextVar().ptr()) ||
+          (variable->name().ptr() == Symbols::ArgDescVar().ptr()) ||
+          (variable->name().ptr() ==
+           Symbols::FunctionTypeArgumentsVar().ptr())) {
         // Don't capture those variables because the VM expects them to be on
         // the stack.
         continue;
@@ -654,8 +733,7 @@ void LocalScope::CaptureLocalVariables(LocalScope* top_scope) {
   }
 }
 
-
-RawContextScope* LocalScope::CreateImplicitClosureScope(const Function& func) {
+ContextScopePtr LocalScope::CreateImplicitClosureScope(const Function& func) {
   static const intptr_t kNumCapturedVars = 1;
 
   // Create a ContextScope with space for kNumCapturedVars descriptors.
@@ -666,6 +744,7 @@ RawContextScope* LocalScope::CreateImplicitClosureScope(const Function& func) {
   context_scope.SetTokenIndexAt(0, func.token_pos());
   context_scope.SetDeclarationTokenIndexAt(0, func.token_pos());
   context_scope.SetNameAt(0, Symbols::This());
+  context_scope.ClearFlagsAt(0);
   context_scope.SetIsFinalAt(0, true);
   context_scope.SetIsConstAt(0, false);
   const AbstractType& type = AbstractType::Handle(func.ParameterTypeAt(0));
@@ -673,9 +752,8 @@ RawContextScope* LocalScope::CreateImplicitClosureScope(const Function& func) {
   context_scope.SetContextIndexAt(0, 0);
   context_scope.SetContextLevelAt(0, 0);
   ASSERT(context_scope.num_variables() == kNumCapturedVars);  // Verify count.
-  return context_scope.raw();
+  return context_scope.ptr();
 }
-
 
 bool LocalVariable::Equals(const LocalVariable& other) const {
   if (HasIndex() && other.HasIndex() && (index() == other.index())) {
@@ -691,21 +769,63 @@ bool LocalVariable::Equals(const LocalVariable& other) const {
   return false;
 }
 
-
-int LocalVariable::BitIndexIn(intptr_t fixed_parameter_count) const {
-  ASSERT(!is_captured());
-  // Parameters have positive indexes with the lowest index being
-  // kParamEndSlotFromFp + 1.  Locals and copied parameters have negative
-  // indexes with the lowest (closest to 0) index being kFirstLocalSlotFromFp.
-  if (index() > 0) {
-    // Shift non-negative indexes so that the lowest one is 0.
-    return fixed_parameter_count - (index() - kParamEndSlotFromFp);
-  } else {
-    // Shift negative indexes so that the lowest one is 0 (they are still
-    // non-positive).
-    return fixed_parameter_count - (index() - kFirstLocalSlotFromFp);
+void LocalVarDescriptorsBuilder::AddAll(Zone* zone,
+                                        const LocalVarDescriptors& var_descs) {
+  for (intptr_t i = 0, n = var_descs.Length(); i < n; ++i) {
+    VarDesc desc;
+    desc.name = &String::Handle(zone, var_descs.GetName(i));
+    var_descs.GetInfo(i, &desc.info);
+    Add(desc);
   }
 }
 
+void LocalVarDescriptorsBuilder::AddDeoptIdToContextLevelMappings(
+    ZoneGrowableArray<intptr_t>* context_level_array) {
+  // Record deopt-id -> context-level mappings, using ranges of deopt-ids with
+  // the same context-level. [context_level_array] contains (deopt_id,
+  // context_level) tuples.
+  for (intptr_t start = 0; start < context_level_array->length();) {
+    intptr_t start_deopt_id = (*context_level_array)[start];
+    intptr_t start_context_level = (*context_level_array)[start + 1];
+    intptr_t end = start;
+    intptr_t end_deopt_id = start_deopt_id;
+    for (intptr_t peek = start + 2; peek < context_level_array->length();
+         peek += 2) {
+      intptr_t peek_deopt_id = (*context_level_array)[peek];
+      intptr_t peek_context_level = (*context_level_array)[peek + 1];
+      // The range encoding assumes the tuples have ascending deopt_ids.
+      ASSERT(peek_deopt_id > end_deopt_id);
+      if (peek_context_level != start_context_level) break;
+      end = peek;
+      end_deopt_id = peek_deopt_id;
+    }
+
+    VarDesc desc;
+    desc.name = &Symbols::Empty();  // No name.
+    desc.info.set_kind(UntaggedLocalVarDescriptors::kContextLevel);
+    desc.info.scope_id = 0;
+    // We repurpose the token position fields to store deopt IDs in this case.
+    desc.info.begin_pos = TokenPosition::Deserialize(start_deopt_id);
+    desc.info.end_pos = TokenPosition::Deserialize(end_deopt_id);
+    desc.info.set_index(start_context_level);
+    Add(desc);
+
+    start = end + 2;
+  }
+}
+
+LocalVarDescriptorsPtr LocalVarDescriptorsBuilder::Done() {
+  if (vars_.is_empty()) {
+    return Object::empty_var_descriptors().ptr();
+  }
+  const LocalVarDescriptors& var_desc =
+      LocalVarDescriptors::Handle(LocalVarDescriptors::New(vars_.length()));
+  for (int i = 0; i < vars_.length(); i++) {
+    var_desc.SetVar(i, *(vars_[i].name), &vars_[i].info);
+  }
+  return var_desc.ptr();
+}
 
 }  // namespace dart
+
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)

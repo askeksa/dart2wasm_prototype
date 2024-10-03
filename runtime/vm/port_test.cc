@@ -2,11 +2,11 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+#include "vm/port.h"
 #include "platform/assert.h"
 #include "vm/lockers.h"
 #include "vm/message_handler.h"
 #include "vm/os.h"
-#include "vm/port.h"
 #include "vm/unit_test.h"
 
 namespace dart {
@@ -16,19 +16,19 @@ class PortMapTestPeer {
  public:
   static bool IsActivePort(Dart_Port port) {
     MutexLocker ml(PortMap::mutex_);
-    return (PortMap::FindPort(port) >= 0);
+    auto it = PortMap::ports_->TryLookup(port);
+    return it != PortMap::ports_->end();
   }
 
   static bool IsLivePort(Dart_Port port) {
     MutexLocker ml(PortMap::mutex_);
-    intptr_t index = PortMap::FindPort(port);
-    if (index < 0) {
+    auto it = PortMap::ports_->TryLookup(port);
+    if (it == PortMap::ports_->end()) {
       return false;
     }
-    return PortMap::map_[index].state == PortMap::kLivePort;
+    return (*it).state == PortMap::kLivePort;
   }
 };
-
 
 class PortTestMessageHandler : public MessageHandler {
  public:
@@ -36,11 +36,10 @@ class PortTestMessageHandler : public MessageHandler {
 
   void MessageNotify(Message::Priority priority) { notify_count++; }
 
-  MessageStatus HandleMessage(Message* message) { return kOK; }
+  MessageStatus HandleMessage(std::unique_ptr<Message> message) { return kOK; }
 
   int notify_count;
 };
-
 
 TEST_CASE(PortMap_CreateAndCloseOnePort) {
   PortTestMessageHandler handler;
@@ -51,7 +50,6 @@ TEST_CASE(PortMap_CreateAndCloseOnePort) {
   PortMap::ClosePort(port);
   EXPECT(!PortMapTestPeer::IsActivePort(port));
 }
-
 
 TEST_CASE(PortMap_CreateAndCloseTwoPorts) {
   PortTestMessageHandler handler;
@@ -72,7 +70,6 @@ TEST_CASE(PortMap_CreateAndCloseTwoPorts) {
   EXPECT(!PortMapTestPeer::IsActivePort(port2));
 }
 
-
 TEST_CASE(PortMap_ClosePorts) {
   PortTestMessageHandler handler;
   Dart_Port port1 = PortMap::CreatePort(&handler);
@@ -86,7 +83,6 @@ TEST_CASE(PortMap_ClosePorts) {
   EXPECT(!PortMapTestPeer::IsActivePort(port2));
 }
 
-
 TEST_CASE(PortMap_CreateManyPorts) {
   PortTestMessageHandler handler;
   for (int i = 0; i < 32; i++) {
@@ -96,7 +92,6 @@ TEST_CASE(PortMap_CreateManyPorts) {
     EXPECT(!PortMapTestPeer::IsActivePort(port));
   }
 }
-
 
 TEST_CASE(PortMap_SetPortState) {
   PortTestMessageHandler handler;
@@ -110,6 +105,11 @@ TEST_CASE(PortMap_SetPortState) {
   PortMap::SetPortState(port, PortMap::kLivePort);
   EXPECT(PortMapTestPeer::IsActivePort(port));
   EXPECT(PortMapTestPeer::IsLivePort(port));
+
+  // Inactive port.
+  PortMap::SetPortState(port, PortMap::kInactivePort);
+  EXPECT(PortMapTestPeer::IsActivePort(port));
+  EXPECT(!PortMapTestPeer::IsLivePort(port));
 
   PortMap::ClosePort(port);
   EXPECT(!PortMapTestPeer::IsActivePort(port));
@@ -130,7 +130,6 @@ TEST_CASE(PortMap_SetPortState) {
   EXPECT(!PortMapTestPeer::IsLivePort(port));
 }
 
-
 TEST_CASE(PortMap_PostMessage) {
   PortTestMessageHandler handler;
   Dart_Port port = PortMap::CreatePort(&handler);
@@ -140,14 +139,13 @@ TEST_CASE(PortMap_PostMessage) {
   intptr_t message_len = strlen(message) + 1;
 
   EXPECT(PortMap::PostMessage(
-      new Message(port, reinterpret_cast<uint8_t*>(strdup(message)),
-                  message_len, Message::kNormalPriority)));
+      Message::New(port, reinterpret_cast<uint8_t*>(Utils::StrDup(message)),
+                   message_len, nullptr, Message::kNormalPriority)));
 
   // Check that the message notify callback was called.
   EXPECT_EQ(1, handler.notify_count);
   PortMap::ClosePorts(&handler);
 }
-
 
 TEST_CASE(PortMap_PostIntegerMessage) {
   PortTestMessageHandler handler;
@@ -155,13 +153,12 @@ TEST_CASE(PortMap_PostIntegerMessage) {
   EXPECT_EQ(0, handler.notify_count);
 
   EXPECT(PortMap::PostMessage(
-      new Message(port, Smi::New(42), Message::kNormalPriority)));
+      Message::New(port, Smi::New(42), Message::kNormalPriority)));
 
   // Check that the message notify callback was called.
   EXPECT_EQ(1, handler.notify_count);
   PortMap::ClosePorts(&handler);
 }
-
 
 TEST_CASE(PortMap_PostNullMessage) {
   PortTestMessageHandler handler;
@@ -169,13 +166,12 @@ TEST_CASE(PortMap_PostNullMessage) {
   EXPECT_EQ(0, handler.notify_count);
 
   EXPECT(PortMap::PostMessage(
-      new Message(port, Object::null(), Message::kNormalPriority)));
+      Message::New(port, Object::null(), Message::kNormalPriority)));
 
   // Check that the message notify callback was called.
   EXPECT_EQ(1, handler.notify_count);
   PortMap::ClosePorts(&handler);
 }
-
 
 TEST_CASE(PortMap_PostMessageClosedPort) {
   // Create a port id and make it invalid.
@@ -187,8 +183,8 @@ TEST_CASE(PortMap_PostMessageClosedPort) {
   intptr_t message_len = strlen(message) + 1;
 
   EXPECT(!PortMap::PostMessage(
-      new Message(port, reinterpret_cast<uint8_t*>(strdup(message)),
-                  message_len, Message::kNormalPriority)));
+      Message::New(port, reinterpret_cast<uint8_t*>(Utils::StrDup(message)),
+                   message_len, nullptr, Message::kNormalPriority)));
 }
 
 }  // namespace dart

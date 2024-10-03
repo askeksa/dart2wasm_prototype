@@ -7,7 +7,7 @@ import 'dart:convert';
 import 'unicode_tests.dart';
 
 List<int> encode(String str) => new Utf8Encoder().convert(str);
-List<int> encode2(String str) => UTF8.encode(str);
+List<int> encode2(String str) => utf8.encode(str);
 
 void main() {
   for (var test in UNICODE_TESTS) {
@@ -21,12 +21,12 @@ void main() {
 }
 
 void testEncodeSlice() {
-  var encoder = UTF8.encoder;
+  var encoder = utf8.encoder;
   String ascii = "ABCDE";
   Expect.listEquals([0x41, 0x42, 0x43, 0x44, 0x45], encoder.convert(ascii));
   Expect.listEquals([0x41, 0x42, 0x43, 0x44, 0x45], encoder.convert(ascii, 0));
-  Expect
-      .listEquals([0x41, 0x42, 0x43, 0x44, 0x45], encoder.convert(ascii, 0, 5));
+  Expect.listEquals(
+      [0x41, 0x42, 0x43, 0x44, 0x45], encoder.convert(ascii, 0, 5));
   Expect.listEquals([0x42, 0x43, 0x44, 0x45], encoder.convert(ascii, 1));
   Expect.listEquals([0x41, 0x42, 0x43, 0x44], encoder.convert(ascii, 0, 4));
   Expect.listEquals([0x42, 0x43, 0x44], encoder.convert(ascii, 1, 4));
@@ -50,6 +50,6 @@ void testEncodeSlice() {
   Expect.listEquals(
       [0xc2, 0x82, 0xe1, 0x81, 0x81], encoder.convert(unicode, 1, 3));
   // Split in the middle of a surrogate pair.
-  Expect.listEquals([0xc2, 0x82, 0xe1, 0x81, 0x81, 0xed, 0xa0, 0x80],
+  Expect.listEquals([0xc2, 0x82, 0xe1, 0x81, 0x81, 0xef, 0xbf, 0xbd],
       encoder.convert(unicode, 1, 4));
 }

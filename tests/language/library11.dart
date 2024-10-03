@@ -8,12 +8,12 @@ library library11.dart;
 class Library11 {
   Library11(this.fld);
   Library11.namedConstructor(this.fld);
-  func() {
+  int func() {
     return 3;
   }
 
   var fld;
-  static static_func() {
+  static int static_func() {
     return 2;
   }
 
@@ -26,6 +26,6 @@ class Library111<T> {
 }
 
 const int top_level11 = 100;
-top_level_func11() {
+int top_level_func11() {
   return 200;
 }

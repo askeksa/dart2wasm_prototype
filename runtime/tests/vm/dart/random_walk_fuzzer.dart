@@ -18,7 +18,7 @@ import 'dart:math';
 import 'dart:mirrors';
 import 'dart:typed_data';
 
-var blacklist = [
+var excludeList = [
   'dart.io.exit',
   'dart.io.exitCode',
   'dart.io.sleep',
@@ -164,11 +164,11 @@ void setupInterestingValues() {
   addInstance(0.0);
   addInstance(1.0);
   addInstance(2.0);
-  addInstance(double.NAN);
-  addInstance(double.INFINITY);
-  addInstance(double.NEGATIVE_INFINITY);
-  addInstance(double.MIN_POSITIVE);
-  addInstance(double.MAX_FINITE);
+  addInstance(double.nan);
+  addInstance(double.infinity);
+  addInstance(double.negativeInfinity);
+  addInstance(double.minPositive);
+  addInstance(double.maxFinite);
 
   addInstance("foo"); // ASCII string
   addInstance("blåbærgrød"); // Latin1 string
@@ -270,7 +270,7 @@ void fuzz(Candidate c) {
   ObjectMirror receiver = c.mirror;
   MethodMirror method = randomMethodOf(receiver);
   if (method == null) return;
-  if (blacklist.contains(MirrorSystem.getName(method.qualifiedName))) return;
+  if (excludeList.contains(MirrorSystem.getName(method.qualifiedName))) return;
 
   List positional = randomPositionalArgumentsFor(method);
   Map named = randomNamedArgumentsFor(method);

@@ -1,17 +1,9 @@
 /*
- * Copyright (c) 2015, the Dart project authors.
+ * Copyright (c) 2019, the Dart project authors. Please see the AUTHORS file
+ * for details. All rights reserved. Use of this source code is governed by a
+ * BSD-style license that can be found in the LICENSE file.
  *
- * Licensed under the Eclipse Public License v1.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.eclipse.org/legal/epl-v10.html
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the License
- * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
- * or implied. See the License for the specific language governing permissions and limitations under
- * the License.
- *
- * This file has been automatically generated.  Please do not edit it manually.
+ * This file has been automatically generated. Please do not edit it manually.
  * To regenerate the file, use the script "pkg/analysis_server/tool/spec/generate_files".
  */
 package org.dartlang.analysis.server.protocol;
@@ -54,37 +46,49 @@ public class NavigationTarget {
   private final int fileIndex;
 
   /**
-   * The offset of the region to which the user can navigate.
+   * The offset of the name of the target to which the user can navigate.
    */
   private final int offset;
 
   /**
-   * The length of the region to which the user can navigate.
+   * The length of the name of the target to which the user can navigate.
    */
   private final int length;
 
   /**
-   * The one-based index of the line containing the first character of the region.
+   * The one-based index of the line containing the first character of the name of the target.
    */
   private final int startLine;
 
   /**
-   * The one-based index of the column containing the first character of the region.
+   * The one-based index of the column containing the first character of the name of the target.
    */
   private final int startColumn;
+
+  /**
+   * The offset of the target code to which the user can navigate.
+   */
+  private final Integer codeOffset;
+
+  /**
+   * The length of the target code to which the user can navigate.
+   */
+  private final Integer codeLength;
 
   private String file;
 
   /**
    * Constructor for {@link NavigationTarget}.
    */
-  public NavigationTarget(String kind, int fileIndex, int offset, int length, int startLine, int startColumn) {
+  public NavigationTarget(String kind, int fileIndex, int offset, int length, int startLine, int startColumn, Integer codeOffset, Integer codeLength) {
     this.kind = kind;
     this.fileIndex = fileIndex;
     this.offset = offset;
     this.length = length;
     this.startLine = startLine;
     this.startColumn = startColumn;
+    this.codeOffset = codeOffset;
+    this.codeLength = codeLength;
   }
 
   @Override
@@ -97,7 +101,9 @@ public class NavigationTarget {
         other.offset == offset &&
         other.length == length &&
         other.startLine == startLine &&
-        other.startColumn == startColumn;
+        other.startColumn == startColumn &&
+        ObjectUtilities.equals(other.codeOffset, codeOffset) &&
+        ObjectUtilities.equals(other.codeLength, codeLength);
     }
     return false;
   }
@@ -109,7 +115,9 @@ public class NavigationTarget {
     int length = jsonObject.get("length").getAsInt();
     int startLine = jsonObject.get("startLine").getAsInt();
     int startColumn = jsonObject.get("startColumn").getAsInt();
-    return new NavigationTarget(kind, fileIndex, offset, length, startLine, startColumn);
+    Integer codeOffset = jsonObject.get("codeOffset") == null ? null : jsonObject.get("codeOffset").getAsInt();
+    Integer codeLength = jsonObject.get("codeLength") == null ? null : jsonObject.get("codeLength").getAsInt();
+    return new NavigationTarget(kind, fileIndex, offset, length, startLine, startColumn, codeOffset, codeLength);
   }
 
   public static List<NavigationTarget> fromJsonArray(JsonArray jsonArray) {
@@ -129,6 +137,20 @@ public class NavigationTarget {
   }
 
   /**
+   * The length of the target code to which the user can navigate.
+   */
+  public Integer getCodeLength() {
+    return codeLength;
+  }
+
+  /**
+   * The offset of the target code to which the user can navigate.
+   */
+  public Integer getCodeOffset() {
+    return codeOffset;
+  }
+
+  /**
    * The index of the file (in the enclosing navigation response) to navigate to.
    */
   public int getFileIndex() {
@@ -143,28 +165,28 @@ public class NavigationTarget {
   }
 
   /**
-   * The length of the region to which the user can navigate.
+   * The length of the name of the target to which the user can navigate.
    */
   public int getLength() {
     return length;
   }
 
   /**
-   * The offset of the region to which the user can navigate.
+   * The offset of the name of the target to which the user can navigate.
    */
   public int getOffset() {
     return offset;
   }
 
   /**
-   * The one-based index of the column containing the first character of the region.
+   * The one-based index of the column containing the first character of the name of the target.
    */
   public int getStartColumn() {
     return startColumn;
   }
 
   /**
-   * The one-based index of the line containing the first character of the region.
+   * The one-based index of the line containing the first character of the name of the target.
    */
   public int getStartLine() {
     return startLine;
@@ -179,6 +201,8 @@ public class NavigationTarget {
     builder.append(length);
     builder.append(startLine);
     builder.append(startColumn);
+    builder.append(codeOffset);
+    builder.append(codeLength);
     return builder.toHashCode();
   }
 
@@ -194,6 +218,12 @@ public class NavigationTarget {
     jsonObject.addProperty("length", length);
     jsonObject.addProperty("startLine", startLine);
     jsonObject.addProperty("startColumn", startColumn);
+    if (codeOffset != null) {
+      jsonObject.addProperty("codeOffset", codeOffset);
+    }
+    if (codeLength != null) {
+      jsonObject.addProperty("codeLength", codeLength);
+    }
     return jsonObject;
   }
 
@@ -212,7 +242,11 @@ public class NavigationTarget {
     builder.append("startLine=");
     builder.append(startLine + ", ");
     builder.append("startColumn=");
-    builder.append(startColumn);
+    builder.append(startColumn + ", ");
+    builder.append("codeOffset=");
+    builder.append(codeOffset + ", ");
+    builder.append("codeLength=");
+    builder.append(codeLength);
     builder.append("]");
     return builder.toString();
   }

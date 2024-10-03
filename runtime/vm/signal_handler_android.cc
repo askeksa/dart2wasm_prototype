@@ -4,9 +4,9 @@
 
 #include "vm/globals.h"
 #include "vm/instructions.h"
-#include "vm/simulator.h"
 #include "vm/signal_handler.h"
-#if defined(HOST_OS_ANDROID)
+#include "vm/simulator.h"
+#if defined(DART_HOST_OS_ANDROID)
 
 namespace dart {
 
@@ -27,7 +27,6 @@ uintptr_t SignalHandler::GetProgramCounter(const mcontext_t& mcontext) {
   return pc;
 }
 
-
 uintptr_t SignalHandler::GetFramePointer(const mcontext_t& mcontext) {
   uintptr_t fp = 0;
 
@@ -36,7 +35,14 @@ uintptr_t SignalHandler::GetFramePointer(const mcontext_t& mcontext) {
 #elif defined(HOST_ARCH_X64)
   fp = static_cast<uintptr_t>(mcontext.gregs[REG_RBP]);
 #elif defined(HOST_ARCH_ARM)
-  fp = static_cast<uintptr_t>(mcontext.arm_fp);
+  // B1.3.3 Program Status Registers (PSRs)
+  if ((mcontext.arm_cpsr & (1 << 5)) != 0) {
+    // Thumb mode.
+    fp = static_cast<uintptr_t>(mcontext.arm_r7);
+  } else {
+    // ARM mode.
+    fp = static_cast<uintptr_t>(mcontext.arm_fp);
+  }
 #elif defined(HOST_ARCH_ARM64)
   fp = static_cast<uintptr_t>(mcontext.regs[29]);
 #else
@@ -45,7 +51,6 @@ uintptr_t SignalHandler::GetFramePointer(const mcontext_t& mcontext) {
 
   return fp;
 }
-
 
 uintptr_t SignalHandler::GetCStackPointer(const mcontext_t& mcontext) {
   uintptr_t sp = 0;
@@ -64,7 +69,6 @@ uintptr_t SignalHandler::GetCStackPointer(const mcontext_t& mcontext) {
   return sp;
 }
 
-
 uintptr_t SignalHandler::GetDartStackPointer(const mcontext_t& mcontext) {
 #if defined(TARGET_ARCH_ARM64) && !defined(USING_SIMULATOR)
   return static_cast<uintptr_t>(mcontext.regs[SPREG]);
@@ -72,7 +76,6 @@ uintptr_t SignalHandler::GetDartStackPointer(const mcontext_t& mcontext) {
   return GetCStackPointer(mcontext);
 #endif
 }
-
 
 uintptr_t SignalHandler::GetLinkRegister(const mcontext_t& mcontext) {
   uintptr_t lr = 0;
@@ -91,30 +94,48 @@ uintptr_t SignalHandler::GetLinkRegister(const mcontext_t& mcontext) {
   return lr;
 }
 
+void SignalHandler::Install(SignalAction action) {
+  // Bionic implementation of setjmp temporary mangles SP register
+  // in place which breaks signal delivery on the thread stack - when
+  // kernel tries to deliver SIGPROF and we are in the middle of
+  // setjmp SP value is invalid - might be pointing to random memory
+  // or outside of writable space at all. In the first case we
+  // get memory corruption and in the second case kernel would send
+  // SIGSEGV to the process. See b/152210274 for details.
+  // To work around this issue we are using alternative signal stack
+  // to handle SIGPROF signals.
+  stack_t ss;
+  ss.ss_size = SIGSTKSZ;
+  ss.ss_sp = malloc(ss.ss_size);
+  ss.ss_flags = 0;
+  int r = sigaltstack(&ss, NULL);
+  ASSERT(r == 0);
 
-void SignalHandler::InstallImpl(SignalAction action) {
-  struct sigaction act;
-  memset(&act, 0, sizeof(act));
+  struct sigaction act = {};
   act.sa_sigaction = action;
   sigemptyset(&act.sa_mask);
-  act.sa_flags = SA_RESTART | SA_SIGINFO;
-  int r = sigaction(SIGPROF, &act, NULL);
+  act.sa_flags = SA_RESTART | SA_SIGINFO | SA_ONSTACK;
+  r = sigaction(SIGPROF, &act, NULL);
   ASSERT(r == 0);
 }
-
 
 void SignalHandler::Remove() {
   // Ignore future SIGPROF signals because by default SIGPROF will terminate
   // the process and we may have some signals in flight.
-  struct sigaction act;
-  memset(&act, 0, sizeof(act));
+  struct sigaction act = {};
   act.sa_handler = SIG_IGN;
   sigemptyset(&act.sa_mask);
   int r = sigaction(SIGPROF, &act, NULL);
   ASSERT(r == 0);
-}
 
+  // Disable and delete alternative signal stack.
+  stack_t ss, old_ss;
+  ss.ss_flags = SS_DISABLE;
+  r = sigaltstack(&ss, &old_ss);
+  ASSERT(r == 0);
+  free(old_ss.ss_sp);
+}
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_ANDROID)
+#endif  // defined(DART_HOST_OS_ANDROID)

@@ -2,7 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-// VMOptions=--old_gen_heap_size=64
+// VMOptions=--old_gen_heap_size=64 --no-background-compilation
 
 library slow_consumer_test;
 
@@ -17,7 +17,7 @@ const int GB = KB * KB * KB;
 class SlowConsumer extends StreamConsumer {
   var current = new Future.value(0);
   final int bytesPerSecond;
-  int finalCount;
+  late int finalCount;
 
   SlowConsumer(int this.bytesPerSecond);
 
@@ -29,7 +29,8 @@ class SlowConsumer extends StreamConsumer {
     bool done = false;
     Completer completer = new Completer();
     var subscription;
-    subscription = stream.listen((List<int> data) {
+    subscription = stream.listen((dynamic _data) {
+      List data = _data;
       current = current.then((count) {
         // Simulated amount of time it takes to handle the data.
         int ms = data.length * 1000 ~/ bytesPerSecond;
@@ -61,8 +62,8 @@ class DataProvider {
   final int bytesPerSecond;
   int sentCount = 0;
   int targetCount;
-  StreamController controller;
-  Timer pendingSend;
+  late StreamController controller;
+  Timer? pendingSend;
 
   DataProvider(int this.bytesPerSecond, int this.targetCount, this.chunkSize) {
     controller = new StreamController(
@@ -74,7 +75,7 @@ class DataProvider {
 
   send() {
     if (pendingSend != null) {
-      pendingSend.cancel();
+      pendingSend!.cancel();
       pendingSend = null;
     }
     if (controller.isPaused) return;
@@ -88,7 +89,7 @@ class DataProvider {
       listSize -= sentCount - targetCount;
       sentCount = targetCount;
     }
-    controller.add(new List(listSize));
+    controller.add(new List.filled(listSize, null));
     int ms = listSize * 1000 ~/ bytesPerSecond;
     Duration duration = new Duration(milliseconds: ms);
     if (!controller.isPaused) {

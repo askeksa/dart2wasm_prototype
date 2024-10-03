@@ -14,26 +14,32 @@ bool VirtualMemory::InSamePage(uword address0, uword address1) {
           Utils::RoundDown(address1, PageSize()));
 }
 
-
-void VirtualMemory::Truncate(intptr_t new_size, bool try_unmap) {
-  ASSERT((new_size & (PageSize() - 1)) == 0);
+void VirtualMemory::Truncate(intptr_t new_size) {
+  ASSERT(Utils::IsAligned(new_size, PageSize()));
   ASSERT(new_size <= size());
-  if (try_unmap &&
-      (reserved_size_ == size()) && /* Don't create holes in reservation. */
-      FreeSubSegment(handle(), reinterpret_cast<void*>(start() + new_size),
-                     size() - new_size)) {
-    reserved_size_ = new_size;
+  if (reserved_.size() ==
+      region_.size()) {  // Don't create holes in reservation.
+    if (FreeSubSegment(reinterpret_cast<void*>(start() + new_size),
+                       size() - new_size)) {
+      reserved_.set_size(new_size);
+      if (AliasOffset() != 0) {
+        FreeSubSegment(reinterpret_cast<void*>(alias_.start() + new_size),
+                       alias_.size() - new_size);
+      }
+    }
   }
   region_.Subregion(region_, 0, new_size);
+  alias_.Subregion(alias_, 0, new_size);
 }
-
 
 VirtualMemory* VirtualMemory::ForImagePage(void* pointer, uword size) {
   // Memory for precompilated instructions was allocated by the embedder, so
   // create a VirtualMemory without allocating.
   MemoryRegion region(pointer, size);
-  VirtualMemory* memory = new VirtualMemory(region);
-  memory->vm_owns_region_ = false;
+  MemoryRegion reserved(0, 0);  // NULL reservation indicates VM should not
+                                // attempt to free this memory.
+  VirtualMemory* memory = new VirtualMemory(region, region, reserved);
+  ASSERT(!memory->vm_owns_region());
   return memory;
 }
 

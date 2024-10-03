@@ -6,28 +6,20 @@
 #define RUNTIME_VM_MEGAMORPHIC_CACHE_TABLE_H_
 
 #include "vm/allocation.h"
+#include "vm/tagged_pointer.h"
 
 namespace dart {
 
 class Array;
-class Function;
 class Isolate;
-class ObjectPointerVisitor;
-class RawArray;
-class RawFunction;
-class RawCode;
-class RawMegamorphicCache;
-class RawString;
 class String;
+class Thread;
 
 class MegamorphicCacheTable : public AllStatic {
  public:
-  static RawFunction* miss_handler(Isolate* isolate);
-  static void InitMissHandler(Isolate* isolate);
-
-  static RawMegamorphicCache* Lookup(Isolate* isolate,
-                                     const String& name,
-                                     const Array& descriptor);
+  static MegamorphicCachePtr Lookup(Thread* thread,
+                                    const String& name,
+                                    const Array& descriptor);
 
   static void PrintSizes(Isolate* isolate);
 };

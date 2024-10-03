@@ -1,9 +1,10 @@
-// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:io';
 
+import 'package:analyzer/dart/analysis/session.dart';
 import 'package:analyzer/src/lint/project.dart';
 import 'package:test/test.dart';
 
@@ -16,8 +17,8 @@ defineTests() {
     group('basic', () {
       // TODO(brianwilkerson) These tests fail on the bots because the cwd is
       // not the same there as when we run tests locally.
-      group('cwd', () {
-        var project = new DartProject(null, null);
+      group('cwd', () async {
+        var project = await DartProject.create(_AnalysisSessionMock(), []);
         test('name', () {
           expect(project.name, 'analyzer');
         });
@@ -58,4 +59,9 @@ defineTests() {
 //      });
     });
   });
+}
+
+class _AnalysisSessionMock implements AnalysisSession {
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

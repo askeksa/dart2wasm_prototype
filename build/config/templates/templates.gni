@@ -17,8 +17,6 @@
 #     variables = "app_name=chrome_shell app_version=1"
 #   }
 template("file_template") {
-  set_sources_assignment_filter([])
-
   if (defined(invoker.testonly)) {
     testonly = invoker.testonly
   }
@@ -38,9 +36,7 @@ template("file_template") {
     script = "//build/android/gyp/jinja_template.py"
     depfile = "$target_gen_dir/$target_name.d"
 
-    sources = [
-      invoker.input,
-    ]
+    sources = [ invoker.input ]
     outputs = [
       invoker.output,
       depfile,

@@ -8,34 +8,32 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' as M show IsolateRef, ScriptRef;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 
-class ScriptRefElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<ScriptRefElement>('script-ref');
-
-  RenderingScheduler _r;
+class ScriptRefElement extends CustomElement implements Renderable {
+  late RenderingScheduler<ScriptRefElement> _r;
 
   Stream<RenderedEvent<ScriptRefElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.ScriptRef _script;
+  late M.IsolateRef _isolate;
+  late M.ScriptRef _script;
 
   M.IsolateRef get isolate => _isolate;
   M.ScriptRef get script => _script;
 
   factory ScriptRefElement(M.IsolateRef isolate, M.ScriptRef script,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(script != null);
-    ScriptRefElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    ScriptRefElement e = new ScriptRefElement.created();
+    e._r = new RenderingScheduler<ScriptRefElement>(e, queue: queue);
     e._isolate = isolate;
     e._script = script;
     return e;
   }
 
-  ScriptRefElement.created() : super.created();
+  ScriptRefElement.created() : super.created('script-ref');
 
   @override
   void attached() {
@@ -46,15 +44,20 @@ class ScriptRefElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [
+    var displayUri = script.uri!.split('/').last;
+    if (displayUri.isEmpty) {
+      displayUri = 'N/A';
+    }
+
+    children = <Element>[
       new AnchorElement(href: Uris.inspect(isolate, object: script))
-        ..title = script.uri
-        ..text = script.uri.split('/').last
+        ..title = script.uri!
+        ..text = displayUri
     ];
   }
 }

@@ -1,80 +1,77 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library services.completion.contributor.dart.field_formal;
-
-import 'dart:async';
-
-import 'package:analysis_server/src/protocol_server.dart'
-    hide Element, ElementKind;
 import 'package:analysis_server/src/provisional/completion/dart/completion_dart.dart';
+import 'package:analysis_server/src/services/completion/dart/completion_manager.dart';
 import 'package:analysis_server/src/services/completion/dart/suggestion_builder.dart';
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/element.dart';
 
-/**
- * A contributor for calculating invocation / access suggestions
- * `completion.getSuggestions` request results.
- */
+/// A contributor that produces suggestions for field formal parameters that are
+/// based on the fields declared directly by the enclosing class that are not
+/// already initialized. More concretely, this class produces suggestions for
+/// expressions of the form `this.^` in a constructor's parameter list.
 class FieldFormalContributor extends DartCompletionContributor {
+  FieldFormalContributor(
+    DartCompletionRequest request,
+    SuggestionBuilder builder,
+  ) : super(request, builder);
+
   @override
-  Future<List<CompletionSuggestion>> computeSuggestions(
-      DartCompletionRequest request) async {
-    AstNode node = request.target.containingNode;
+  Future<void> computeSuggestions() async {
+    var node = request.target.containingNode;
+    // TODO(brianwilkerson) We should suggest field formal parameters even if
+    //  the user hasn't already typed the `this.` prefix, by including the
+    //  prefix in the completion.
     if (node is! FieldFormalParameter) {
-      return EMPTY_LIST;
+      return;
     }
 
-    // If this is a constructor declaration
-    // then compute fields already referenced
-    ConstructorDeclaration constructorDecl =
-        node.getAncestor((p) => p is ConstructorDeclaration);
-    if (constructorDecl == null) {
-      return EMPTY_LIST;
+    var constructor = node.thisOrAncestorOfType<ConstructorDeclaration>();
+    if (constructor == null) {
+      return;
     }
 
-    // Compute the list of fields already referenced in the constructor
-    List<String> referencedFields = new List<String>();
-    for (FormalParameter param in constructorDecl.parameters.parameters) {
-      if (param is DefaultFormalParameter &&
-          param.parameter is FieldFormalParameter) {
-        param = (param as DefaultFormalParameter).parameter;
+    // Compute the list of fields already referenced in the constructor.
+    // TODO(brianwilkerson) This doesn't include fields in initializers, which
+    //  shouldn't be suggested.
+    var referencedFields = <String>[];
+    for (var param in constructor.parameters.parameters) {
+      if (param is DefaultFormalParameter) {
+        param = param.parameter;
       }
       if (param is FieldFormalParameter) {
-        SimpleIdentifier fieldId = param.identifier;
-        if (fieldId != null && fieldId != request.target.entity) {
-          String fieldName = fieldId.name;
-          if (fieldName != null && fieldName.length > 0) {
+        var fieldId = param.identifier;
+        if (fieldId != request.target.entity) {
+          var fieldName = fieldId.name;
+          if (fieldName.isNotEmpty) {
             referencedFields.add(fieldName);
           }
         }
       }
     }
 
-    // Add suggestions for fields that are not already referenced
-    ClassDeclaration classDecl =
-        constructorDecl.getAncestor((p) => p is ClassDeclaration);
-    List<CompletionSuggestion> suggestions = <CompletionSuggestion>[];
-    for (ClassMember member in classDecl.members) {
+    var enclosingClass = constructor.thisOrAncestorOfType<ClassDeclaration>();
+    if (enclosingClass == null) {
+      return;
+    }
+
+    // Add suggestions for fields that are not already referenced.
+    for (var member in enclosingClass.members) {
       if (member is FieldDeclaration && !member.isStatic) {
-        for (VariableDeclaration varDecl in member.fields.variables) {
-          SimpleIdentifier fieldId = varDecl.name;
-          if (fieldId != null) {
-            String fieldName = fieldId.name;
-            if (fieldName != null && fieldName.length > 0) {
+        for (var variable in member.fields.variables) {
+          var field = variable.name.staticElement;
+          if (field is FieldElement) {
+            var fieldName = field.name;
+            if (fieldName.isNotEmpty) {
               if (!referencedFields.contains(fieldName)) {
-                CompletionSuggestion suggestion = createSuggestion(
-                    fieldId.bestElement, request.ideOptions,
-                    relevance: DART_RELEVANCE_LOCAL_FIELD);
-                if (suggestion != null) {
-                  suggestions.add(suggestion);
-                }
+                builder.suggestFieldFormalParameter(field);
               }
             }
           }
         }
       }
     }
-    return suggestions;
   }
 }

@@ -5,7 +5,7 @@
 library test_dart_copy.status_file_parser;
 
 import "dart:async";
-import "dart:convert" show LineSplitter, UTF8;
+import "dart:convert" show LineSplitter, utf8;
 import "dart:io";
 
 import "path.dart";
@@ -29,18 +29,18 @@ class StatusFile {
 class Section {
   final StatusFile statusFile;
 
-  final BooleanExpression condition;
+  final BooleanExpression? condition;
   final List<TestRule> testRules;
   final int lineNumber;
 
   Section.always(this.statusFile, this.lineNumber)
       : condition = null,
-        testRules = new List<TestRule>();
+        testRules = <TestRule>[];
   Section(this.statusFile, this.condition, this.lineNumber)
-      : testRules = new List<TestRule>();
+      : testRules = <TestRule>[];
 
-  bool isEnabled(environment) =>
-      condition == null || condition.evaluate(environment);
+  bool isEnabled(Map<String, String> environment) =>
+      condition == null || condition!.evaluate(environment);
 
   String toString() {
     return "Section: $condition";
@@ -48,17 +48,17 @@ class Section {
 }
 
 Future<TestExpectations> ReadTestExpectations(List<String> statusFilePaths,
-    Map environment, ExpectationSet expectationSet) {
+    Map<String, String> environment, ExpectationSet expectationSet) {
   var testExpectations = new TestExpectations(expectationSet);
   return Future.wait(statusFilePaths.map((String statusFile) {
     return ReadTestExpectationsInto(testExpectations, statusFile, environment);
   })).then((_) => testExpectations);
 }
 
-Future ReadTestExpectationsInto(
-    TestExpectations expectations, String statusFilePath, environment) {
+Future<void> ReadTestExpectationsInto(TestExpectations expectations,
+    String statusFilePath, Map<String, String> environment) {
   var completer = new Completer();
-  List<Section> sections = new List<Section>();
+  List<Section> sections = <Section>[];
 
   void sectionsRead() {
     for (Section section in sections) {
@@ -75,32 +75,35 @@ Future ReadTestExpectationsInto(
   return completer.future;
 }
 
-void ReadConfigurationInto(Path path, sections, onDone) {
+void ReadConfigurationInto(Path path, List<Section> sections, void onDone()) {
   StatusFile statusFile = new StatusFile(path);
   File file = new File(path.toNativePath());
   if (!file.existsSync()) {
     throw new Exception('Cannot find test status file $path');
   }
   int lineNumber = 0;
-  Stream<String> lines =
-      file.openRead().transform(UTF8.decoder).transform(new LineSplitter());
+  Stream<String> lines = file
+      .openRead()
+      .cast<List<int>>()
+      .transform(utf8.decoder)
+      .transform(new LineSplitter());
 
   Section currentSection = new Section.always(statusFile, -1);
   sections.add(currentSection);
 
   lines.listen((String line) {
     lineNumber++;
-    Match match = SplitComment.firstMatch(line);
-    line = (match == null) ? "" : match[1];
+    Match? match = SplitComment.firstMatch(line);
+    line = (match == null) ? "" : match[1]!;
     line = line.trim();
     if (line.isEmpty) return;
 
     // Extract the comment to get the issue number if needed.
-    String comment = (match == null || match[2] == null) ? "" : match[2];
+    String comment = (match == null || match[2] == null) ? "" : match[2]!;
 
     match = HeaderPattern.firstMatch(line);
     if (match != null) {
-      String condition_string = match[1].trim();
+      String condition_string = match[1]!.trim();
       List<String> tokens = new Tokenizer(condition_string).tokenize();
       ExpressionParser parser = new ExpressionParser(new Scanner(tokens));
       currentSection =
@@ -111,21 +114,21 @@ void ReadConfigurationInto(Path path, sections, onDone) {
 
     match = RulePattern.firstMatch(line);
     if (match != null) {
-      String name = match[1].trim();
+      String name = match[1]!.trim();
       // TODO(whesse): Handle test names ending in a wildcard (*).
-      String expression_string = match[2].trim();
+      String expression_string = match[2]!.trim();
       List<String> tokens = new Tokenizer(expression_string).tokenize();
       SetExpression expression =
           new ExpressionParser(new Scanner(tokens)).parseSetExpression();
 
       // Look for issue number in comment.
-      String issueString = null;
+      String? issueString = null;
       match = IssueNumberPattern.firstMatch(comment);
       if (match != null) {
         issueString = match[1];
         if (issueString == null) issueString = match[2];
       }
-      int issue = issueString != null ? int.parse(issueString) : null;
+      int? issue = issueString != null ? int.parse(issueString) : null;
       currentSection.testRules
           .add(new TestRule(name, expression, issue, lineNumber));
       return;
@@ -138,7 +141,7 @@ void ReadConfigurationInto(Path path, sections, onDone) {
 class TestRule {
   String name;
   SetExpression expression;
-  int issue;
+  int? issue;
   int lineNumber;
 
   TestRule(this.name, this.expression, this.issue, this.lineNumber);
@@ -152,25 +155,25 @@ class TestExpectations {
   // Only create one copy of each Set<Expectation>.
   // We just use .toString as a key, so we may make a few
   // sets that only differ in their toString element order.
-  static Map _cachedSets = new Map();
+  static Map<String, Set<Expectation>> _cachedSets = {};
 
   final ExpectationSet expectationSet;
 
-  Map _map;
+  Map<String, Set<Expectation>> _map;
   bool _preprocessed = false;
-  Map _regExpCache;
-  Map _keyToRegExps;
+  Map<String, RegExp>? _regExpCache;
+  Map<String, List<RegExp>>? _keyToRegExps;
 
   /**
    * Create a TestExpectations object. See the [expectations] method
    * for an explanation of matching.
    */
-  TestExpectations(this.expectationSet) : _map = new Map();
+  TestExpectations(this.expectationSet) : _map = {};
 
   /**
    * Add a rule to the expectations.
    */
-  void addRule(testRule, environment) {
+  void addRule(TestRule testRule, Map<String, String> environment) {
     // Once we have started using the expectations we cannot add more
     // rules.
     if (_preprocessed) {
@@ -193,14 +196,14 @@ class TestExpectations {
    * "^$keyComponent\$" matches the corresponding filename component.
    */
   Set<Expectation> expectations(String filename) {
-    var result = new Set();
+    var result = new Set<Expectation>();
     var splitFilename = filename.split('/');
 
     // Create mapping from keys to list of RegExps once and for all.
     _preprocessForMatching();
 
     _map.forEach((key, expectation) {
-      List regExps = _keyToRegExps[key];
+      List<RegExp> regExps = _keyToRegExps![key]!;
       if (regExps.length > splitFilename.length) return;
       for (var i = 0; i < regExps.length; i++) {
         if (!regExps[i].hasMatch(splitFilename[i])) return;
@@ -224,24 +227,23 @@ class TestExpectations {
   void _preprocessForMatching() {
     if (_preprocessed) return;
 
-    _keyToRegExps = new Map();
-    _regExpCache = new Map();
+    _keyToRegExps = {};
+    _regExpCache = {};
 
     _map.forEach((key, expectations) {
-      if (_keyToRegExps[key] != null) return;
+      if (_keyToRegExps![key] != null) return;
       var splitKey = key.split('/');
-      var regExps = new List(splitKey.length);
-      for (var i = 0; i < splitKey.length; i++) {
+      var regExps = new List<RegExp>.generate(splitKey.length, (int i) {
         var component = splitKey[i];
-        var regExp = _regExpCache[component];
+        var regExp = _regExpCache![component];
         if (regExp == null) {
           var pattern = "^${splitKey[i]}\$".replaceAll('*', '.*');
           regExp = new RegExp(pattern);
-          _regExpCache[component] = regExp;
+          _regExpCache![component] = regExp;
         }
-        regExps[i] = regExp;
-      }
-      _keyToRegExps[key] = regExps;
+        return regExp;
+      }, growable: false);
+      _keyToRegExps![key] = regExps;
     });
 
     _regExpCache = null;

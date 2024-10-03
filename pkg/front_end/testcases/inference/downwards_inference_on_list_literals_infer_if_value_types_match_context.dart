@@ -1,7 +1,7 @@
 // Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
+// @dart=2.9
 /*@testedFeatures=inference*/
 library test;
 
@@ -22,16 +22,16 @@ abstract class C {
   AsserterBuilder<List<Asserter<DartType>>, DartType> get assertDOf;
 
   method(AsserterBuilder<List<Asserter<DartType>>, DartType> assertEOf) {
-    assertAOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+    /*@target=C.assertAOf*/ assertAOf(
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
     assertBOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
     assertCOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
-    assertDOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
+    /*@target=C.assertDOf*/ assertDOf(
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
     assertEOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
   }
 }
 
@@ -40,42 +40,44 @@ abstract class G<T> {
   AsserterBuilder<List<Asserter<DartType>>, DartType> get assertDOf;
 
   method(AsserterBuilder<List<Asserter<DartType>>, DartType> assertEOf) {
-    assertAOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
-    this.assertAOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
-    this.assertDOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+    /*@target=G.assertAOf*/ assertAOf(
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
+    this. /*@target=G.assertAOf*/ assertAOf(
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
+    this. /*@target=G.assertDOf*/ assertDOf(
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
     assertEOf(
-        /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+        /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
   }
 }
 
 AsserterBuilder<List<Asserter<DartType>>, DartType> assertBOf;
 AsserterBuilder<List<Asserter<DartType>>, DartType> get assertCOf => null;
 
-main() {
+test() {
   AsserterBuilder<List<Asserter<DartType>>, DartType> assertAOf;
   assertAOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
   assertBOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
   assertCOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
   C.assertBOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
   C.assertCOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
 
   C c;
-  c.assertAOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
-  c.assertDOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+  c. /*@target=C.assertAOf*/ assertAOf(
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
+  c. /*@target=C.assertDOf*/ assertDOf(
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
 
   G<int> g;
-  g.assertAOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
-  g.assertDOf(
-      /*@typeArgs=<DartType>(DartType) -> void*/ [_isInt, _isString]);
+  g. /*@target=G.assertAOf*/ assertAOf(
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
+  g. /*@target=G.assertDOf*/ assertDOf(
+      /*@ typeArgs=(DartType*) ->* void */ [_isInt, _isString]);
 }
+
+main() {}

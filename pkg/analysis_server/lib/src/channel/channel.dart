@@ -1,44 +1,31 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library channel;
-
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:analysis_server/protocol/protocol.dart';
 
-/**
- * Instances of the class [ChannelChunkSink] uses a [Converter] to translate
- * chunks.
- */
+/// Instances of the class [ChannelChunkSink] uses a [Converter] to translate
+/// chunks.
 class ChannelChunkSink<S, T> extends ChunkedConversionSink<S> {
-  /**
-   * The converter used to translate chunks.
-   */
+  /// The converter used to translate chunks.
   final Converter<S, T> converter;
 
-  /**
-   * The sink to which the converted chunks are added.
-   */
+  /// The sink to which the converted chunks are added.
   final Sink sink;
 
-  /**
-   * A flag indicating whether the sink has been closed.
-   */
+  /// A flag indicating whether the sink has been closed.
   bool closed = false;
 
-  /**
-   * Initialize a newly create sink to use the given [converter] to convert
-   * chunks before adding them to the given [sink].
-   */
+  /// Initialize a newly create sink to use the given [converter] to convert
+  /// chunks before adding them to the given [sink].
   ChannelChunkSink(this.converter, this.sink);
 
   @override
   void add(S chunk) {
     if (!closed) {
-      T convertedChunk = converter.convert(chunk);
+      var convertedChunk = converter.convert(chunk);
       if (convertedChunk != null) {
         sink.add(convertedChunk);
       }
@@ -52,101 +39,74 @@ class ChannelChunkSink<S, T> extends ChunkedConversionSink<S> {
   }
 }
 
-/**
- * The abstract class [ClientCommunicationChannel] defines the behavior of
- * objects that allow a client to send [Request]s to an [AnalysisServer] and to
- * receive both [Response]s and [Notification]s.
- */
+/// The abstract class [ClientCommunicationChannel] defines the behavior of
+/// objects that allow a client to send [Request]s to an [AnalysisServer] and to
+/// receive both [Response]s and [Notification]s.
 abstract class ClientCommunicationChannel {
-  /**
-   * The stream of notifications from the server.
-   */
-  Stream<Notification> notificationStream;
+  /// The stream of notifications from the server.
+  Stream<Notification> get notificationStream;
 
-  /**
-   * The stream of responses from the server.
-   */
-  Stream<Response> responseStream;
+  /// The stream of responses from the server.
+  Stream<Response> get responseStream;
 
-  /**
-   * Close the channel to the server. Once called, all future communication
-   * with the server via [sendRequest] will silently be ignored.
-   */
+  /// Close the channel to the server. Once called, all future communication
+  /// with the server via [sendRequest] will silently be ignored.
   Future close();
 
-  /**
-   * Send the given [request] to the server
-   * and return a future with the associated [Response].
-   */
+  /// Send the given [request] to the server
+  /// and return a future with the associated [Response].
   Future<Response> sendRequest(Request request);
 }
 
-/**
- * Instances of the class [JsonStreamDecoder] convert JSON strings to JSON
- * maps.
- */
-class JsonStreamDecoder extends Converter<String, Map> {
+/// Instances of the class [JsonStreamDecoder] convert JSON strings to values.
+class JsonStreamDecoder extends Converter<String, Object?> {
   @override
-  Map convert(String text) => JSON.decode(text);
+  Object? convert(String text) => json.decode(text);
 
   @override
-  ChunkedConversionSink<String> startChunkedConversion(Sink<Map> sink) =>
-      new ChannelChunkSink<String, Map>(this, sink);
+  ChunkedConversionSink<String> startChunkedConversion(Sink<Object?> sink) =>
+      ChannelChunkSink<String, Object?>(this, sink);
 }
 
-/**
- * Instances of the class [NotificationConverter] convert JSON maps to
- * [Notification]s.
- */
-class NotificationConverter extends Converter<Map, Notification> {
+/// Instances of the class [NotificationConverter] convert JSON maps to
+/// [Notification]s.
+class NotificationConverter
+    extends Converter<Map<String, Object?>, Notification> {
   @override
-  Notification convert(Map json) => new Notification.fromJson(json);
+  Notification convert(Map json) => Notification.fromJson(json);
 
   @override
-  ChunkedConversionSink<Map> startChunkedConversion(Sink<Notification> sink) =>
-      new ChannelChunkSink<Map, Notification>(this, sink);
+  ChunkedConversionSink<Map<String, Object?>> startChunkedConversion(
+          Sink<Notification> sink) =>
+      ChannelChunkSink<Map<String, Object?>, Notification>(this, sink);
 }
 
-/**
- * Instances of the class [ResponseConverter] convert JSON maps to [Response]s.
- */
-class ResponseConverter extends Converter<Map, Response> {
+/// Instances of the class [ResponseConverter] convert JSON maps to [Response]s.
+class ResponseConverter extends Converter<Map<String, Object?>, Response?> {
   @override
-  Response convert(Map json) => new Response.fromJson(json);
+  Response? convert(Map<String, Object?> json) => Response.fromJson(json);
 
   @override
-  ChunkedConversionSink<Map> startChunkedConversion(Sink<Response> sink) =>
-      new ChannelChunkSink<Map, Response>(this, sink);
+  ChunkedConversionSink<Map<String, Object?>> startChunkedConversion(
+    Sink<Response?> sink,
+  ) {
+    return ChannelChunkSink<Map<String, Object?>, Response?>(this, sink);
+  }
 }
 
-/**
- * The abstract class [ServerCommunicationChannel] defines the behavior of
- * objects that allow an [AnalysisServer] to receive [Request]s and to return
- * both [Response]s and [Notification]s.
- */
+/// The abstract class [ServerCommunicationChannel] defines the behavior of
+/// objects that allow an [AnalysisServer] to receive [Request]s and to return
+/// both [Response]s and [Notification]s.
 abstract class ServerCommunicationChannel {
-  /**
-   * Close the communication channel.
-   */
+  /// The single-subscription stream of requests.
+  Stream<Request> get requests;
+
+  /// Close the communication channel.
   void close();
 
-  /**
-   * Listen to the channel for requests. If a request is received, invoke the
-   * [onRequest] function. If an error is encountered while trying to read from
-   * the socket, invoke the [onError] function. If the socket is closed by the
-   * client, invoke the [onDone] function.
-   * Only one listener is allowed per channel.
-   */
-  void listen(void onRequest(Request request),
-      {Function onError, void onDone()});
-
-  /**
-   * Send the given [notification] to the client.
-   */
+  /// Send the given [notification] to the client.
   void sendNotification(Notification notification);
 
-  /**
-   * Send the given [response] to the client.
-   */
+  /// Send the given [response] to the client.
   void sendResponse(Response response);
 }

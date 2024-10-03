@@ -1,17 +1,16 @@
 // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override
 
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'service_test_common.dart';
 import 'test_helper.dart';
 import 'dart:developer';
 
-const int LINE_A = 24;
-const int LINE_B = 27;
-const int LINE_C = 30;
+const int LINE_A = 23;
+const int LINE_B = 26;
+const int LINE_C = 29;
 
 testFunction() {
   debugger();
@@ -36,7 +35,7 @@ testMain() {
   expect(f(), equals(11));
 }
 
-var tests = [
+var tests = <IsolateTest>[
   hasStoppedAtBreakpoint,
 
 // Add breakpoint
@@ -52,8 +51,8 @@ var tests = [
       expect(result is Breakpoint, isTrue);
       Breakpoint bpt = result;
       expect(bpt.type, equals('Breakpoint'));
-      expect(bpt.location.script.id, equals(script.id));
-      expect(bpt.location.script.tokenToLine(bpt.location.tokenPos),
+      expect(bpt.location!.script.id, equals(script.id));
+      expect(bpt.location!.script.tokenToLine(bpt.location!.tokenPos),
           equals(LINE_A));
       expect(isolate.breakpoints.length, equals(1));
     }
@@ -63,8 +62,8 @@ var tests = [
       expect(result is Breakpoint, isTrue);
       Breakpoint bpt = result;
       expect(bpt.type, equals('Breakpoint'));
-      expect(bpt.location.script.id, equals(script.id));
-      expect(bpt.location.script.tokenToLine(bpt.location.tokenPos),
+      expect(bpt.location!.script.id, equals(script.id));
+      expect(bpt.location!.script.tokenToLine(bpt.location!.tokenPos),
           equals(LINE_B));
       expect(isolate.breakpoints.length, equals(2));
     }
@@ -74,8 +73,8 @@ var tests = [
       expect(result is Breakpoint, isTrue);
       Breakpoint bpt = result;
       expect(bpt.type, equals('Breakpoint'));
-      expect(bpt.location.script.id, equals(script.id));
-      expect(bpt.location.script.tokenToLine(bpt.location.tokenPos),
+      expect(bpt.location!.script.id, equals(script.id));
+      expect(bpt.location!.script.tokenToLine(bpt.location!.tokenPos),
           equals(LINE_C));
       expect(isolate.breakpoints.length, equals(3));
     }

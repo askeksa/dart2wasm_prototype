@@ -194,11 +194,10 @@ class DirectoryTest {
           if (++errors == 2) {
             d.delete(recursive: true).then((_) => asyncEnd());
           }
-          return true;
         }
 
-        long.delete().catchError(onError);
-        long.delete(recursive: true).catchError(onError);
+        Future<void>.value(long.delete()).catchError(onError);
+        Future<void>.value(long.delete(recursive: true)).catchError(onError);
       });
     });
   }
@@ -359,8 +358,8 @@ class DirectoryTest {
     String template = 'dart_temp_dir';
     if (base.existsSync()) {
       asyncStart();
-      Future.wait([base.createTemp(template), base.createTemp(template)]).then(
-          (tempDirs) {
+      Future.wait([base.createTemp(template), base.createTemp(template)])
+          .then((tempDirs) {
         Expect.notEquals(tempDirs[0].path, tempDirs[1].path);
         for (Directory t in tempDirs) {
           Expect.isTrue(t.existsSync());
@@ -453,9 +452,8 @@ class DirectoryTest {
 
 class NestedTempDirectoryTest {
   List<Directory> createdDirectories;
-  Directory current;
 
-  NestedTempDirectoryTest.run() : createdDirectories = new List<Directory>() {
+  NestedTempDirectoryTest.run() : createdDirectories = <Directory>[] {
     Directory.systemTemp.createTemp('dart_directory').then(createPhaseCallback);
   }
 
@@ -475,7 +473,7 @@ class NestedTempDirectoryTest {
 
   void deletePhaseCallback() {
     if (!createdDirectories.isEmpty) {
-      current = createdDirectories.removeLast();
+      final current = createdDirectories.removeLast();
       current.deleteSync();
       deletePhaseCallback();
     }
@@ -487,7 +485,7 @@ class NestedTempDirectoryTest {
   }
 }
 
-String illegalTempDirectoryLocation() {
+String? illegalTempDirectoryLocation() {
   // Determine a platform specific illegal location for a temporary directory.
   var os = Platform.operatingSystem;
   if (os == "linux" || os == "macos") {
@@ -513,7 +511,7 @@ testCreateTempError() {
 
   asyncStart();
   var future = new Directory(location).createTemp('dart_tempdir');
-  future.catchError((_) => asyncEnd());
+  Future<Directory?>.value(future).catchError((_) => asyncEnd());
 }
 
 testCreateExistingSync() {
@@ -584,37 +582,6 @@ testCreateDirExistingFile() {
   });
 }
 
-testRename() {
-  var temp1 = Directory.systemTemp.createTempSync('directory_test');
-  var temp2 = Directory.systemTemp.createTempSync('directory_test');
-  var temp3 = temp1.renameSync(temp2.path);
-  Expect.isFalse(temp1.existsSync());
-  Expect.isTrue(temp2.existsSync());
-  Expect.equals(temp3.path, temp2.path);
-
-  var temp4 = temp2.renameSync(temp1.path);
-  Expect.isFalse(temp3.existsSync());
-  Expect.isFalse(temp2.existsSync());
-  Expect.isTrue(temp1.existsSync());
-  Expect.isTrue(temp4.existsSync());
-  Expect.equals(temp1.path, temp4.path);
-
-  String foo = '${temp4.path}/foo';
-  String bar = '${temp4.path}/bar';
-  new File(foo).createSync();
-  try {
-    new Directory(foo).renameSync(bar);
-    Expect.fail('Directory.rename should fail to rename a non-directory');
-  } catch (e) {
-    Expect.isTrue(e is FileSystemException);
-    if (Platform.isLinux || Platform.isMacOS) {
-      Expect.isTrue(e.osError.message.contains('Not a directory'));
-    }
-  }
-
-  temp1.deleteSync(recursive: true);
-}
-
 main() {
   DirectoryTest.testMain();
   NestedTempDirectoryTest.testMain();
@@ -624,5 +591,4 @@ main() {
   testCreateExisting();
   testCreateDirExistingFileSync();
   testCreateDirExistingFile();
-  testRename();
 }

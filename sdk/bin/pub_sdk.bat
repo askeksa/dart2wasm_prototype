@@ -18,13 +18,18 @@ rem Remove trailing backslash if there is one
 IF %SDK_DIR:~-1%==\ set SDK_DIR=%SDK_DIR:~0,-1%
 
 set VM_OPTIONS=
+set USING_DART_1=
 
 rem We allow extra vm options to be passed in through an environment variable.
 if not "_%DART_VM_OPTIONS%_" == "__" (
   set VM_OPTIONS=%VM_OPTIONS% %DART_VM_OPTIONS%
+  for %%o in (%DART_VM_OPTIONS%) do (
+    if "%%o" equ "--no-preview-dart-2" set USING_DART_1=y
+  )
 )
 
-"%BIN_DIR%\dart" %VM_OPTIONS% "%BIN_DIR%\snapshots\pub.dart.snapshot" %*
+echo "The top level `pub.bat` command is deprecated. Use `dart pub` instead." 1>&2
+"%BIN_DIR%\dart" %VM_OPTIONS% __deprecated_pub %*
 
 endlocal
 
@@ -35,7 +40,7 @@ setlocal
 for %%i in (%1) do set result=%%~fi
 set current=
 for /f "usebackq tokens=2 delims=[]" %%i in (`dir /a:l "%~dp1" 2^>nul ^
-                                             ^| find ">     %~n1 [" 2^>nul`) do (
+                                             ^| %SystemRoot%\System32\find.exe ">     %~n1 [" 2^>nul`) do (
   set current=%%i
 )
 if not "%current%"=="" call :follow_links "%current%", result

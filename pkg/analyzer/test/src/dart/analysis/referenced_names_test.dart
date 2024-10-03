@@ -1,4 +1,4 @@
-// Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2016, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -7,16 +7,17 @@ import 'package:analyzer/src/dart/analysis/referenced_names.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
-import '../../../generated/parser_test.dart';
+import '../../../generated/parser_test_base.dart';
 
 main() {
   defineReflectiveSuite(() {
-    defineReflectiveTests(ReferencedNamesBuilderTest);
+    defineReflectiveTests(ComputeReferencedNamesTest);
+    defineReflectiveTests(ComputeSubtypedNamesTest);
   });
 }
 
 @reflectiveTest
-class ReferencedNamesBuilderTest extends ParserTestCase {
+class ComputeReferencedNamesTest extends ParserTestCase {
   test_class_constructor() {
     Set<String> names = _computeReferencedNames('''
 class U {
@@ -407,5 +408,55 @@ main() {
   Set<String> _computeReferencedNames(String code) {
     CompilationUnit unit = parseCompilationUnit2(code);
     return computeReferencedNames(unit);
+  }
+}
+
+@reflectiveTest
+class ComputeSubtypedNamesTest extends ParserTestCase {
+  void test_classDeclaration() {
+    Set<String> names = _computeSubtypedNames('''
+import 'lib.dart';
+class X extends A {}
+class Y extends A with B {}
+class Z implements A, B, C {}
+''');
+    expect(names, unorderedEquals(['A', 'B', 'C']));
+  }
+
+  void test_classTypeAlias() {
+    Set<String> names = _computeSubtypedNames('''
+import 'lib.dart';
+class X = A with B implements C, D, E;
+''');
+    expect(names, unorderedEquals(['A', 'B', 'C', 'D', 'E']));
+  }
+
+  void test_mixinDeclaration() {
+    Set<String> names = _computeSubtypedNames('''
+import 'lib.dart';
+mixin M on A, B implements C, D {}
+''');
+    expect(names, unorderedEquals(['A', 'B', 'C', 'D']));
+  }
+
+  void test_prefixed() {
+    Set<String> names = _computeSubtypedNames('''
+import 'lib.dart' as p;
+class X extends p.A with p.B implements p.C {}
+''');
+    expect(names, unorderedEquals(['A', 'B', 'C']));
+  }
+
+  void test_typeArguments() {
+    Set<String> names = _computeSubtypedNames('''
+import 'lib.dart';
+class X extends A<B> {}
+''');
+    expect(names, unorderedEquals(['A']));
+  }
+
+  Set<String> _computeSubtypedNames(String code) {
+    CompilationUnit unit = parseCompilationUnit2(code);
+    return computeSubtypedNames(unit);
   }
 }

@@ -4,7 +4,6 @@
 
 library test.invoke_call_through_getter;
 
-@MirrorsUsed(targets: "test.invoke_call_through_getter")
 import 'dart:mirrors';
 
 import 'package:expect/expect.dart';
@@ -30,11 +29,11 @@ class C {
 }
 
 class Forwarder {
-  noSuchMethod(msg) => reflect(new C()).delegate(msg);
+  dynamic noSuchMethod(Invocation msg) => reflect(new C()).delegate(msg);
 }
 
 main() {
-  var f = new Forwarder();
+  dynamic f = new Forwarder();
 
   Expect.equals('1 5 6', f.fakeFunctionCall(5, 6));
   Expect.equals('7, 8', f.fakeFunctionNSM(7, 8));
@@ -42,6 +41,6 @@ main() {
   Expect.equals('3 C 11 12 13 null', f.closureOpt(11, 12, 13));
   Expect.equals('4 C 14 15 null 16', f.closureNamed(14, 15, w: 16));
   Expect.equals('DNU', f.doesNotExist(17, 18));
-  Expect.throws(() => f.closure('wrong arity'), (e) => e is NoSuchMethodError);
-  Expect.throws(() => f.notAClosure(), (e) => e is NoSuchMethodError);
+  Expect.throwsNoSuchMethodError(() => f.closure('wrong arity'));
+  Expect.throwsNoSuchMethodError(() => f.notAClosure());
 }

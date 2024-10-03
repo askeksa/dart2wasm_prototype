@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_FUCHSIA)
+#if defined(DART_HOST_OS_FUCHSIA)
 
 #include "vm/signal_handler.h"
 
@@ -16,35 +16,29 @@ uintptr_t SignalHandler::GetProgramCounter(const mcontext_t& mcontext) {
   return 0;
 }
 
-
 uintptr_t SignalHandler::GetFramePointer(const mcontext_t& mcontext) {
   UNIMPLEMENTED();
   return 0;
 }
-
 
 uintptr_t SignalHandler::GetCStackPointer(const mcontext_t& mcontext) {
   UNIMPLEMENTED();
   return 0;
 }
 
-
 uintptr_t SignalHandler::GetDartStackPointer(const mcontext_t& mcontext) {
   UNIMPLEMENTED();
   return 0;
 }
-
 
 uintptr_t SignalHandler::GetLinkRegister(const mcontext_t& mcontext) {
   UNIMPLEMENTED();
   return 0;
 }
 
-
-void SignalHandler::InstallImpl(SignalAction action) {
+void SignalHandler::Install(SignalAction action) {
   UNIMPLEMENTED();
 }
-
 
 void SignalHandler::Remove() {
   UNIMPLEMENTED();
@@ -52,4 +46,4 @@ void SignalHandler::Remove() {
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_FUCHSIA)
+#endif  // defined(DART_HOST_OS_FUCHSIA)

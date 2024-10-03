@@ -2,12 +2,9 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 //
-// VMOptions=--enable-inlining-annotations --optimization-counter-threshold=1000 --no-background-compilation
+// VMOptions=--optimization-counter-threshold=1000 --no-background-compilation
 
 // Regression test for correct LICM and type propagation.
-
-const AlwaysInline = "AlwaysInline";
-const NeverInline = "NeverInline";
 
 class Attribute {
   final id = 123;
@@ -18,7 +15,7 @@ abstract class Name {
   final String name;
   get attr;
 
-  @AlwaysInline
+  @pragma('vm:prefer-inline')
   int compareTo(other) {
     int nameCompare = name.compareTo(other.name);
     if (nameCompare != 0) return nameCompare;
@@ -42,7 +39,7 @@ class Member {
   var name;
 }
 
-Member find(List<Member> members, Name name) {
+Member? find(List<Member> members, Name name) {
   int low = 0, high = members.length - 1;
   while (low <= high) {
     int mid = low + ((high - low) >> 1);

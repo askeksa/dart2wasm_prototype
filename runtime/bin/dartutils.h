@@ -10,6 +10,7 @@
 #include "include/dart_native_api.h"
 #include "platform/assert.h"
 #include "platform/globals.h"
+#include "platform/hashmap.h"
 
 namespace dart {
 namespace bin {
@@ -33,14 +34,9 @@ static inline Dart_Handle ThrowIfError(Dart_Handle handle) {
   return handle;
 }
 
-// Tries to read [script_uri] as a Kernel IR file.  If successful this function
-// returns `true` and sets [kernel_file] and [kernel_length] to be the memory
-// contents.
-//
-// The caller is responsible for free()ing [kernel_file] if `true` was returned.
-bool TryReadKernel(const char* script_uri,
-                   const uint8_t** kernel_file,
-                   intptr_t* kernel_length);
+static inline void* GetHashmapKeyFromString(char* key) {
+  return reinterpret_cast<void*>(key);
+}
 
 class CommandLineOptions {
  public:
@@ -59,7 +55,10 @@ class CommandLineOptions {
     arguments_ = NULL;
   }
 
+  void Reset() { count_ = 0; }
+
   int count() const { return count_; }
+  int max_count() const { return max_count_; }
   const char** arguments() const { return arguments_; }
 
   const char* GetArgument(int index) const {
@@ -74,6 +73,17 @@ class CommandLineOptions {
     }
   }
 
+  void AddArguments(const char** argv, int argc) {
+    if (count_ + argc >= max_count_) {
+      abort();  // We should never get into this situation.
+    }
+    for (int i = 0; i < argc; ++i) {
+      arguments_[count_++] = argv[i];
+    }
+  }
+
+  Dart_Handle CreateRuntimeOptions();
+
   void operator delete(void* pointer) { abort(); }
 
  private:
@@ -85,7 +95,6 @@ class CommandLineOptions {
 
   DISALLOW_COPY_AND_ASSIGN(CommandLineOptions);
 };
-
 
 class DartUtils {
  public:
@@ -113,7 +122,23 @@ class DartUtils {
   // Returns the boolean value of a Dart object. If the object is not
   // a boolean value an API error is propagated.
   static bool GetBooleanValue(Dart_Handle bool_obj);
-
+  // Returns the boolean value of the argument at index. If the argument
+  // is not a boolean value an API error is propagated.
+  static bool GetNativeBooleanArgument(Dart_NativeArguments args,
+                                       intptr_t index);
+  // Returns the integer value of the argument at index. If the argument
+  // is not an integer value an API error is propagated.
+  static int64_t GetNativeIntegerArgument(Dart_NativeArguments args,
+                                          intptr_t index);
+  // Returns the intptr_t value of the argument at index. If the argument
+  // is not an integer value or the value is outside the intptr_t range an
+  // API error is propagated.
+  static intptr_t GetNativeIntptrArgument(Dart_NativeArguments args,
+                                          intptr_t index);
+  // Returns the string value of the argument at index. If the argument
+  // is not a string value an API error is propagated.
+  static const char* GetNativeStringArgument(Dart_NativeArguments args,
+                                             intptr_t index);
   static Dart_Handle SetIntegerField(Dart_Handle handle,
                                      const char* name,
                                      int64_t val);
@@ -121,30 +146,29 @@ class DartUtils {
                                     const char* name,
                                     const char* val);
   static bool IsDartSchemeURL(const char* url_name);
-  static bool IsDartExtensionSchemeURL(const char* url_name);
   static bool IsDartIOLibURL(const char* url_name);
+  static bool IsDartCLILibURL(const char* url_name);
+  static bool IsDartHttpLibURL(const char* url_name);
   static bool IsDartBuiltinLibURL(const char* url_name);
   static bool IsHttpSchemeURL(const char* url_name);
   static const char* RemoveScheme(const char* url);
   static char* DirName(const char* url);
   static void* MapExecutable(const char* name, intptr_t* file_len);
   static void* OpenFile(const char* name, bool write);
-  static void ReadFile(const uint8_t** data, intptr_t* file_len, void* stream);
+  static void* OpenFileUri(const char* uri, bool write);
+  static void ReadFile(uint8_t** data, intptr_t* file_len, void* stream);
   static void WriteFile(const void* buffer, intptr_t num_bytes, void* stream);
   static void CloseFile(void* stream);
   static bool EntropySource(uint8_t* buffer, intptr_t length);
   static Dart_Handle ReadStringFromFile(const char* filename);
-  static Dart_Handle MakeUint8Array(const uint8_t* buffer, intptr_t length);
-  static Dart_Handle LibraryTagHandler(Dart_LibraryTag tag,
-                                       Dart_Handle library,
-                                       Dart_Handle url);
-  static Dart_Handle LoadScript(const char* script_uri);
+  static Dart_Handle MakeUint8Array(const void* buffer, intptr_t length);
   static Dart_Handle PrepareForScriptLoading(bool is_service_isolate,
                                              bool trace_loading);
-  static Dart_Handle SetupServiceLoadPort();
-  static Dart_Handle SetupPackageRoot(const char* package_root,
-                                      const char* packages_file);
-  static Dart_Handle SetupIOLibrary(const char* script_uri);
+  static Dart_Handle SetupPackageConfig(const char* packages_file);
+
+  static Dart_Handle SetupIOLibrary(const char* namespc_path,
+                                    const char* script_uri,
+                                    bool disable_exit);
 
   static bool PostNull(Dart_Port port_id);
   static bool PostInt32(Dart_Port port_id, int32_t value);
@@ -164,17 +188,21 @@ class DartUtils {
                                                  const char* exception_name,
                                                  const char* message);
   static Dart_Handle NewDartArgumentError(const char* message);
+  static Dart_Handle NewDartFormatException(const char* message);
   static Dart_Handle NewDartUnsupportedError(const char* message);
   static Dart_Handle NewDartIOException(const char* exception_name,
                                         const char* message,
                                         Dart_Handle os_error);
 
-  // Create a new Dart String object from a C String.
+  // Create a new Dart String object from a UTF8 encoded C String.
   static Dart_Handle NewString(const char* str) {
     ASSERT(str != NULL);
     return Dart_NewStringFromUTF8(reinterpret_cast<const uint8_t*>(str),
                                   strlen(str));
   }
+
+  // Create a new Dart String object from a formatted string.
+  static Dart_Handle NewStringFormatted(const char* format, ...);
 
   // Allocate length bytes for a C string with Dart_ScopeAllocate.
   static char* ScopedCString(intptr_t length) {
@@ -197,59 +225,49 @@ class DartUtils {
   static Dart_Handle NewError(const char* format, ...);
   static Dart_Handle NewInternalError(const char* message);
 
-  static Dart_Handle BuiltinLib() {
-    IsolateData* isolate_data =
-        reinterpret_cast<IsolateData*>(Dart_CurrentIsolateData());
-    return isolate_data->builtin_lib();
+  static Dart_Handle LookupBuiltinLib() {
+    return Dart_LookupLibrary(NewString(kBuiltinLibURL));
   }
 
   static bool SetOriginalWorkingDirectory();
-  static Dart_Handle GetCanonicalizableWorkingDirectory();
 
-  static const char* MapLibraryUrl(const char* url_string);
-
-  static Dart_Handle ResolveUriInWorkingDirectory(Dart_Handle script_uri);
   static Dart_Handle ResolveScript(Dart_Handle url);
 
   enum MagicNumber {
-    kSnapshotMagicNumber,
+    kAppJITMagicNumber,
     kKernelMagicNumber,
+    kKernelListMagicNumber,
+    kGzipMagicNumber,
     kUnknownMagicNumber
   };
 
-  // static const uint8_t* GetMagicNumber(MagicNumber number);
+  // Checks if the buffer is a script snapshot, kernel file, or gzip file.
+  static MagicNumber SniffForMagicNumber(const char* filename);
 
-  // Sniffs the specified text_buffer to see if it contains the magic number
-  // representing a script snapshot. If the text_buffer is a script snapshot
-  // the return value is an updated pointer to the text_buffer pointing past
-  // the magic number value. The 'buffer_len' parameter is also appropriately
-  // adjusted.
-  static MagicNumber SniffForMagicNumber(const uint8_t** text_buffer,
-                                         intptr_t* buffer_len);
-
-  // Write a magic number to indicate a script snapshot file.
-  static void WriteMagicNumber(File* file);
+  // Checks if the buffer is a script snapshot, kernel file, or gzip file.
+  static MagicNumber SniffForMagicNumber(const uint8_t* text_buffer,
+                                         intptr_t buffer_len);
 
   // Global state that stores the original working directory..
   static const char* original_working_directory;
 
-  // Global state that captures the URL mappings specified on the command line.
-  static CommandLineOptions* url_mapping;
-
   static const char* const kDartScheme;
-  static const char* const kDartExtensionScheme;
   static const char* const kAsyncLibURL;
   static const char* const kBuiltinLibURL;
   static const char* const kCoreLibURL;
   static const char* const kInternalLibURL;
   static const char* const kIsolateLibURL;
+  static const char* const kHttpLibURL;
   static const char* const kIOLibURL;
   static const char* const kIOLibPatchURL;
+  static const char* const kCLILibURL;
+  static const char* const kCLILibPatchURL;
   static const char* const kUriLibURL;
   static const char* const kHttpScheme;
   static const char* const kVMServiceLibURL;
 
-  static Dart_Handle LibraryFilePath(Dart_Handle library_uri);
+  static void SetEnvironment(dart::SimpleHashMap* environment);
+  static Dart_Handle EnvironmentCallback(Dart_Handle name);
 
  private:
   static Dart_Handle SetWorkingDirectory();
@@ -258,17 +276,19 @@ class DartUtils {
                                            bool is_service_isolate,
                                            bool trace_loading);
   static Dart_Handle PrepareCoreLibrary(Dart_Handle core_lib,
-                                        Dart_Handle builtin_lib,
+                                        Dart_Handle io_lib,
                                         bool is_service_isolate);
   static Dart_Handle PrepareAsyncLibrary(Dart_Handle async_lib,
                                          Dart_Handle isolate_lib);
   static Dart_Handle PrepareIOLibrary(Dart_Handle io_lib);
   static Dart_Handle PrepareIsolateLibrary(Dart_Handle isolate_lib);
+  static Dart_Handle PrepareCLILibrary(Dart_Handle cli_lib);
+
+  static dart::SimpleHashMap* environment_;
 
   DISALLOW_ALLOCATION();
   DISALLOW_IMPLICIT_CONSTRUCTORS(DartUtils);
 };
-
 
 class CObject {
  public:
@@ -292,7 +312,6 @@ class CObject {
   bool IsInt64() { return type() == Dart_CObject_kInt64; }
   bool IsInt32OrInt64() { return IsInt32() || IsInt64(); }
   bool IsIntptr() { return IsInt32OrInt64(); }
-  bool IsBigint() { return type() == Dart_CObject_kBigint; }
   bool IsDouble() { return type() == Dart_CObject_kDouble; }
   bool IsString() { return type() == Dart_CObject_kString; }
   bool IsArray() { return type() == Dart_CObject_kArray; }
@@ -320,21 +339,22 @@ class CObject {
   static Dart_CObject* NewInt32(int32_t value);
   static Dart_CObject* NewInt64(int64_t value);
   static Dart_CObject* NewIntptr(intptr_t value);
-  static Dart_CObject* NewBigint(const char* hex_value);
-  static char* BigintToHexValue(Dart_CObject* bigint);
   static Dart_CObject* NewDouble(double value);
   static Dart_CObject* NewString(intptr_t length);
   static Dart_CObject* NewString(const char* str);
   static Dart_CObject* NewArray(intptr_t length);
   static Dart_CObject* NewUint8Array(intptr_t length);
   static Dart_CObject* NewUint32Array(intptr_t length);
-  static Dart_CObject* NewExternalUint8Array(
-      intptr_t length,
-      uint8_t* data,
-      void* peer,
-      Dart_WeakPersistentHandleFinalizer callback);
+  static Dart_CObject* NewExternalUint8Array(intptr_t length,
+                                             uint8_t* data,
+                                             void* peer,
+                                             Dart_HandleFinalizer callback);
+  static Dart_CObject* NewNativePointer(intptr_t ptr,
+                                        intptr_t size,
+                                        Dart_HandleFinalizer callback);
 
   static Dart_CObject* NewIOBuffer(int64_t length);
+  static void ShrinkIOBuffer(Dart_CObject* cobject, int64_t new_length);
   static void FreeIOBufferData(Dart_CObject* object);
 
   Dart_CObject* AsApiCObject() { return cobject_; }
@@ -366,7 +386,6 @@ class CObject {
   DISALLOW_COPY_AND_ASSIGN(CObject);
 };
 
-
 #define DECLARE_COBJECT_CONSTRUCTORS(t)                                        \
   explicit CObject##t(Dart_CObject* cobject) : CObject(cobject) {              \
     ASSERT(type() == Dart_CObject_k##t);                                       \
@@ -377,7 +396,6 @@ class CObject {
     ASSERT(cobject->type() == Dart_CObject_k##t);                              \
     cobject_ = cobject->AsApiCObject();                                        \
   }
-
 
 #define DECLARE_COBJECT_TYPED_DATA_CONSTRUCTORS(t)                             \
   explicit CObject##t##Array(Dart_CObject* cobject) : CObject(cobject) {       \
@@ -391,7 +409,6 @@ class CObject {
     ASSERT(cobject->byte_array_type() == Dart_TypedData_k##t);                 \
     cobject_ = cobject->AsApiCObject();                                        \
   }
-
 
 #define DECLARE_COBJECT_EXTERNAL_TYPED_DATA_CONSTRUCTORS(t)                    \
   explicit CObjectExternal##t##Array(Dart_CObject* cobject)                    \
@@ -407,7 +424,6 @@ class CObject {
     cobject_ = cobject->AsApiCObject();                                        \
   }
 
-
 class CObjectBool : public CObject {
  public:
   DECLARE_COBJECT_CONSTRUCTORS(Bool)
@@ -417,7 +433,6 @@ class CObjectBool : public CObject {
  private:
   DISALLOW_COPY_AND_ASSIGN(CObjectBool);
 };
-
 
 class CObjectInt32 : public CObject {
  public:
@@ -429,7 +444,6 @@ class CObjectInt32 : public CObject {
   DISALLOW_COPY_AND_ASSIGN(CObjectInt32);
 };
 
-
 class CObjectInt64 : public CObject {
  public:
   DECLARE_COBJECT_CONSTRUCTORS(Int64)
@@ -439,7 +453,6 @@ class CObjectInt64 : public CObject {
  private:
   DISALLOW_COPY_AND_ASSIGN(CObjectInt64);
 };
-
 
 class CObjectIntptr : public CObject {
  public:
@@ -469,38 +482,6 @@ class CObjectIntptr : public CObject {
   DISALLOW_COPY_AND_ASSIGN(CObjectIntptr);
 };
 
-
-class CObjectBigint : public CObject {
- public:
-  // DECLARE_COBJECT_CONSTRUCTORS(Bigint) would miss hex_value_ initialization.
-  explicit CObjectBigint(Dart_CObject* cobject) : CObject(cobject) {
-    ASSERT(type() == Dart_CObject_kBigint);
-    cobject_ = cobject;
-    hex_value_ = NULL;
-  }
-  explicit CObjectBigint(CObject* cobject) : CObject() {
-    ASSERT(cobject != NULL);
-    ASSERT(cobject->type() == Dart_CObject_kBigint);
-    cobject_ = cobject->AsApiCObject();
-    hex_value_ = NULL;
-  }
-
-  char* Value() {
-    if (hex_value_ == NULL) {
-      hex_value_ = BigintToHexValue(cobject_);
-    }
-    ASSERT(hex_value_ != NULL);
-    return hex_value_;
-  }
-
-  ~CObjectBigint() { free(hex_value_); }
-
- private:
-  char* hex_value_;
-  DISALLOW_COPY_AND_ASSIGN(CObjectBigint);
-};
-
-
 class CObjectDouble : public CObject {
  public:
   DECLARE_COBJECT_CONSTRUCTORS(Double)
@@ -510,7 +491,6 @@ class CObjectDouble : public CObject {
  private:
   DISALLOW_COPY_AND_ASSIGN(CObjectDouble);
 };
-
 
 class CObjectString : public CObject {
  public:
@@ -522,7 +502,6 @@ class CObjectString : public CObject {
  private:
   DISALLOW_COPY_AND_ASSIGN(CObjectString);
 };
-
 
 class CObjectArray : public CObject {
  public:
@@ -540,7 +519,6 @@ class CObjectArray : public CObject {
   DISALLOW_COPY_AND_ASSIGN(CObjectArray);
 };
 
-
 class CObjectSendPort : public CObject {
  public:
   DECLARE_COBJECT_CONSTRUCTORS(SendPort)
@@ -551,7 +529,6 @@ class CObjectSendPort : public CObject {
  private:
   DISALLOW_COPY_AND_ASSIGN(CObjectSendPort);
 };
-
 
 class CObjectTypedData : public CObject {
  public:
@@ -575,7 +552,6 @@ class CObjectTypedData : public CObject {
   DISALLOW_COPY_AND_ASSIGN(CObjectTypedData);
 };
 
-
 class CObjectUint8Array : public CObject {
  public:
   DECLARE_COBJECT_TYPED_DATA_CONSTRUCTORS(Uint8)
@@ -587,7 +563,6 @@ class CObjectUint8Array : public CObject {
   DISALLOW_COPY_AND_ASSIGN(CObjectUint8Array);
 };
 
-
 class CObjectExternalUint8Array : public CObject {
  public:
   DECLARE_COBJECT_EXTERNAL_TYPED_DATA_CONSTRUCTORS(Uint8)
@@ -595,12 +570,9 @@ class CObjectExternalUint8Array : public CObject {
   intptr_t Length() const {
     return cobject_->value.as_external_typed_data.length;
   }
-  void SetLength(intptr_t length) {
-    cobject_->value.as_external_typed_data.length = length;
-  }
   uint8_t* Data() const { return cobject_->value.as_external_typed_data.data; }
   void* Peer() const { return cobject_->value.as_external_typed_data.peer; }
-  Dart_WeakPersistentHandleFinalizer Callback() const {
+  Dart_HandleFinalizer Callback() const {
     return cobject_->value.as_external_typed_data.callback;
   }
 
@@ -608,6 +580,19 @@ class CObjectExternalUint8Array : public CObject {
   DISALLOW_COPY_AND_ASSIGN(CObjectExternalUint8Array);
 };
 
+class CObjectNativePointer : public CObject {
+ public:
+  DECLARE_COBJECT_CONSTRUCTORS(NativePointer)
+
+  intptr_t Ptr() const { return cobject_->value.as_native_pointer.ptr; }
+  intptr_t Size() const { return cobject_->value.as_native_pointer.size; }
+  Dart_HandleFinalizer Callback() const {
+    return cobject_->value.as_native_pointer.callback;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(CObjectNativePointer);
+};
 
 class ScopedBlockingCall {
  public:
@@ -620,61 +605,17 @@ class ScopedBlockingCall {
   DISALLOW_COPY_AND_ASSIGN(ScopedBlockingCall);
 };
 
+struct MagicNumberData {
+  static const intptr_t kMaxLength = 8;
 
-// Where the argument to the constructor is the handle for an object
-// implementing List<int>, this class creates a scope in which the memory
-// backing the list can be accessed.
-//
-// Do not make Dart_ API calls while in a ScopedMemBuffer.
-// Do not call Dart_PropagateError while in a ScopedMemBuffer.
-class ScopedMemBuffer {
- public:
-  explicit ScopedMemBuffer(Dart_Handle object) {
-    if (!Dart_IsTypedData(object) && !Dart_IsList(object)) {
-      Dart_ThrowException(
-          DartUtils::NewDartArgumentError("Argument is not a List<int>"));
-    }
-
-    uint8_t* bytes = NULL;
-    intptr_t bytes_len = 0;
-    bool is_typed_data = false;
-    if (Dart_IsTypedData(object)) {
-      is_typed_data = true;
-      Dart_TypedData_Type typ;
-      ThrowIfError(Dart_TypedDataAcquireData(
-          object, &typ, reinterpret_cast<void**>(&bytes), &bytes_len));
-    } else {
-      ASSERT(Dart_IsList(object));
-      ThrowIfError(Dart_ListLength(object, &bytes_len));
-      bytes = Dart_ScopeAllocate(bytes_len);
-      ASSERT(bytes != NULL);
-      ThrowIfError(Dart_ListGetAsBytes(object, 0, bytes, bytes_len));
-    }
-
-    object_ = object;
-    bytes_ = bytes;
-    bytes_len_ = bytes_len;
-    is_typed_data_ = is_typed_data;
-  }
-
-  ~ScopedMemBuffer() {
-    if (is_typed_data_) {
-      ThrowIfError(Dart_TypedDataReleaseData(object_));
-    }
-  }
-
-  uint8_t* get() const { return bytes_; }
-  intptr_t length() const { return bytes_len_; }
-
- private:
-  Dart_Handle object_;
-  uint8_t* bytes_;
-  intptr_t bytes_len_;
-  bool is_typed_data_;
-
-  DISALLOW_ALLOCATION();
-  DISALLOW_COPY_AND_ASSIGN(ScopedMemBuffer);
+  intptr_t length;
+  const uint8_t bytes[kMaxLength];
 };
+
+extern MagicNumberData appjit_magic_number;
+extern MagicNumberData kernel_magic_number;
+extern MagicNumberData kernel_list_magic_number;
+extern MagicNumberData gzip_magic_number;
 
 }  // namespace bin
 }  // namespace dart

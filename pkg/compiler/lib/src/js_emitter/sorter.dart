@@ -4,7 +4,6 @@
 
 library dart2js.js_emitter.sorter;
 
-import '../elements/elements.dart';
 import '../elements/entities.dart';
 
 /// Sorting strategy for libraries, classes and members.
@@ -16,24 +15,9 @@ abstract class Sorter {
   Iterable<ClassEntity> sortClasses(Iterable<ClassEntity> classes);
 
   /// Returns a sorted list of [members].
-  Iterable<MemberEntity> sortMembers(Iterable<MemberEntity> members);
-}
+  Iterable<T> sortMembers<T extends MemberEntity>(Iterable<T> members);
 
-class ElementSorter implements Sorter {
-  const ElementSorter();
-
-  @override
-  List<LibraryEntity> sortLibraries(Iterable<LibraryEntity> libraries) {
-    return Elements.sortedByPosition(new List.from(libraries, growable: false));
-  }
-
-  @override
-  List<ClassEntity> sortClasses(Iterable<ClassEntity> classes) {
-    return Elements.sortedByPosition(new List.from(classes, growable: false));
-  }
-
-  @override
-  List<MemberEntity> sortMembers(Iterable<MemberEntity> members) {
-    return Elements.sortedByPosition(new List.from(members, growable: false));
-  }
+  int compareLibrariesByLocation(LibraryEntity a, LibraryEntity b);
+  int compareClassesByLocation(ClassEntity a, ClassEntity b);
+  int compareMembersByLocation(MemberEntity a, MemberEntity b);
 }

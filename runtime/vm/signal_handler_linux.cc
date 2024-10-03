@@ -4,9 +4,9 @@
 
 #include "vm/globals.h"
 #include "vm/instructions.h"
-#include "vm/simulator.h"
 #include "vm/signal_handler.h"
-#if defined(HOST_OS_LINUX)
+#include "vm/simulator.h"
+#if defined(DART_HOST_OS_LINUX)
 
 namespace dart {
 
@@ -21,14 +21,15 @@ uintptr_t SignalHandler::GetProgramCounter(const mcontext_t& mcontext) {
   pc = static_cast<uintptr_t>(mcontext.arm_pc);
 #elif defined(HOST_ARCH_ARM64)
   pc = static_cast<uintptr_t>(mcontext.pc);
-#elif defined(HOST_ARCH_MIPS)
-  pc = static_cast<uintptr_t>(mcontext.pc);
+#elif defined(HOST_ARCH_RISCV32)
+  pc = static_cast<uintptr_t>(mcontext.__gregs[REG_PC]);
+#elif defined(HOST_ARCH_RISCV64)
+  pc = static_cast<uintptr_t>(mcontext.__gregs[REG_PC]);
 #else
 #error Unsupported architecture.
 #endif  // HOST_ARCH_...
   return pc;
 }
-
 
 uintptr_t SignalHandler::GetFramePointer(const mcontext_t& mcontext) {
   uintptr_t fp = 0;
@@ -38,18 +39,26 @@ uintptr_t SignalHandler::GetFramePointer(const mcontext_t& mcontext) {
 #elif defined(HOST_ARCH_X64)
   fp = static_cast<uintptr_t>(mcontext.gregs[REG_RBP]);
 #elif defined(HOST_ARCH_ARM)
-  fp = static_cast<uintptr_t>(mcontext.arm_fp);
+  // B1.3.3 Program Status Registers (PSRs)
+  if ((mcontext.arm_cpsr & (1 << 5)) != 0) {
+    // Thumb mode.
+    fp = static_cast<uintptr_t>(mcontext.arm_r7);
+  } else {
+    // ARM mode.
+    fp = static_cast<uintptr_t>(mcontext.arm_fp);
+  }
 #elif defined(HOST_ARCH_ARM64)
   fp = static_cast<uintptr_t>(mcontext.regs[29]);
-#elif defined(HOST_ARCH_MIPS)
-  fp = static_cast<uintptr_t>(mcontext.gregs[30]);
+#elif defined(HOST_ARCH_RISCV32)
+  fp = static_cast<uintptr_t>(mcontext.__gregs[REG_S0]);
+#elif defined(HOST_ARCH_RISCV64)
+  fp = static_cast<uintptr_t>(mcontext.__gregs[REG_S0]);
 #else
 #error Unsupported architecture.
 #endif  // HOST_ARCH_...
 
   return fp;
 }
-
 
 uintptr_t SignalHandler::GetCStackPointer(const mcontext_t& mcontext) {
   uintptr_t sp = 0;
@@ -62,14 +71,15 @@ uintptr_t SignalHandler::GetCStackPointer(const mcontext_t& mcontext) {
   sp = static_cast<uintptr_t>(mcontext.arm_sp);
 #elif defined(HOST_ARCH_ARM64)
   sp = static_cast<uintptr_t>(mcontext.sp);
-#elif defined(HOST_ARCH_MIPS)
-  sp = static_cast<uintptr_t>(mcontext.gregs[29]);
+#elif defined(HOST_ARCH_RISCV32)
+  sp = static_cast<uintptr_t>(mcontext.__gregs[REG_SP]);
+#elif defined(HOST_ARCH_RISCV64)
+  sp = static_cast<uintptr_t>(mcontext.__gregs[REG_SP]);
 #else
 #error Unsupported architecture.
 #endif  // HOST_ARCH_...
   return sp;
 }
-
 
 uintptr_t SignalHandler::GetDartStackPointer(const mcontext_t& mcontext) {
 #if defined(TARGET_ARCH_ARM64) && !defined(USING_SIMULATOR)
@@ -78,7 +88,6 @@ uintptr_t SignalHandler::GetDartStackPointer(const mcontext_t& mcontext) {
   return GetCStackPointer(mcontext);
 #endif
 }
-
 
 uintptr_t SignalHandler::GetLinkRegister(const mcontext_t& mcontext) {
   uintptr_t lr = 0;
@@ -91,17 +100,18 @@ uintptr_t SignalHandler::GetLinkRegister(const mcontext_t& mcontext) {
   lr = static_cast<uintptr_t>(mcontext.arm_lr);
 #elif defined(HOST_ARCH_ARM64)
   lr = static_cast<uintptr_t>(mcontext.regs[30]);
-#elif defined(HOST_ARCH_MIPS)
-  lr = static_cast<uintptr_t>(mcontext.gregs[31]);
+#elif defined(HOST_ARCH_RISCV32)
+  lr = static_cast<uintptr_t>(mcontext.__gregs[REG_RA]);
+#elif defined(HOST_ARCH_RISCV64)
+  lr = static_cast<uintptr_t>(mcontext.__gregs[REG_RA]);
 #else
 #error Unsupported architecture.
 #endif  // HOST_ARCH_...
   return lr;
 }
 
-
-void SignalHandler::InstallImpl(SignalAction action) {
-  struct sigaction act;
+void SignalHandler::Install(SignalAction action) {
+  struct sigaction act = {};
   act.sa_handler = NULL;
   act.sa_sigaction = action;
   sigemptyset(&act.sa_mask);
@@ -110,11 +120,10 @@ void SignalHandler::InstallImpl(SignalAction action) {
   ASSERT(r == 0);
 }
 
-
 void SignalHandler::Remove() {
   // Ignore future SIGPROF signals because by default SIGPROF will terminate
   // the process and we may have some signals in flight.
-  struct sigaction act;
+  struct sigaction act = {};
   act.sa_handler = SIG_IGN;
   sigemptyset(&act.sa_mask);
   act.sa_flags = 0;
@@ -122,7 +131,6 @@ void SignalHandler::Remove() {
   ASSERT(r == 0);
 }
 
-
 }  // namespace dart
 
-#endif  // defined(HOST_OS_LINUX)
+#endif  // defined(DART_HOST_OS_LINUX)

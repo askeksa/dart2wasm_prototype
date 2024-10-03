@@ -6,7 +6,11 @@
 #define RUNTIME_VM_DART_H_
 
 #include "include/dart_api.h"
+#include "include/dart_tools_api.h"
 #include "vm/allocation.h"
+#include "vm/isolate.h"
+#include "vm/lockers.h"
+#include "vm/os_thread.h"
 #include "vm/snapshot.h"
 
 namespace dart {
@@ -15,7 +19,6 @@ namespace dart {
 class DebugInfo;
 class Isolate;
 class LocalHandle;
-class RawError;
 class ReadOnlyHandles;
 class ThreadPool;
 namespace kernel {
@@ -24,38 +27,58 @@ class Program;
 
 class Dart : public AllStatic {
  public:
-  static char* InitOnce(const uint8_t* vm_snapshot_data,
-                        const uint8_t* vm_snapshot_instructions,
-                        Dart_IsolateCreateCallback create,
-                        Dart_IsolateShutdownCallback shutdown,
-                        Dart_IsolateCleanupCallback cleanup,
-                        Dart_ThreadExitCallback thread_exit,
-                        Dart_FileOpenCallback file_open,
-                        Dart_FileReadCallback file_read,
-                        Dart_FileWriteCallback file_write,
-                        Dart_FileCloseCallback file_close,
-                        Dart_EntropySource entropy_source,
-                        Dart_GetVMServiceAssetsArchive get_service_assets);
-  static const char* Cleanup();
+  // Returns null if initialization succeeds, otherwise returns an error message
+  // (caller owns error message and has to free it).
+  static char* Init(const Dart_InitializeParams* params);
+
+  // Returns null if cleanup succeeds, otherwise returns an error message
+  // (caller owns error message and has to free it).
+  static char* Cleanup();
+
+  // Returns true if the VM is initialized.
+  static bool IsInitialized();
+
+  // Used to Indicate that a Dart API call is active.
+  static bool SetActiveApiCall();
+  static void ResetActiveApiCall();
 
   static Isolate* CreateIsolate(const char* name_prefix,
-                                const Dart_IsolateFlags& api_flags);
+                                const Dart_IsolateFlags& api_flags,
+                                IsolateGroup* isolate_group);
 
   // Initialize an isolate, either from a snapshot, from a Kernel binary, or
   // from SDK library sources.  If the snapshot_buffer is non-NULL,
   // initialize from a snapshot or a Kernel binary depending on the value of
   // from_kernel.  Otherwise, initialize from sources.
-  static RawError* InitializeIsolate(const uint8_t* snapshot_data,
-                                     const uint8_t* snapshot_instructions,
-                                     intptr_t snapshot_length,
-                                     kernel::Program* kernel_program,
-                                     void* data);
+  static ErrorPtr InitializeIsolate(const uint8_t* snapshot_data,
+                                    const uint8_t* snapshot_instructions,
+                                    const uint8_t* kernel_buffer,
+                                    intptr_t kernel_buffer_size,
+                                    IsolateGroup* source_isolate_group,
+                                    void* data);
+  static ErrorPtr InitIsolateFromSnapshot(Thread* T,
+                                          Isolate* I,
+                                          const uint8_t* snapshot_data,
+                                          const uint8_t* snapshot_instructions,
+                                          const uint8_t* kernel_buffer,
+                                          intptr_t kernel_buffer_size);
+
+  static bool DetectNullSafety(const char* script_uri,
+                               const uint8_t* snapshot_data,
+                               const uint8_t* snapshot_instructions,
+                               const uint8_t* kernel_buffer,
+                               intptr_t kernel_buffer_size,
+                               const char* package_config,
+                               const char* original_working_directory);
+
   static void RunShutdownCallback();
   static void ShutdownIsolate(Isolate* isolate);
   static void ShutdownIsolate();
 
   static Isolate* vm_isolate() { return vm_isolate_; }
+  static IsolateGroup* vm_isolate_group() { return vm_isolate_->group(); }
   static ThreadPool* thread_pool() { return thread_pool_; }
+  static bool VmIsolateNameEquals(const char* name);
 
   static int64_t UptimeMicros();
   static int64_t UptimeMillis() {
@@ -73,15 +96,32 @@ class Dart : public AllStatic {
   static uword AllocateReadOnlyHandle();
   static bool IsReadOnlyHandle(uword address);
 
-  static const char* FeaturesString(Isolate* isolate, Snapshot::Kind kind);
+  // The returned string has to be free()ed.
+  static char* FeaturesString(IsolateGroup* isolate_group,
+                              bool is_vm_snapshot,
+                              Snapshot::Kind kind);
   static Snapshot::Kind vm_snapshot_kind() { return vm_snapshot_kind_; }
 
+  static Dart_ThreadStartCallback thread_start_callback() {
+    return thread_start_callback_;
+  }
+  static void set_thread_start_callback(Dart_ThreadStartCallback cback) {
+    thread_start_callback_ = cback;
+  }
   static Dart_ThreadExitCallback thread_exit_callback() {
     return thread_exit_callback_;
   }
   static void set_thread_exit_callback(Dart_ThreadExitCallback cback) {
     thread_exit_callback_ = cback;
   }
+  static Dart_PostTaskCallback post_task_callback() {
+    return post_task_callback_;
+  }
+  static void set_post_task_callback(Dart_PostTaskCallback cback) {
+    post_task_callback_ = cback;
+  }
+  static void* post_task_data() { return post_task_data_; }
+  static void set_post_task_data(void* data) { post_task_data_ = data; }
   static void SetFileCallbacks(Dart_FileOpenCallback file_open,
                                Dart_FileReadCallback file_read,
                                Dart_FileWriteCallback file_write,
@@ -112,7 +152,16 @@ class Dart : public AllStatic {
     return entropy_source_callback_;
   }
 
+  static void set_gc_event_callback(Dart_GCEventCallback gc_event) {
+    gc_event_callback_ = gc_event;
+  }
+  static Dart_GCEventCallback gc_event_callback() { return gc_event_callback_; }
+
  private:
+  static char* DartInit(const Dart_InitializeParams* params);
+
+  static constexpr const char* kVmIsolateName = "vm-isolate";
+
   static void WaitForIsolateShutdown();
   static void WaitForApplicationIsolateShutdown();
 
@@ -122,12 +171,16 @@ class Dart : public AllStatic {
   static DebugInfo* pprof_symbol_generator_;
   static ReadOnlyHandles* predefined_handles_;
   static Snapshot::Kind vm_snapshot_kind_;
+  static Dart_ThreadStartCallback thread_start_callback_;
   static Dart_ThreadExitCallback thread_exit_callback_;
   static Dart_FileOpenCallback file_open_callback_;
   static Dart_FileReadCallback file_read_callback_;
   static Dart_FileWriteCallback file_write_callback_;
   static Dart_FileCloseCallback file_close_callback_;
   static Dart_EntropySource entropy_source_callback_;
+  static Dart_GCEventCallback gc_event_callback_;
+  static Dart_PostTaskCallback post_task_callback_;
+  static void* post_task_data_;
 };
 
 }  // namespace dart

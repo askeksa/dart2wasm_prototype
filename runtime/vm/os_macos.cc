@@ -3,21 +3,20 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_MACOS)
+#if defined(DART_HOST_OS_MACOS)
 
 #include "vm/os.h"
 
 #include <errno.h>           // NOLINT
 #include <limits.h>          // NOLINT
-#include <mach/mach.h>       // NOLINT
 #include <mach/clock.h>      // NOLINT
+#include <mach/mach.h>       // NOLINT
 #include <mach/mach_time.h>  // NOLINT
-#include <sys/time.h>        // NOLINT
 #include <sys/resource.h>    // NOLINT
+#include <sys/time.h>        // NOLINT
 #include <unistd.h>          // NOLINT
-#if HOST_OS_IOS
-#include <sys/sysctl.h>  // NOLINT
-#include <syslog.h>      // NOLINT
+#if DART_HOST_OS_IOS
+#include <syslog.h>  // NOLINT
 #endif
 
 #include "platform/utils.h"
@@ -27,18 +26,16 @@
 namespace dart {
 
 const char* OS::Name() {
-#if HOST_OS_IOS
+#if DART_HOST_OS_IOS
   return "ios";
 #else
   return "macos";
 #endif
 }
 
-
 intptr_t OS::ProcessId() {
   return static_cast<intptr_t>(getpid());
 }
-
 
 static bool LocalTime(int64_t seconds_since_epoch, tm* tm_result) {
   time_t seconds = static_cast<time_t>(seconds_since_epoch);
@@ -47,14 +44,12 @@ static bool LocalTime(int64_t seconds_since_epoch, tm* tm_result) {
   return error_code != NULL;
 }
 
-
 const char* OS::GetTimeZoneName(int64_t seconds_since_epoch) {
   tm decomposed;
   bool succeeded = LocalTime(seconds_since_epoch, &decomposed);
   // If unsuccessful, return an empty string like V8 does.
   return (succeeded && (decomposed.tm_zone != NULL)) ? decomposed.tm_zone : "";
 }
-
 
 int OS::GetTimeZoneOffsetInSeconds(int64_t seconds_since_epoch) {
   tm decomposed;
@@ -64,7 +59,6 @@ int OS::GetTimeZoneOffsetInSeconds(int64_t seconds_since_epoch) {
   return succeeded ? static_cast<int>(decomposed.tm_gmtoff) : 0;
 }
 
-
 int OS::GetLocalTimeZoneAdjustmentInSeconds() {
   // TODO(floitsch): avoid excessive calls to tzset?
   tzset();
@@ -73,11 +67,9 @@ int OS::GetLocalTimeZoneAdjustmentInSeconds() {
   return static_cast<int>(-timezone);
 }
 
-
 int64_t OS::GetCurrentTimeMillis() {
   return GetCurrentTimeMicros() / 1000;
 }
-
 
 int64_t OS::GetCurrentTimeMicros() {
   // gettimeofday has microsecond resolution.
@@ -89,28 +81,9 @@ int64_t OS::GetCurrentTimeMicros() {
   return (static_cast<int64_t>(tv.tv_sec) * 1000000) + tv.tv_usec;
 }
 
-
-#if !HOST_OS_IOS
 static mach_timebase_info_data_t timebase_info;
-#endif
-
 
 int64_t OS::GetCurrentMonotonicTicks() {
-#if HOST_OS_IOS
-  // On iOS mach_absolute_time stops while the device is sleeping. Instead use
-  // now - KERN_BOOTTIME to get a time difference that is not impacted by clock
-  // changes. KERN_BOOTTIME will be updated by the system whenever the system
-  // clock change.
-  struct timeval boottime;
-  int mib[2] = {CTL_KERN, KERN_BOOTTIME};
-  size_t size = sizeof(boottime);
-  int kr = sysctl(mib, sizeof(mib) / sizeof(mib[0]), &boottime, &size, NULL, 0);
-  ASSERT(KERN_SUCCESS == kr);
-  int64_t now = GetCurrentTimeMicros();
-  int64_t origin = boottime.tv_sec * kMicrosecondsPerSecond;
-  origin += boottime.tv_usec;
-  return now - origin;
-#else
   if (timebase_info.denom == 0) {
     kern_return_t kr = mach_timebase_info(&timebase_info);
     ASSERT(KERN_SUCCESS == kr);
@@ -121,41 +94,24 @@ int64_t OS::GetCurrentMonotonicTicks() {
   result *= timebase_info.numer;
   result /= timebase_info.denom;
   return result;
-#endif  // HOST_OS_IOS
 }
-
 
 int64_t OS::GetCurrentMonotonicFrequency() {
-#if HOST_OS_IOS
-  return kMicrosecondsPerSecond;
-#else
   return kNanosecondsPerSecond;
-#endif  // HOST_OS_IOS
 }
-
 
 int64_t OS::GetCurrentMonotonicMicros() {
-#if HOST_OS_IOS
-  ASSERT(GetCurrentMonotonicFrequency() == kMicrosecondsPerSecond);
-  return GetCurrentMonotonicTicks();
-#else
   ASSERT(GetCurrentMonotonicFrequency() == kNanosecondsPerSecond);
   return GetCurrentMonotonicTicks() / kNanosecondsPerMicrosecond;
-#endif  // HOST_OS_IOS
 }
-
 
 int64_t OS::GetCurrentThreadCPUMicros() {
   mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
   thread_basic_info_data_t info_data;
   thread_basic_info_t info = &info_data;
-  mach_port_t thread_port = mach_thread_self();
-  if (thread_port == MACH_PORT_NULL) {
-    return -1;
-  }
+  mach_port_t thread_port = pthread_mach_thread_np(pthread_self());
   kern_return_t r =
       thread_info(thread_port, THREAD_BASIC_INFO, (thread_info_t)info, &count);
-  mach_port_deallocate(mach_task_self(), thread_port);
   ASSERT(r == KERN_SUCCESS);
   int64_t thread_cpu_micros =
       (info->system_time.seconds + info->user_time.seconds);
@@ -165,9 +121,12 @@ int64_t OS::GetCurrentThreadCPUMicros() {
   return thread_cpu_micros;
 }
 
+int64_t OS::GetCurrentThreadCPUMicrosForTimeline() {
+  return OS::GetCurrentThreadCPUMicros();
+}
 
 intptr_t OS::ActivationFrameAlignment() {
-#if HOST_OS_IOS
+#if DART_HOST_OS_IOS
 #if TARGET_ARCH_ARM
   // Even if we generate code that maintains a stronger alignment, we cannot
   // assert the stronger stack alignment because C++ code will not maintain it.
@@ -178,58 +137,24 @@ intptr_t OS::ActivationFrameAlignment() {
   return 16;  // iOS simulator
 #elif TARGET_ARCH_X64
   return 16;  // iOS simulator
-#elif TARGET_ARCH_DBC
-  return 16;
 #else
 #error Unimplemented
 #endif
-#else   // HOST_OS_IOS
+#else   // DART_HOST_OS_IOS
   // OS X activation frames must be 16 byte-aligned; see "Mac OS X ABI
   // Function Call Guide".
   return 16;
-#endif  // HOST_OS_IOS
+#endif  // DART_HOST_OS_IOS
 }
-
-
-intptr_t OS::PreferredCodeAlignment() {
-#if defined(TARGET_ARCH_IA32) || defined(TARGET_ARCH_X64) ||                   \
-    defined(TARGET_ARCH_ARM64) || defined(TARGET_ARCH_DBC)
-  const int kMinimumAlignment = 32;
-#elif defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_MIPS)
-  const int kMinimumAlignment = 16;
-#else
-#error Unsupported architecture.
-#endif
-  intptr_t alignment = kMinimumAlignment;
-  // TODO(5411554): Allow overriding default code alignment for
-  // testing purposes.
-  // Flags::DebugIsInt("codealign", &alignment);
-  ASSERT(Utils::IsPowerOfTwo(alignment));
-  ASSERT(alignment >= kMinimumAlignment);
-  ASSERT(alignment <= OS::kMaxPreferredCodeAlignment);
-  return alignment;
-}
-
 
 int OS::NumberOfAvailableProcessors() {
   return sysconf(_SC_NPROCESSORS_ONLN);
 }
 
-
-uintptr_t OS::MaxRSS() {
-  struct rusage usage;
-  usage.ru_maxrss = 0;
-  int r = getrusage(RUSAGE_SELF, &usage);
-  ASSERT(r == 0);
-  return usage.ru_maxrss;
-}
-
-
 void OS::Sleep(int64_t millis) {
   int64_t micros = millis * kMicrosecondsPerMillisecond;
   SleepMicros(micros);
 }
-
 
 void OS::SleepMicros(int64_t micros) {
   struct timespec req;  // requested.
@@ -255,61 +180,17 @@ void OS::SleepMicros(int64_t micros) {
   }
 }
 
-
 void OS::DebugBreak() {
   __builtin_trap();
 }
 
-
-uintptr_t DART_NOINLINE OS::GetProgramCounter() {
+DART_NOINLINE uintptr_t OS::GetProgramCounter() {
   return reinterpret_cast<uintptr_t>(
       __builtin_extract_return_addr(__builtin_return_address(0)));
 }
 
-
-char* OS::StrNDup(const char* s, intptr_t n) {
-// strndup has only been added to Mac OS X in 10.7. We are supplying
-// our own copy here if needed.
-#if !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) ||                 \
-    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ <= 1060
-  intptr_t len = strlen(s);
-  if ((n < 0) || (len < 0)) {
-    return NULL;
-  }
-  if (n < len) {
-    len = n;
-  }
-  char* result = reinterpret_cast<char*>(malloc(len + 1));
-  if (result == NULL) {
-    return NULL;
-  }
-  result[len] = '\0';
-  return reinterpret_cast<char*>(memmove(result, s, len));
-#else   // !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) || ...
-  return strndup(s, n);
-#endif  // !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) || ...
-}
-
-
-intptr_t OS::StrNLen(const char* s, intptr_t n) {
-// strnlen has only been added to Mac OS X in 10.7. We are supplying
-// our own copy here if needed.
-#if !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) ||                 \
-    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ <= 1060
-  intptr_t len = 0;
-  while ((len <= n) && (*s != '\0')) {
-    s++;
-    len++;
-  }
-  return len;
-#else   // !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) || ...
-  return strnlen(s, n);
-#endif  // !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) || ...
-}
-
-
 void OS::Print(const char* format, ...) {
-#if HOST_OS_IOS
+#if DART_HOST_OS_IOS
   va_list args;
   va_start(args, format);
   vsyslog(LOG_INFO, format, args);
@@ -322,30 +203,10 @@ void OS::Print(const char* format, ...) {
 #endif
 }
 
-
 void OS::VFPrint(FILE* stream, const char* format, va_list args) {
   vfprintf(stream, format, args);
   fflush(stream);
 }
-
-
-int OS::SNPrint(char* str, size_t size, const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  int retval = VSNPrint(str, size, format, args);
-  va_end(args);
-  return retval;
-}
-
-
-int OS::VSNPrint(char* str, size_t size, const char* format, va_list args) {
-  int retval = vsnprintf(str, size, format, args);
-  if (retval < 0) {
-    FATAL1("Fatal error in OS::VSNPrint with format '%s'", format);
-  }
-  return retval;
-}
-
 
 char* OS::SCreate(Zone* zone, const char* format, ...) {
   va_list args;
@@ -355,12 +216,11 @@ char* OS::SCreate(Zone* zone, const char* format, ...) {
   return buffer;
 }
 
-
 char* OS::VSCreate(Zone* zone, const char* format, va_list args) {
   // Measure.
   va_list measure_args;
   va_copy(measure_args, args);
-  intptr_t len = VSNPrint(NULL, 0, format, measure_args);
+  intptr_t len = Utils::VSNPrint(NULL, 0, format, measure_args);
   va_end(measure_args);
 
   char* buffer;
@@ -374,11 +234,10 @@ char* OS::VSCreate(Zone* zone, const char* format, va_list args) {
   // Print.
   va_list print_args;
   va_copy(print_args, args);
-  VSNPrint(buffer, len + 1, format, print_args);
+  Utils::VSNPrint(buffer, len + 1, format, print_args);
   va_end(print_args);
   return buffer;
 }
-
 
 bool OS::StringToInt64(const char* str, int64_t* value) {
   ASSERT(str != NULL && strlen(str) > 0 && value != NULL);
@@ -387,22 +246,28 @@ bool OS::StringToInt64(const char* str, int64_t* value) {
   int i = 0;
   if (str[0] == '-') {
     i = 1;
+  } else if (str[0] == '+') {
+    i = 1;
   }
   if ((str[i] == '0') && (str[i + 1] == 'x' || str[i + 1] == 'X') &&
       (str[i + 2] != '\0')) {
     base = 16;
   }
   errno = 0;
-  *value = strtoll(str, &endptr, base);
+  if (base == 16) {
+    // Unsigned 64-bit hexadecimal integer literals are allowed but
+    // immediately interpreted as signed 64-bit integers.
+    *value = static_cast<int64_t>(strtoull(str, &endptr, base));
+  } else {
+    *value = strtoll(str, &endptr, base);
+  }
   return ((errno == 0) && (endptr != str) && (*endptr == 0));
 }
 
-
 void OS::RegisterCodeObservers() {}
 
-
 void OS::PrintErr(const char* format, ...) {
-#if HOST_OS_IOS
+#if DART_HOST_OS_IOS
   va_list args;
   va_start(args, format);
   vsyslog(LOG_ERR, format, args);
@@ -415,15 +280,7 @@ void OS::PrintErr(const char* format, ...) {
 #endif
 }
 
-
-void OS::InitOnce() {
-  // TODO(5411554): For now we check that initonce is called only once,
-  // Once there is more formal mechanism to call InitOnce we can move
-  // this check there.
-  static bool init_once_called = false;
-  ASSERT(init_once_called == false);
-  init_once_called = true;
-
+void OS::Init() {
   // See https://github.com/dart-lang/sdk/issues/29539
   // This is a workaround for a macos bug, we eagerly call localtime_r so that
   // libnotify is initialized early before any fork happens.
@@ -440,14 +297,14 @@ void OS::InitOnce() {
   }
 }
 
+void OS::Cleanup() {}
 
-void OS::Shutdown() {}
-
+void OS::PrepareToAbort() {}
 
 void OS::Abort() {
+  PrepareToAbort();
   abort();
 }
-
 
 void OS::Exit(int code) {
   exit(code);
@@ -455,4 +312,4 @@ void OS::Exit(int code) {
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_MACOS)
+#endif  // defined(DART_HOST_OS_MACOS)

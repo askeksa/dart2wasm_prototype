@@ -9,17 +9,16 @@ import 'dart:io';
 
 import 'standard_deviation.dart';
 
-const String bRootPath = const String.fromEnvironment("bRoot");
-const int abIterations =
-    const int.fromEnvironment("abIterations", defaultValue: 15);
-const int iterations =
-    const int.fromEnvironment("iterations", defaultValue: 15);
+const String? bRootPath =
+    bool.hasEnvironment("bRoot") ? String.fromEnvironment("bRoot") : null;
+const int abIterations = int.fromEnvironment("abIterations", defaultValue: 15);
+const int iterations = int.fromEnvironment("iterations", defaultValue: 15);
 
 /// Compare the performance of two different fast implementations
 /// by alternately launching the compile application in this directory
 /// and the compile application location in the repo specified by "bRoot"
 /// via -DbRoot=/absolute/path/to/other/sdk/repo
-main(List<String> args) async {
+Future<void> main(List<String> args) async {
   print(args);
   if (bRootPath == null) {
     print('Expected -DbRoot=/absolute/path/to/other/sdk/repo');
@@ -30,7 +29,7 @@ main(List<String> args) async {
   Uri aRoot = Platform.script.resolve('../../../..');
 
   // The root of the other Dart SDK repo "B"
-  Uri bRoot = new Uri.directory(bRootPath);
+  Uri bRoot = new Uri.directory(bRootPath!);
 
   // Sanity check
   String relPath = 'pkg/front_end/tool/_fasta/compile.dart';
@@ -156,7 +155,7 @@ Future<Null> run(Uri workingDir, Uri dartApp, List<String> args,
     }
     if (line.startsWith(_summaryTag)) {
       String json = line.substring(_summaryTag.length - 2);
-      Map<String, dynamic> results = JSON.decode(json);
+      Map<String, dynamic> results = jsonDecode(json);
       List<double> elapsedTimes = results['elapsedTimes'];
       print('\nElapse times: $elapsedTimes');
       if (elapsedTimes.length > 0) {
@@ -180,16 +179,17 @@ Future<Null> run(Uri workingDir, Uri dartApp, List<String> args,
 
   Process process = await Process.start(Platform.executable, procArgs,
       workingDirectory: workingDirPath);
+  // ignore: unawaited_futures
   stderr.addStream(process.stderr);
-  StreamSubscription<String> stdOutSubscription;
+  StreamSubscription<String>? stdOutSubscription;
   stdOutSubscription = process.stdout
-      .transform(UTF8.decoder)
+      .transform(utf8.decoder)
       .transform(new LineSplitter())
       .listen(processLine, onDone: () {
-    stdOutSubscription.cancel();
+    stdOutSubscription!.cancel();
   }, onError: (e) {
     print('Error: $e');
-    stdOutSubscription.cancel();
+    stdOutSubscription!.cancel();
   });
   int code = await process.exitCode;
   if (code != 0) {

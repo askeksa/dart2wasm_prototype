@@ -6,7 +6,14 @@
 #define RUNTIME_BIN_PLATFORM_H_
 
 #include "bin/builtin.h"
+
+#include "platform/atomic.h"
 #include "platform/globals.h"
+#include "platform/utils.h"
+
+#if defined(DART_HOST_OS_MACOS)
+#include "bin/platform_macos.h"
+#endif  // defined(DART_HOST_OS_MACOS)
 
 namespace dart {
 namespace bin {
@@ -24,8 +31,13 @@ class Platform {
   // deallocated by the caller.
   static const char* OperatingSystem();
 
+  // Returns a string representing the version of the operating system. The
+  // format of the string is determined by the platform. The returned string
+  // should not be deallocated by the caller.
+  static const char* OperatingSystemVersion();
+
   // Returns the architecture name of the processor the VM is running on
-  // (ia32, x64, arm, arm64, or mips).
+  // (ia32, x64, arm, or arm64).
   static const char* HostArchitecture() {
 #if defined(HOST_ARCH_ARM)
     return "arm";
@@ -33,10 +45,12 @@ class Platform {
     return "arm64";
 #elif defined(HOST_ARCH_IA32)
     return "ia32";
-#elif defined(HOST_ARCH_MIPS)
-    return "mips";
 #elif defined(HOST_ARCH_X64)
     return "x64";
+#elif defined(HOST_ARCH_RISCV32)
+    return "riscv32";
+#elif defined(HOST_ARCH_RISCV64)
+    return "riscv64";
 #else
 #error Architecture detection failed.
 #endif
@@ -61,20 +75,33 @@ class Platform {
 
   static const char* ResolveExecutablePath();
 
+  // This has the same effect as calling ResolveExecutablePath except that
+  // Dart_ScopeAllocate is not called and that the result goes into the given
+  // parameters.
+  // WARNING: On Fuchsia it returns -1, i.e. doesn't work.
+  // Note that `result` should be pre-allocated with size `result_size`.
+  // The return-value is the length read into `result` or -1 on failure.
+  static intptr_t ResolveExecutablePathInto(char* result, size_t result_size);
+
   // Stores the executable name.
   static void SetExecutableName(const char* executable_name) {
     executable_name_ = executable_name;
   }
-  static const char* GetExecutableName() { return executable_name_; }
+  static const char* GetExecutableName();
   static const char* GetResolvedExecutableName() {
-    if (resolved_executable_name_ == NULL) {
+    if (resolved_executable_name_.load() == nullptr) {
       // Try to resolve the executable path using platform specific APIs.
       const char* resolved_name = Platform::ResolveExecutablePath();
-      if (resolved_name != NULL) {
-        resolved_executable_name_ = strdup(resolved_name);
+      if (resolved_name != nullptr) {
+        char* resolved_name_copy = Utils::StrDup(resolved_name);
+        const char* expect_old_is_null = nullptr;
+        if (!resolved_executable_name_.compare_exchange_strong(
+                expect_old_is_null, resolved_name_copy)) {
+          free(resolved_name_copy);
+        }
       }
     }
-    return resolved_executable_name_;
+    return resolved_executable_name_.load();
   }
 
   // Stores and gets the flags passed to the executable.
@@ -85,13 +112,21 @@ class Platform {
   static int GetScriptIndex() { return script_index_; }
   static char** GetArgv() { return argv_; }
 
-  static DART_NORETURN void Exit(int exit_code);
+  static void SetProcessName(const char* name);
+
+  DART_NORETURN static void Exit(int exit_code);
+
+  static void SetCoreDumpResourceLimit(int value);
 
  private:
   // The path to the executable.
   static const char* executable_name_;
+
   // The path to the resolved executable.
-  static char* resolved_executable_name_;
+  //
+  // We use require-release semantics to ensure initializing stores to the
+  // string are visible when the string becomes visible.
+  static AcqRelAtomic<const char*> resolved_executable_name_;
 
   static int script_index_;
   static char** argv_;  // VM flags are argv_[1 ... script_index_ - 1]

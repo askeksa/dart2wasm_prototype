@@ -4,7 +4,6 @@
 
 library dart2js.diagnostic_listener;
 
-import 'package:front_end/src/fasta/scanner.dart' show Token;
 import '../elements/entities.dart';
 import '../options.dart' show DiagnosticOptions;
 import 'messages.dart';
@@ -26,14 +25,8 @@ abstract class DiagnosticReporter {
   /// tokens can be found within the tokens of the current element.
   SourceSpan spanFromSpannable(Spannable node);
 
-  /// Creates a [SourceSpan] for [token] in scope of the current element.
-  ///
-  /// In checked mode we assert that the token can be found within the tokens
-  /// of the current element.
-  SourceSpan spanFromToken(Token token);
-
   void reportErrorMessage(Spannable spannable, MessageKind messageKind,
-      [Map arguments = const {}]) {
+      [Map<String, String> arguments = const {}]) {
     reportError(createMessage(spannable, messageKind, arguments));
   }
 
@@ -41,7 +34,7 @@ abstract class DiagnosticReporter {
       [List<DiagnosticMessage> infos = const <DiagnosticMessage>[]]);
 
   void reportWarningMessage(Spannable spannable, MessageKind messageKind,
-      [Map arguments = const {}]) {
+      [Map<String, String> arguments = const {}]) {
     reportWarning(createMessage(spannable, messageKind, arguments));
   }
 
@@ -49,23 +42,27 @@ abstract class DiagnosticReporter {
       [List<DiagnosticMessage> infos = const <DiagnosticMessage>[]]);
 
   void reportHintMessage(Spannable spannable, MessageKind messageKind,
-      [Map arguments = const {}]) {
+      [Map<String, String> arguments = const {}]) {
     reportHint(createMessage(spannable, messageKind, arguments));
   }
 
   void reportHint(DiagnosticMessage message,
       [List<DiagnosticMessage> infos = const <DiagnosticMessage>[]]);
 
-  @deprecated
-  void reportInfo(Spannable node, MessageKind errorCode,
-      [Map arguments = const {}]);
+  void reportInfoMessage(Spannable node, MessageKind errorCode,
+      [Map<String, String> arguments = const {}]) {
+    reportInfo(createMessage(node, errorCode, arguments));
+  }
+
+  void reportInfo(DiagnosticMessage message,
+      [List<DiagnosticMessage> infos = const <DiagnosticMessage>[]]);
 
   /// Set current element of this reporter to [element]. This is used for
   /// creating [SourceSpan] in [spanFromSpannable].
   withCurrentElement(Entity element, f());
 
   DiagnosticMessage createMessage(Spannable spannable, MessageKind messageKind,
-      [Map arguments = const {}]);
+      [Map<String, String> arguments = const {}]);
 
   /// Returns `true` if a crash, an error or a fatal warning has been reported.
   bool get hasReportedError;

@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of view;
 
 typedef void SelectHandler(String menuText);
@@ -30,7 +32,7 @@ class SliderMenu extends View {
 
   List<String> _menuItems;
 
-  SliderMenu(this._menuItems, this.onSelect) : super() {}
+  SliderMenu(this._menuItems, this.onSelect);
 
   Element render() {
     // Create a div for each menu item.

@@ -7,15 +7,20 @@
 #include "bin/builtin.h"
 #include "bin/file.h"
 #include "bin/isolate_data.h"
+#include "bin/process.h"
+#include "bin/reference_counting.h"
+#include "bin/vmservice_impl.h"
 
 #include "platform/assert.h"
 #include "platform/globals.h"
+#include "platform/utils.h"
 
-#include "vm/clustered_snapshot.h"
-#include "vm/compiler_stats.h"
+#include "vm/app_snapshot.h"
 #include "vm/dart_api_impl.h"
+#include "vm/datastream.h"
+#include "vm/message_snapshot.h"
 #include "vm/stack_frame.h"
-#include "vm/unit_test.h"
+#include "vm/timer.h"
 
 using dart::bin::File;
 
@@ -24,66 +29,6 @@ namespace dart {
 Benchmark* Benchmark::first_ = NULL;
 Benchmark* Benchmark::tail_ = NULL;
 const char* Benchmark::executable_ = NULL;
-
-
-//
-// Measure compile of all dart2js(compiler) functions.
-//
-static char* ComputeDart2JSPath(const char* arg) {
-  char buffer[2048];
-  char* dart2js_path = strdup(File::GetCanonicalPath(arg));
-  const char* compiler_path = "%s%spkg%scompiler%slib%scompiler.dart";
-  const char* path_separator = File::PathSeparator();
-  ASSERT(path_separator != NULL && strlen(path_separator) == 1);
-  char* ptr = strrchr(dart2js_path, *path_separator);
-  while (ptr != NULL) {
-    *ptr = '\0';
-    OS::SNPrint(buffer, 2048, compiler_path, dart2js_path, path_separator,
-                path_separator, path_separator, path_separator, path_separator);
-    if (File::Exists(buffer)) {
-      break;
-    }
-    ptr = strrchr(dart2js_path, *path_separator);
-  }
-  if (ptr == NULL) {
-    free(dart2js_path);
-    dart2js_path = NULL;
-  }
-  return dart2js_path;
-}
-
-
-static void func(Dart_NativeArguments args) {}
-
-
-static Dart_NativeFunction NativeResolver(Dart_Handle name,
-                                          int arg_count,
-                                          bool* auto_setup_scope) {
-  ASSERT(auto_setup_scope != NULL);
-  *auto_setup_scope = false;
-  return &func;
-}
-
-
-static void SetupDart2JSPackagePath() {
-  bool worked = bin::DartUtils::SetOriginalWorkingDirectory();
-  EXPECT(worked);
-
-  Dart_Handle result = bin::DartUtils::PrepareForScriptLoading(false, false);
-  DART_CHECK_VALID(result);
-
-  // Setup package root.
-  char buffer[2048];
-  char* executable_path =
-      strdup(File::GetCanonicalPath(Benchmark::Executable()));
-  const char* packages_path = "%s%s..%spackages";
-  const char* path_separator = File::PathSeparator();
-  OS::SNPrint(buffer, 2048, packages_path, executable_path, path_separator,
-              path_separator);
-  result = bin::DartUtils::SetupPackageRoot(buffer, NULL);
-  DART_CHECK_VALID(result);
-}
-
 
 void Benchmark::RunAll(const char* executable) {
   SetExecutable(executable);
@@ -94,28 +39,19 @@ void Benchmark::RunAll(const char* executable) {
   }
 }
 
-
-Dart_Isolate Benchmark::CreateIsolate(const uint8_t* snapshot_data,
-                                      const uint8_t* snapshot_instructions) {
-  char* err = NULL;
-  isolate_ = Dart_CreateIsolate(NULL, NULL, snapshot_data,
-                                snapshot_instructions, NULL, NULL, &err);
-  EXPECT(isolate_ != NULL);
-  free(err);
-  return isolate_;
-}
-
-
 //
 // Measure compile of all functions in dart core lib classes.
 //
 BENCHMARK(CorelibCompileAll) {
   bin::Builtin::SetNativeResolver(bin::Builtin::kBuiltinLibrary);
   bin::Builtin::SetNativeResolver(bin::Builtin::kIOLibrary);
+  bin::Builtin::SetNativeResolver(bin::Builtin::kCLILibrary);
   TransitionNativeToVM transition(thread);
-  Timer timer(true, "Compile all of Core lib benchmark");
+  StackZone zone(thread);
+  Timer timer;
   timer.Start();
-  const Error& error = Error::Handle(Library::CompileAll());
+  const Error& error =
+      Error::Handle(Library::CompileAll(/*ignore_error=*/true));
   if (!error.IsNull()) {
     OS::PrintErr("Unexpected error in CorelibCompileAll benchmark:\n%s",
                  error.ToErrorCString());
@@ -125,81 +61,38 @@ BENCHMARK(CorelibCompileAll) {
   benchmark->set_score(elapsed_time);
 }
 
-
-#ifndef PRODUCT
-
-
-BENCHMARK(CorelibCompilerStats) {
-  bin::Builtin::SetNativeResolver(bin::Builtin::kBuiltinLibrary);
-  bin::Builtin::SetNativeResolver(bin::Builtin::kIOLibrary);
-  TransitionNativeToVM transition(thread);
-  CompilerStats* stats = thread->isolate()->aggregate_compiler_stats();
-  ASSERT(stats != NULL);
-  stats->EnableBenchmark();
-  Timer timer(true, "Compiler stats compiling all of Core lib");
-  timer.Start();
-  const Error& error = Error::Handle(Library::CompileAll());
-  if (!error.IsNull()) {
-    OS::PrintErr("Unexpected error in CorelibCompileAll benchmark:\n%s",
-                 error.ToErrorCString());
+// This file is created by the target //runtime/bin:dart_kernel_platform_cc
+// which is depended on by run_vm_tests.
+static char* ComputeKernelServicePath(const char* arg) {
+  char buffer[2048];
+  char* kernel_service_path = Utils::StrDup(File::GetCanonicalPath(NULL, arg));
+  EXPECT(kernel_service_path != NULL);
+  const char* compiler_path = "%s%sgen%skernel_service.dill";
+  const char* path_separator = File::PathSeparator();
+  ASSERT(path_separator != NULL && strlen(path_separator) == 1);
+  char* ptr = strrchr(kernel_service_path, *path_separator);
+  while (ptr != NULL) {
+    *ptr = '\0';
+    Utils::SNPrint(buffer, ARRAY_SIZE(buffer), compiler_path,
+                   kernel_service_path, path_separator, path_separator);
+    if (File::Exists(NULL, buffer)) {
+      break;
+    }
+    ptr = strrchr(kernel_service_path, *path_separator);
   }
-  timer.Stop();
-  int64_t elapsed_time = timer.TotalElapsedTime();
-  benchmark->set_score(elapsed_time);
-}
-
-
-BENCHMARK(Dart2JSCompilerStats) {
-  bin::Builtin::SetNativeResolver(bin::Builtin::kBuiltinLibrary);
-  bin::Builtin::SetNativeResolver(bin::Builtin::kIOLibrary);
-  SetupDart2JSPackagePath();
-  char* dart_root = ComputeDart2JSPath(Benchmark::Executable());
-  char* script = NULL;
-  if (dart_root != NULL) {
-    HANDLESCOPE(thread);
-    script = OS::SCreate(NULL, "import '%s/pkg/compiler/lib/compiler.dart';",
-                         dart_root);
-    Dart_Handle lib = TestCase::LoadTestScript(
-        script, reinterpret_cast<Dart_NativeEntryResolver>(NativeResolver));
-    EXPECT_VALID(lib);
-  } else {
-    Dart_Handle lib = TestCase::LoadTestScript(
-        "import 'pkg/compiler/lib/compiler.dart';",
-        reinterpret_cast<Dart_NativeEntryResolver>(NativeResolver));
-    EXPECT_VALID(lib);
+  free(kernel_service_path);
+  if (ptr == NULL) {
+    return NULL;
   }
-  CompilerStats* stats = thread->isolate()->aggregate_compiler_stats();
-  ASSERT(stats != NULL);
-  stats->EnableBenchmark();
-  Timer timer(true, "Compile all of dart2js benchmark");
-  timer.Start();
-#if !defined(PRODUCT)
-  // Constant in product mode.
-  const bool old_flag = FLAG_background_compilation;
-  FLAG_background_compilation = false;
-#endif
-  Dart_Handle result = Dart_CompileAll();
-#if !defined(PRODUCT)
-  FLAG_background_compilation = old_flag;
-#endif
-  EXPECT_VALID(result);
-  timer.Stop();
-  int64_t elapsed_time = timer.TotalElapsedTime();
-  benchmark->set_score(elapsed_time);
-  free(dart_root);
-  free(script);
+  return Utils::StrDup(buffer);
 }
-
-
-#endif  // !PRODUCT
-
 
 //
 // Measure creation of core isolate from a snapshot.
 //
 BENCHMARK(CorelibIsolateStartup) {
   const int kNumIterations = 1000;
-  Timer timer(true, "CorelibIsolateStartup");
+  Timer timer;
   Isolate* isolate = thread->isolate();
   Dart_ExitIsolate();
   for (int i = 0; i < kNumIterations; i++) {
@@ -212,12 +105,10 @@ BENCHMARK(CorelibIsolateStartup) {
   Dart_EnterIsolate(reinterpret_cast<Dart_Isolate>(isolate));
 }
 
-
 //
 // Measure invocation of Dart API functions.
 //
 static void InitNativeFields(Dart_NativeArguments args) {
-  Dart_EnterScope();
   int count = Dart_GetNativeArgumentCount(args);
   EXPECT_EQ(1, count);
 
@@ -225,10 +116,7 @@ static void InitNativeFields(Dart_NativeArguments args) {
   EXPECT_VALID(recv);
   Dart_Handle result = Dart_SetNativeInstanceField(recv, 0, 7);
   EXPECT_VALID(result);
-
-  Dart_ExitScope();
 }
-
 
 // The specific api functions called here are a bit arbitrary.  We are
 // trying to get a sense of the overhead for using the dart api.
@@ -260,7 +148,6 @@ static void UseDartApi(Dart_NativeArguments args) {
   Dart_SetReturnValue(args, Dart_NewInteger(value1 * receiver_value));
 }
 
-
 static Dart_NativeFunction bm_uda_lookup(Dart_Handle name,
                                          int argument_count,
                                          bool* auto_setup_scope) {
@@ -276,55 +163,55 @@ static Dart_NativeFunction bm_uda_lookup(Dart_Handle name,
   }
 }
 
-
 BENCHMARK(UseDartApi) {
   const int kNumIterations = 1000000;
-  const char* kScriptChars =
-      "class Class extends NativeFieldsWrapper{\n"
-      "  int init() native 'init';\n"
-      "  int method(int param1, int param2) native 'method';\n"
-      "}\n"
-      "\n"
-      "void benchmark(int count) {\n"
-      "  Class c = new Class();\n"
-      "  c.init();\n"
-      "  for (int i = 0; i < count; i++) {\n"
-      "    c.method(i,7);\n"
-      "  }\n"
-      "}\n";
+  const char* kScriptChars = R"(
+import 'dart:nativewrappers';
 
-  Dart_Handle lib = TestCase::LoadTestScript(
-      kScriptChars, reinterpret_cast<Dart_NativeEntryResolver>(bm_uda_lookup),
-      USER_TEST_URI, false);
+class Class extends NativeFieldWrapperClass1 {
+  @pragma("vm:external-name", "init")
+  external void init();
+  @pragma("vm:external-name", "method")
+  external int method(int param1, int param2);
+}
 
-  // Create a native wrapper class with native fields.
-  Dart_Handle result =
-      Dart_CreateNativeWrapperClass(lib, NewString("NativeFieldsWrapper"), 1);
-  EXPECT_VALID(result);
-  result = Dart_FinalizeLoading(false);
+void benchmark(int count) {
+  Class c = Class();
+  c.init();
+  for (int i = 0; i < count; i++) {
+    c.method(i,7);
+  }
+})";
+
+  Dart_Handle lib = TestCase::LoadTestScript(kScriptChars, bm_uda_lookup,
+                                             RESOLVED_USER_TEST_URI, false);
+  Dart_Handle result = Dart_FinalizeLoading(false);
   EXPECT_VALID(result);
 
   Dart_Handle args[1];
   args[0] = Dart_NewInteger(kNumIterations);
 
   // Warmup first to avoid compilation jitters.
-  Dart_Invoke(lib, NewString("benchmark"), 1, args);
+  result = Dart_Invoke(lib, NewString("benchmark"), 1, args);
+  EXPECT_VALID(result);
 
-  Timer timer(true, "UseDartApi benchmark");
+  Timer timer;
   timer.Start();
-  Dart_Invoke(lib, NewString("benchmark"), 1, args);
+  result = Dart_Invoke(lib, NewString("benchmark"), 1, args);
+  EXPECT_VALID(result);
   timer.Stop();
   int64_t elapsed_time = timer.TotalElapsedTime();
   benchmark->set_score(elapsed_time);
 }
 
+static void NoopFinalizer(void* isolate_callback_data, void* peer) {}
 
 //
 // Measure time accessing internal and external strings.
 //
 BENCHMARK(DartStringAccess) {
   const int kNumIterations = 10000000;
-  Timer timer(true, "DartStringAccess benchmark");
+  Timer timer;
   timer.Start();
   Dart_EnterScope();
 
@@ -334,7 +221,8 @@ BENCHMARK(DartStringAccess) {
   intptr_t char_size;
   intptr_t str_len;
   Dart_Handle external_string = Dart_NewExternalLatin1String(
-      data8, ARRAY_SIZE(data8), &external_peer_data, NULL);
+      data8, ARRAY_SIZE(data8), &external_peer_data, sizeof(data8),
+      NoopFinalizer);
   Dart_Handle internal_string = NewString("two");
 
   // Run benchmark.
@@ -357,33 +245,52 @@ BENCHMARK(DartStringAccess) {
   benchmark->set_score(elapsed_time);
 }
 
+static void vmservice_resolver(Dart_NativeArguments args) {}
 
-BENCHMARK(Dart2JSCompileAll) {
+static Dart_NativeFunction NativeResolver(Dart_Handle name,
+                                          int arg_count,
+                                          bool* auto_setup_scope) {
+  ASSERT(auto_setup_scope != NULL);
+  *auto_setup_scope = false;
+  return &vmservice_resolver;
+}
+
+//
+// Measure compile of all kernel Service(CFE) functions.
+//
+BENCHMARK(KernelServiceCompileAll) {
+  // kernel_service.dill is built with sound null safety.
+  if (FLAG_sound_null_safety != kNullSafetyOptionStrong) {
+    return;
+  }
   bin::Builtin::SetNativeResolver(bin::Builtin::kBuiltinLibrary);
   bin::Builtin::SetNativeResolver(bin::Builtin::kIOLibrary);
-  SetupDart2JSPackagePath();
-  char* dart_root = ComputeDart2JSPath(Benchmark::Executable());
-  char* script = NULL;
-  if (dart_root != NULL) {
-    HANDLESCOPE(thread);
-    script = OS::SCreate(NULL, "import '%s/pkg/compiler/lib/compiler.dart';",
-                         dart_root);
-    Dart_Handle lib = TestCase::LoadTestScript(
-        script, reinterpret_cast<Dart_NativeEntryResolver>(NativeResolver));
-    EXPECT_VALID(lib);
-  } else {
-    Dart_Handle lib = TestCase::LoadTestScript(
-        "import 'pkg/compiler/lib/compiler.dart';",
-        reinterpret_cast<Dart_NativeEntryResolver>(NativeResolver));
-    EXPECT_VALID(lib);
-  }
-  Timer timer(true, "Compile all of dart2js benchmark");
+  bin::Builtin::SetNativeResolver(bin::Builtin::kCLILibrary);
+  char* dill_path = ComputeKernelServicePath(Benchmark::Executable());
+  File* file = File::Open(NULL, dill_path, File::kRead);
+  EXPECT(file != NULL);
+  bin::RefCntReleaseScope<File> rs(file);
+  intptr_t kernel_buffer_size = file->Length();
+  uint8_t* kernel_buffer =
+      reinterpret_cast<uint8_t*>(malloc(kernel_buffer_size));
+  bool read_fully = file->ReadFully(kernel_buffer, kernel_buffer_size);
+  EXPECT(read_fully);
+  Dart_Handle result =
+      Dart_LoadScriptFromKernel(kernel_buffer, kernel_buffer_size);
+  EXPECT_VALID(result);
+  Dart_Handle service_lib = Dart_LookupLibrary(NewString("dart:vmservice_io"));
+  ASSERT(!Dart_IsError(service_lib));
+  Dart_SetNativeResolver(service_lib, NativeResolver, NULL);
+  result = Dart_FinalizeLoading(false);
+  EXPECT_VALID(result);
+
+  Timer timer;
   timer.Start();
 #if !defined(PRODUCT)
   const bool old_flag = FLAG_background_compilation;
   FLAG_background_compilation = false;
 #endif
-  Dart_Handle result = Dart_CompileAll();
+  result = Dart_CompileAll();
 #if !defined(PRODUCT)
   FLAG_background_compilation = old_flag;
 #endif
@@ -391,40 +298,41 @@ BENCHMARK(Dart2JSCompileAll) {
   timer.Stop();
   int64_t elapsed_time = timer.TotalElapsedTime();
   benchmark->set_score(elapsed_time);
-  free(dart_root);
-  free(script);
+  free(dill_path);
+  free(kernel_buffer);
 }
-
 
 //
 // Measure frame lookup during stack traversal.
 //
 static void StackFrame_accessFrame(Dart_NativeArguments args) {
-  const int kNumIterations = 100;
-  Code& code = Code::Handle();
-  Timer timer(true, "LookupDartCode benchmark");
+  Timer timer;
   timer.Start();
-  for (int i = 0; i < kNumIterations; i++) {
-    StackFrameIterator frames(StackFrameIterator::kDontValidateFrames,
-                              Thread::Current(),
-                              StackFrameIterator::kNoCrossThreadIteration);
-    StackFrame* frame = frames.NextFrame();
-    while (frame != NULL) {
-      if (frame->IsStubFrame()) {
-        code = frame->LookupDartCode();
-        EXPECT(code.function() == Function::null());
-      } else if (frame->IsDartFrame()) {
-        code = frame->LookupDartCode();
-        EXPECT(code.function() != Function::null());
+  {
+    Thread* thread = Thread::Current();
+    TransitionNativeToVM transition(thread);
+    const int kNumIterations = 100;
+    Code& code = Code::Handle(thread->zone());
+    for (int i = 0; i < kNumIterations; i++) {
+      StackFrameIterator frames(ValidationPolicy::kDontValidateFrames, thread,
+                                StackFrameIterator::kNoCrossThreadIteration);
+      StackFrame* frame = frames.NextFrame();
+      while (frame != NULL) {
+        if (frame->IsStubFrame()) {
+          code = frame->LookupDartCode();
+          EXPECT(code.function() == Function::null());
+        } else if (frame->IsDartFrame()) {
+          code = frame->LookupDartCode();
+          EXPECT(code.function() != Function::null());
+        }
+        frame = frames.NextFrame();
       }
-      frame = frames.NextFrame();
     }
   }
   timer.Stop();
   int64_t elapsed_time = timer.TotalElapsedTime();
   Dart_SetReturnValue(args, Dart_NewInteger(elapsed_time));
 }
-
 
 static Dart_NativeFunction StackFrameNativeResolver(Dart_Handle name,
                                                     int arg_count,
@@ -433,7 +341,6 @@ static Dart_NativeFunction StackFrameNativeResolver(Dart_Handle name,
   *auto_setup_scope = false;
   return &StackFrame_accessFrame;
 }
-
 
 // Unit test case to verify stack frame iteration.
 BENCHMARK(FrameLookup) {
@@ -475,9 +382,8 @@ BENCHMARK(FrameLookup) {
       "    return obj.method1(1);"
       "  }"
       "}";
-  Dart_Handle lib = TestCase::LoadTestScript(
-      kScriptChars,
-      reinterpret_cast<Dart_NativeEntryResolver>(StackFrameNativeResolver));
+  Dart_Handle lib =
+      TestCase::LoadTestScript(kScriptChars, StackFrameNativeResolver);
   Dart_Handle cls = Dart_GetClass(lib, NewString("StackFrameTest"));
   Dart_Handle result = Dart_Invoke(cls, NewString("testMain"), 0, NULL);
   EXPECT_VALID(result);
@@ -486,19 +392,6 @@ BENCHMARK(FrameLookup) {
   EXPECT_VALID(result);
   benchmark->set_score(elapsed_time);
 }
-
-
-static uint8_t* malloc_allocator(uint8_t* ptr,
-                                 intptr_t old_size,
-                                 intptr_t new_size) {
-  return reinterpret_cast<uint8_t*>(realloc(ptr, new_size));
-}
-
-
-static void malloc_deallocator(uint8_t* ptr) {
-  free(ptr);
-}
-
 
 BENCHMARK_SIZE(CoreSnapshotSize) {
   const char* kScriptChars =
@@ -513,65 +406,64 @@ BENCHMARK_SIZE(CoreSnapshotSize) {
       "\n";
 
   // Start an Isolate, load a script and create a full snapshot.
-  uint8_t* vm_snapshot_data_buffer;
-  uint8_t* isolate_snapshot_data_buffer;
   // Need to load the script into the dart: core library due to
   // the import of dart:_internal.
   TestCase::LoadCoreTestScript(kScriptChars, NULL);
+
+  TransitionNativeToVM transition(thread);
+  StackZone zone(thread);
+
   Api::CheckAndFinalizePendingClasses(thread);
 
   // Write snapshot with object content.
-  FullSnapshotWriter writer(Snapshot::kCore, &vm_snapshot_data_buffer,
-                            &isolate_snapshot_data_buffer, &malloc_allocator,
-                            NULL, NULL /* image_writer */);
+  MallocWriteStream vm_snapshot_data(FullSnapshotWriter::kInitialSize);
+  MallocWriteStream isolate_snapshot_data(FullSnapshotWriter::kInitialSize);
+  FullSnapshotWriter writer(
+      Snapshot::kFullCore, &vm_snapshot_data, &isolate_snapshot_data,
+      /*vm_image_writer=*/nullptr, /*iso_image_writer=*/nullptr);
   writer.WriteFullSnapshot();
   const Snapshot* snapshot =
-      Snapshot::SetupFromBuffer(isolate_snapshot_data_buffer);
-  ASSERT(snapshot->kind() == Snapshot::kCore);
+      Snapshot::SetupFromBuffer(isolate_snapshot_data.buffer());
+  ASSERT(snapshot->kind() == Snapshot::kFullCore);
   benchmark->set_score(snapshot->length());
-
-  free(vm_snapshot_data_buffer);
-  free(isolate_snapshot_data_buffer);
 }
-
 
 BENCHMARK_SIZE(StandaloneSnapshotSize) {
   const char* kScriptChars =
       "import 'dart:async';\n"
       "import 'dart:core';\n"
       "import 'dart:collection';\n"
-      "import 'dart:_internal';\n"
       "import 'dart:convert';\n"
       "import 'dart:math';\n"
       "import 'dart:isolate';\n"
       "import 'dart:mirrors';\n"
       "import 'dart:typed_data';\n"
-      "import 'dart:_builtin';\n"
       "import 'dart:io';\n"
+      "import 'dart:cli';\n"
       "\n";
 
   // Start an Isolate, load a script and create a full snapshot.
-  uint8_t* vm_snapshot_data_buffer;
-  uint8_t* isolate_snapshot_data_buffer;
   // Need to load the script into the dart: core library due to
   // the import of dart:_internal.
   TestCase::LoadCoreTestScript(kScriptChars, NULL);
+
+  TransitionNativeToVM transition(thread);
+  StackZone zone(thread);
+
   Api::CheckAndFinalizePendingClasses(thread);
 
   // Write snapshot with object content.
-  FullSnapshotWriter writer(Snapshot::kCore, &vm_snapshot_data_buffer,
-                            &isolate_snapshot_data_buffer, &malloc_allocator,
-                            NULL, NULL /* image_writer */);
+  MallocWriteStream vm_snapshot_data(FullSnapshotWriter::kInitialSize);
+  MallocWriteStream isolate_snapshot_data(FullSnapshotWriter::kInitialSize);
+  FullSnapshotWriter writer(
+      Snapshot::kFullCore, &vm_snapshot_data, &isolate_snapshot_data,
+      /*vm_image_writer=*/nullptr, /*iso_image_writer=*/nullptr);
   writer.WriteFullSnapshot();
   const Snapshot* snapshot =
-      Snapshot::SetupFromBuffer(isolate_snapshot_data_buffer);
-  ASSERT(snapshot->kind() == Snapshot::kCore);
+      Snapshot::SetupFromBuffer(isolate_snapshot_data.buffer());
+  ASSERT(snapshot->kind() == Snapshot::kFullCore);
   benchmark->set_score(snapshot->length());
-
-  free(vm_snapshot_data_buffer);
-  free(isolate_snapshot_data_buffer);
 }
-
 
 BENCHMARK(CreateMirrorSystem) {
   const char* kScriptChars =
@@ -583,14 +475,14 @@ BENCHMARK(CreateMirrorSystem) {
 
   Dart_Handle lib = TestCase::LoadTestScript(kScriptChars, NULL);
 
-  Timer timer(true, "currentMirrorSystem() benchmark");
+  Timer timer;
   timer.Start();
-  Dart_Invoke(lib, NewString("benchmark"), 0, NULL);
+  Dart_Handle result = Dart_Invoke(lib, NewString("benchmark"), 0, NULL);
+  EXPECT_VALID(result);
   timer.Stop();
   int64_t elapsed_time = timer.TotalElapsedTime();
   benchmark->set_score(elapsed_time);
 }
-
 
 BENCHMARK(EnterExitIsolate) {
   const char* kScriptChars =
@@ -598,9 +490,13 @@ BENCHMARK(EnterExitIsolate) {
       "\n";
   const intptr_t kLoopCount = 1000000;
   TestCase::LoadTestScript(kScriptChars, NULL);
-  Api::CheckAndFinalizePendingClasses(thread);
+  {
+    TransitionNativeToVM transition(thread);
+    StackZone zone(thread);
+    Api::CheckAndFinalizePendingClasses(thread);
+  }
   Dart_Isolate isolate = Dart_CurrentIsolate();
-  Timer timer(true, "Enter and Exit isolate");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     Dart_ExitIsolate();
@@ -611,87 +507,70 @@ BENCHMARK(EnterExitIsolate) {
   benchmark->set_score(elapsed_time);
 }
 
-
-static uint8_t message_buffer[64];
-static uint8_t* message_allocator(uint8_t* ptr,
-                                  intptr_t old_size,
-                                  intptr_t new_size) {
-  return message_buffer;
-}
-static void message_deallocator(uint8_t* ptr) {}
-
-
 BENCHMARK(SerializeNull) {
+  TransitionNativeToVM transition(thread);
+  StackZone zone(thread);
   const Object& null_object = Object::Handle();
   const intptr_t kLoopCount = 1000000;
-  uint8_t* buffer;
-  Timer timer(true, "Serialize Null");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     StackZone zone(thread);
-    MessageWriter writer(&buffer, &message_allocator, &message_deallocator,
-                         true);
-    writer.WriteMessage(null_object);
-    intptr_t buffer_len = writer.BytesWritten();
+    std::unique_ptr<Message> message =
+        WriteMessage(/* can_send_any_object */ true, /* same_group */ false,
+                     null_object, ILLEGAL_PORT, Message::kNormalPriority);
 
     // Read object back from the snapshot.
-    MessageSnapshotReader reader(buffer, buffer_len, thread);
-    reader.ReadObject();
+    ReadMessage(thread, message.get());
   }
   timer.Stop();
   int64_t elapsed_time = timer.TotalElapsedTime();
   benchmark->set_score(elapsed_time);
 }
-
 
 BENCHMARK(SerializeSmi) {
+  TransitionNativeToVM transition(thread);
+  StackZone zone(thread);
   const Integer& smi_object = Integer::Handle(Smi::New(42));
   const intptr_t kLoopCount = 1000000;
-  uint8_t* buffer;
-  Timer timer(true, "Serialize Smi");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     StackZone zone(thread);
-    MessageWriter writer(&buffer, &message_allocator, &message_deallocator,
-                         true);
-    writer.WriteMessage(smi_object);
-    intptr_t buffer_len = writer.BytesWritten();
+    std::unique_ptr<Message> message =
+        WriteMessage(/* can_send_any_object */ true, /* same_group */ false,
+                     smi_object, ILLEGAL_PORT, Message::kNormalPriority);
 
     // Read object back from the snapshot.
-    MessageSnapshotReader reader(buffer, buffer_len, thread);
-    reader.ReadObject();
+    ReadMessage(thread, message.get());
   }
   timer.Stop();
   int64_t elapsed_time = timer.TotalElapsedTime();
   benchmark->set_score(elapsed_time);
 }
-
 
 BENCHMARK(SimpleMessage) {
   TransitionNativeToVM transition(thread);
+  StackZone zone(thread);
   const Array& array_object = Array::Handle(Array::New(2));
   array_object.SetAt(0, Integer::Handle(Smi::New(42)));
   array_object.SetAt(1, Object::Handle());
   const intptr_t kLoopCount = 1000000;
-  uint8_t* buffer;
-  Timer timer(true, "Simple Message");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     StackZone zone(thread);
-    MessageWriter writer(&buffer, &malloc_allocator, &malloc_deallocator, true);
-    writer.WriteMessage(array_object);
-    intptr_t buffer_len = writer.BytesWritten();
+    std::unique_ptr<Message> message = WriteMessage(
+        /* can_send_any_object */ true, /* same_group */ false, array_object,
+        ILLEGAL_PORT, Message::kNormalPriority);
 
     // Read object back from the snapshot.
-    MessageSnapshotReader reader(buffer, buffer_len, thread);
-    reader.ReadObject();
-    free(buffer);
+    ReadMessage(thread, message.get());
   }
   timer.Stop();
   int64_t elapsed_time = timer.TotalElapsedTime();
   benchmark->set_score(elapsed_time);
 }
-
 
 BENCHMARK(LargeMap) {
   const char* kScript =
@@ -704,31 +583,29 @@ BENCHMARK(LargeMap) {
   EXPECT_VALID(h_lib);
   Dart_Handle h_result = Dart_Invoke(h_lib, NewString("makeMap"), 0, NULL);
   EXPECT_VALID(h_result);
+  TransitionNativeToVM transition(thread);
+  StackZone zone(thread);
   Instance& map = Instance::Handle();
   map ^= Api::UnwrapHandle(h_result);
   const intptr_t kLoopCount = 100;
-  uint8_t* buffer;
-  Timer timer(true, "Large Map");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     StackZone zone(thread);
-    MessageWriter writer(&buffer, &malloc_allocator, &malloc_deallocator, true);
-    writer.WriteMessage(map);
-    intptr_t buffer_len = writer.BytesWritten();
+    std::unique_ptr<Message> message =
+        WriteMessage(/* can_send_any_object */ true, /* same_group */ false,
+                     map, ILLEGAL_PORT, Message::kNormalPriority);
 
     // Read object back from the snapshot.
-    MessageSnapshotReader reader(buffer, buffer_len, thread);
-    reader.ReadObject();
-    free(buffer);
+    ReadMessage(thread, message.get());
   }
   timer.Stop();
   int64_t elapsed_time = timer.TotalElapsedTime();
   benchmark->set_score(elapsed_time);
 }
 
-
 BENCHMARK_MEMORY(InitialRSS) {
-  benchmark->set_score(OS::MaxRSS());
+  benchmark->set_score(bin::Process::MaxRSS());
 }
 
 }  // namespace dart

@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_FUCHSIA)
+#if defined(DART_HOST_OS_FUCHSIA)
 
 #include "vm/cpuinfo.h"
 
@@ -15,13 +15,13 @@ namespace dart {
 CpuInfoMethod CpuInfo::method_ = kCpuInfoDefault;
 const char* CpuInfo::fields_[kCpuInfoMax] = {0};
 
-void CpuInfo::InitOnce() {
+void CpuInfo::Init() {
 // TODO(zra): Add support for HOST_ARCH_ARM64
 #if defined(HOST_ARCH_IA32) || defined(HOST_ARCH_X64)
   method_ = kCpuInfoCpuId;
 
   // Initialize the CpuId information.
-  CpuId::InitOnce();
+  CpuId::Init();
 
   fields_[kCpuInfoProcessor] = "Processor";
   fields_[kCpuInfoModel] = "Hardware";
@@ -31,13 +31,11 @@ void CpuInfo::InitOnce() {
 #endif
 }
 
-
 void CpuInfo::Cleanup() {
   if (method_ == kCpuInfoCpuId) {
     CpuId::Cleanup();
   }
 }
-
 
 bool CpuInfo::FieldContains(CpuInfoIndices idx, const char* search_string) {
   if (method_ == kCpuInfoCpuId) {
@@ -47,7 +45,6 @@ bool CpuInfo::FieldContains(CpuInfoIndices idx, const char* search_string) {
   }
 }
 
-
 const char* CpuInfo::ExtractField(CpuInfoIndices idx) {
   if (method_ == kCpuInfoCpuId) {
     return CpuId::field(idx);
@@ -55,7 +52,6 @@ const char* CpuInfo::ExtractField(CpuInfoIndices idx) {
     return strdup("");
   }
 }
-
 
 bool CpuInfo::HasField(const char* field) {
   if (method_ == kCpuInfoCpuId) {
@@ -70,4 +66,4 @@ bool CpuInfo::HasField(const char* field) {
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_FUCHSIA)
+#endif  // defined(DART_HOST_OS_FUCHSIA)

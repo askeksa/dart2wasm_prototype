@@ -1,9 +1,12 @@
-// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:analyzer/src/lint/config.dart';
 import 'package:test/test.dart';
+import 'package:yaml/yaml.dart';
+
+import '../util/yaml_test.dart';
 
 main() {
   defineTests();
@@ -31,7 +34,7 @@ rules:
 //        - param1
 //        - param2
 
-  var config = new LintConfig.parse(src);
+  var config = LintConfig.parse(src);
 
   group('lint config', () {
     group('file', () {
@@ -49,7 +52,7 @@ rules:
       });
 
       test('config', () {
-        config = new LintConfig.parse('''
+        config = LintConfig.parse('''
 rules:
   style_guide:
     unnecessary_getters: false''');
@@ -78,7 +81,7 @@ linter:
       unnecessary_getters: false #disable
       camel_case_types: true #enable
 ''';
-          var config = processAnalysisOptionsFile(src);
+          var config = processAnalysisOptionsFile(src)!;
           var ruleNames = config.ruleConfigs.map((rc) => rc.name);
           expect(ruleNames, hasLength(2));
           expect(ruleNames, contains('unnecessary_getters'));
@@ -97,7 +100,7 @@ linter:
   rules:
     - camel_case_types
 ''';
-          var config = processAnalysisOptionsFile(src);
+          var config = processAnalysisOptionsFile(src)!;
           expect(config.ruleConfigs.length, 1);
           // Verify that defaults are enabled.
           expect(config.ruleConfigs[0].args['enabled'], isTrue);
@@ -114,15 +117,15 @@ linter:
     camel_case_types: true #enable
     unnecessary_getters: false #disable
 ''';
-          var config = processAnalysisOptionsFile(src);
+          var config = processAnalysisOptionsFile(src)!;
           var ruleConfigs = config.ruleConfigs.toList();
-          ruleConfigs.sort(
-              (RuleConfig rc1, RuleConfig rc2) => rc1.name.compareTo(rc2.name));
+          ruleConfigs.sort((RuleConfig rc1, RuleConfig rc2) =>
+              rc1.name!.compareTo(rc2.name!));
           expect(ruleConfigs, hasLength(2));
           expect(ruleConfigs[0].name, 'camel_case_types');
-          expect(config.ruleConfigs[0].args['enabled'], isFalse);
+          expect(ruleConfigs[0].args['enabled'], isTrue);
           expect(ruleConfigs[1].name, 'unnecessary_getters');
-          expect(config.ruleConfigs[1].args['enabled'], isTrue);
+          expect(ruleConfigs[1].args['enabled'], isFalse);
         });
       });
     });
@@ -138,44 +141,48 @@ linter:
 
   group('options processing', () {
     group('raw maps', () {
+      LintConfig parseMap(Map<Object, Object?> map) {
+        return parseConfig(wrap(map) as YamlMap)!;
+      }
+
       test('rule list', () {
-        Map options = {};
+        var options = <Object, Object?>{};
         var lintOptions = {
           'rules': ['camel_case_types']
         };
         options['linter'] = lintOptions;
 
-        var config = parseConfig(options);
+        var config = parseMap(options);
         expect(config, isNotNull);
         expect(config.ruleConfigs, hasLength(1));
       });
 
       test('rule map (bool)', () {
-        Map options = {};
+        var options = <Object, Object?>{};
         var lintOptions = {
           'rules': {'camel_case_types': true}
         };
         options['linter'] = lintOptions;
 
-        var config = parseConfig(options);
+        var config = parseMap(options);
         expect(config, isNotNull);
         expect(config.ruleConfigs, hasLength(1));
       });
 
       test('rule map (string)', () {
-        Map options = {};
+        var options = <Object, Object?>{};
         var lintOptions = {
           'rules': {'camel_case_types': 'true'}
         };
         options['linter'] = lintOptions;
 
-        var config = parseConfig(options);
+        var config = parseMap(options);
         expect(config, isNotNull);
         expect(config.ruleConfigs, hasLength(1));
       });
 
       test('nested rule map (bool)', () {
-        Map options = {};
+        var options = <Object, Object?>{};
         var lintOptions = {
           'rules': {
             'style_guide': {'camel_case_types': true}
@@ -183,13 +190,13 @@ linter:
         };
         options['linter'] = lintOptions;
 
-        var config = parseConfig(options);
+        var config = parseMap(options);
         expect(config, isNotNull);
         expect(config.ruleConfigs, hasLength(1));
       });
 
       test('nested rule map (string)', () {
-        Map options = {};
+        var options = <Object, Object?>{};
         var lintOptions = {
           'rules': {
             'style_guide': {'camel_case_types': true}
@@ -197,7 +204,7 @@ linter:
         };
         options['linter'] = lintOptions;
 
-        var config = parseConfig(options);
+        var config = parseMap(options);
         expect(config, isNotNull);
         expect(config.ruleConfigs, hasLength(1));
       });

@@ -6,6 +6,7 @@
 #define RUNTIME_VM_CPUINFO_H_
 
 #include "platform/assert.h"
+#include "platform/utils.h"
 #include "vm/allocation.h"
 
 namespace dart {
@@ -28,6 +29,9 @@ enum CpuInfoMethod {
   // Use system calls.
   kCpuInfoSystem,
 
+  // Don't query anything.
+  kCpuInfoNone,
+
   // Use whatever the default is for a particular OS:
   // Linux, Windows -> CpuId,
   // Android, MacOS -> System.
@@ -36,7 +40,7 @@ enum CpuInfoMethod {
 
 class CpuInfo : public AllStatic {
  public:
-  static void InitOnce();
+  static void Init();
   static void Cleanup();
 
   static const char* FieldName(CpuInfoIndices idx) {
@@ -56,7 +60,7 @@ class CpuInfo : public AllStatic {
     if (HasField(FieldName(kCpuInfoHardware))) {
       return ExtractField(kCpuInfoHardware);
     } else {
-      return strdup("Unknown");
+      return Utils::StrDup("Unknown");
     }
   }
 

@@ -1,112 +1,158 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright (c) 2011, the Dart project authors.  Please see the AUTHORS file
 # for details. All rights reserved. Use of this source code is governed by a
 # BSD-style license that can be found in the LICENSE file.
 #
 # This python script creates a version string in a C++ file.
 
+from __future__ import print_function
+
+import argparse
 import hashlib
 import os
 import sys
-import time
-from optparse import OptionParser
 import utils
-
-def debugLog(message):
-  print >> sys.stderr, message
-  sys.stderr.flush()
 
 # When these files change, snapshots created by the VM are potentially no longer
 # backwards-compatible.
-VM_SNAPSHOT_FILES=[
-  # Header files.
-  'datastream.h',
-  'object.h',
-  'raw_object.h',
-  'snapshot.h',
-  'snapshot_ids.h',
-  'symbols.h',
-  # Source files.
-  'dart.cc',
-  'dart_api_impl.cc',
-  'object.cc',
-  'raw_object.cc',
-  'raw_object_snapshot.cc',
-  'snapshot.cc',
-  'symbols.cc',
+VM_SNAPSHOT_FILES = [
+    # Header files.
+    'app_snapshot.h',
+    'datastream.h',
+    'image_snapshot.h',
+    'object.h',
+    'raw_object.h',
+    'snapshot.h',
+    'symbols.h',
+    # Source files.
+    'app_snapshot.cc',
+    'dart.cc',
+    'dart_api_impl.cc',
+    'image_snapshot.cc',
+    'object.cc',
+    'raw_object.cc',
+    'snapshot.cc',
+    'symbols.cc',
 ]
 
-def makeVersionString(quiet, no_svn):
-  version_string = utils.GetSemanticSDKVersion(ignore_svn_revision=no_svn)
-  if not quiet:
-    debugLog("Returning version string: %s " % version_string)
-  return version_string
+
+def MakeSnapshotHashString():
+    vmhash = hashlib.md5()
+    for vmfilename in VM_SNAPSHOT_FILES:
+        vmfilepath = os.path.join(utils.DART_DIR, 'runtime', 'vm', vmfilename)
+        with open(vmfilepath, 'rb') as vmfile:
+            vmhash.update(vmfile.read())
+    return vmhash.hexdigest()
 
 
-def makeSnapshotHashString():
-  vmhash = hashlib.md5()
-  for vmfilename in VM_SNAPSHOT_FILES:
-    vmfilepath = os.path.join(utils.DART_DIR, 'runtime', 'vm', vmfilename)
-    with open(vmfilepath) as vmfile:
-      vmhash.update(vmfile.read())
-  return vmhash.hexdigest()
+def GetSemanticVersionFormat(no_git_hash):
+    version_format = '{{SEMANTIC_SDK_VERSION}}'
+    return version_format
 
 
-def makeFile(quiet, output_file, input_file, ignore_svn_revision):
-  version_cc_text = open(input_file).read()
-  version_string = makeVersionString(quiet, ignore_svn_revision)
-  version_cc_text = version_cc_text.replace("{{VERSION_STR}}",
-                                            version_string)
-  version_time = time.ctime(time.time())
-  version_cc_text = version_cc_text.replace("{{BUILD_TIME}}",
-                                            version_time)
-  snapshot_hash = makeSnapshotHashString()
-  version_cc_text = version_cc_text.replace("{{SNAPSHOT_HASH}}",
-                                            snapshot_hash)
-  open(output_file, 'w').write(version_cc_text)
-  return True
+def FormatVersionString(version,
+                        no_git_hash,
+                        no_sdk_hash,
+                        version_file=None,
+                        git_revision_file=None):
+    semantic_sdk_version = utils.GetSemanticSDKVersion(no_git_hash,
+                                                       version_file,
+                                                       git_revision_file)
+    semantic_version_format = GetSemanticVersionFormat(no_git_hash)
+    version_str = (semantic_sdk_version
+                   if version_file else semantic_version_format)
+
+    version = version.replace('{{VERSION_STR}}', version_str)
+
+    version = version.replace('{{SEMANTIC_SDK_VERSION}}', semantic_sdk_version)
+
+    git_hash = None
+    # If we need SDK hash and git usage is not suppressed then try to get it.
+    if not no_sdk_hash and not no_git_hash:
+        git_hash = utils.GetShortGitHash()
+    if git_hash is None or len(git_hash) != 10:
+        git_hash = '0000000000'
+    version = version.replace('{{GIT_HASH}}', git_hash)
+
+    channel = utils.GetChannel()
+    version = version.replace('{{CHANNEL}}', channel)
+
+    version_time = None
+    if not no_git_hash:
+        version_time = utils.GetGitTimestamp()
+    if version_time == None:
+        version_time = 'Unknown timestamp'
+    version = version.replace('{{COMMIT_TIME}}', version_time)
+
+    snapshot_hash = MakeSnapshotHashString()
+    version = version.replace('{{SNAPSHOT_HASH}}', snapshot_hash)
+
+    return version
 
 
-def main(args):
-  try:
-    # Parse input.
-    parser = OptionParser()
-    parser.add_option("-q", "--quiet",
-                      action="store_true", default=False,
-                      help="disable console output")
-    parser.add_option("--ignore_svn_revision",
-                      action="store_true", default=False,
-                      help="Don't try to determine svn revision")
-    parser.add_option("--output",
-                      action="store", type="string",
-                      help="output file name")
-    parser.add_option("--input",
-                      action="store", type="string",
-                      help="input template file")
+def main():
+    try:
+        # Parse input.
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--input', help='Input template file.')
+        parser.add_argument(
+            '--no_git_hash',
+            action='store_true',
+            default=False,
+            help=('Don\'t try to call git to derive things like '
+                  'git revision hash.'))
+        parser.add_argument(
+            '--no_sdk_hash',
+            action='store_true',
+            default=False,
+            help='Use null SDK hash to disable SDK verification in the VM')
+        parser.add_argument('--output', help='output file name')
+        parser.add_argument('-q',
+                            '--quiet',
+                            action='store_true',
+                            default=False,
+                            help='DEPRECATED: Does nothing!')
+        parser.add_argument('--version-file', help='Path to the VERSION file.')
+        parser.add_argument('--git-revision-file',
+                            help='Path to the GIT_REVISION file.')
+        parser.add_argument(
+            '--format',
+            default='{{VERSION_STR}}',
+            help='Version format used if no input template is given.')
 
-    (options, args) = parser.parse_args()
-    if not options.output:
-      sys.stderr.write('--output not specified\n')
-      return -1
-    if not len(options.input):
-      sys.stderr.write('--input not specified\n')
-      return -1
+        args = parser.parse_args()
 
-    files = []
-    for arg in args:
-      files.append(arg)
+        # If there is no input template, then write the bare version string to
+        # args.output. If there is no args.output, then write the version
+        # string to stdout.
 
-    if not makeFile(options.quiet, options.output, options.input,
-                    options.ignore_svn_revision):
-      return -1
+        version_template = ''
+        if args.input:
+            version_template = open(args.input).read()
+        elif not args.format is None:
+            version_template = args.format
+        else:
+            raise 'No version template given! Set either --input or --format.'
 
-    return 0
-  except Exception, inst:
-    sys.stderr.write('make_version.py exception\n')
-    sys.stderr.write(str(inst))
-    sys.stderr.write('\n')
-    return -1
+        version = FormatVersionString(version_template, args.no_git_hash,
+                                      args.no_sdk_hash, args.version_file,
+                                      args.git_revision_file)
+
+        if args.output:
+            with open(args.output, 'w') as fh:
+                fh.write(version)
+        else:
+            sys.stdout.write(version)
+
+        return 0
+
+    except Exception as inst:
+        sys.stderr.write('make_version.py exception\n')
+        sys.stderr.write(str(inst))
+        sys.stderr.write('\n')
+
+        return -1
+
 
 if __name__ == '__main__':
-  exit_code = main(sys.argv)
-  sys.exit(exit_code)
+    sys.exit(main())

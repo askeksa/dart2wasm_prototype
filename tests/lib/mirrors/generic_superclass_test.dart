@@ -2,11 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library lib;
-
 import 'package:expect/expect.dart';
-
-@MirrorsUsed(targets: "lib")
 import 'dart:mirrors';
 
 class A<T> {}
@@ -39,11 +35,11 @@ void testOriginals() {
   ClassMirror e = reflectClass(E);
   ClassMirror f = reflectClass(F);
   ClassMirror ff = reflectClass(FF);
-  ClassMirror superA = a.superclass;
-  ClassMirror superB = b.superclass;
-  ClassMirror superC = c.superclass;
-  ClassMirror superD = d.superclass;
-  ClassMirror superE = e.superclass;
+  ClassMirror superA = a.superclass!;
+  ClassMirror superB = b.superclass!;
+  ClassMirror superC = c.superclass!;
+  ClassMirror superD = d.superclass!;
+  ClassMirror superE = e.superclass!;
   ClassMirror superInterfaceF = f.superinterfaces[0];
   ClassMirror superInterfaceFF = ff.superinterfaces[0];
 
@@ -87,12 +83,12 @@ void testInstances() {
   ClassMirror r = reflect(new R()).type;
   ClassMirror hr = reflect(new H<R>()).type;
 
-  ClassMirror superA = a.superclass;
-  ClassMirror superB = b.superclass;
-  ClassMirror superC = c.superclass;
-  ClassMirror superD = d.superclass;
-  ClassMirror superE = e.superclass;
-  ClassMirror superE0 = e0.superclass;
+  ClassMirror superA = a.superclass!;
+  ClassMirror superB = b.superclass!;
+  ClassMirror superC = c.superclass!;
+  ClassMirror superD = d.superclass!;
+  ClassMirror superE = e.superclass!;
+  ClassMirror superE0 = e0.superclass!;
   ClassMirror superInterfaceF = f.superinterfaces[0];
   ClassMirror superInterfaceFF = ff.superinterfaces[0];
 

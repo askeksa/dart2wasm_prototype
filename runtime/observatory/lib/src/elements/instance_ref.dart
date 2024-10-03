@@ -9,42 +9,41 @@ import 'package:observatory/src/elements/curly_block.dart';
 import 'package:observatory/src/elements/field_ref.dart';
 import 'package:observatory/src/elements/helpers/any_ref.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 import 'package:observatory/utils.dart';
 
-class InstanceRefElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<InstanceRefElement>('instance-ref',
-      dependencies: const [CurlyBlockElement.tag]);
-
-  RenderingScheduler<InstanceRefElement> _r;
+class InstanceRefElement extends CustomElement implements Renderable {
+  late RenderingScheduler<InstanceRefElement> _r;
 
   Stream<RenderedEvent<InstanceRefElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.InstanceRef _instance;
-  M.ObjectRepository _objects;
-  M.Instance _loadedInstance;
-  bool _expanded = false;
+  late M.IsolateRef _isolate;
+  late M.InstanceRef _instance;
+  late M.ObjectRepository _objects;
+  M.Instance? _loadedInstance;
+  late bool _expandable;
+  late bool _expanded = false;
 
   M.IsolateRef get isolate => _isolate;
   M.InstanceRef get instance => _instance;
 
   factory InstanceRefElement(
       M.IsolateRef isolate, M.InstanceRef instance, M.ObjectRepository objects,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue, bool expandable: true}) {
     assert(isolate != null);
     assert(instance != null);
     assert(objects != null);
-    InstanceRefElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    InstanceRefElement e = new InstanceRefElement.created();
+    e._r = new RenderingScheduler<InstanceRefElement>(e, queue: queue);
     e._isolate = isolate;
     e._instance = instance;
     e._objects = objects;
+    e._expandable = expandable;
     return e;
   }
 
-  InstanceRefElement.created() : super.created();
+  InstanceRefElement.created() : super.created('instance-ref');
 
   @override
   void attached() {
@@ -55,30 +54,31 @@ class InstanceRefElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
     final content = _createLink();
 
-    if (_hasValue()) {
+    if (_expandable && _hasValue()) {
       content.addAll([
         new SpanElement()..text = ' ',
-        new CurlyBlockElement(expanded: _expanded, queue: _r.queue)
-          ..content = [
-            new DivElement()
-              ..classes = ['indent']
-              ..children = _createValue()
-          ]
-          ..onToggle.listen((e) async {
-            _expanded = e.control.expanded;
-            if (_expanded) {
-              e.control.disabled = true;
-              await _refresh();
-              e.control.disabled = false;
-            }
-          })
+        (new CurlyBlockElement(expanded: _expanded, queue: _r.queue)
+              ..content = <Element>[
+                new DivElement()
+                  ..classes = ['indent']
+                  ..children = _createValue()
+              ]
+              ..onToggle.listen((e) async {
+                _expanded = e.control.expanded;
+                if (_expanded) {
+                  e.control.disabled = true;
+                  await _refresh();
+                  e.control.disabled = false;
+                }
+              }))
+            .element
       ]);
     }
 
@@ -86,20 +86,20 @@ class InstanceRefElement extends HtmlElement implements Renderable {
   }
 
   Future _refresh() async {
-    _loadedInstance = await _objects.get(_isolate, _instance.id);
+    _loadedInstance = await _objects.get(_isolate, _instance.id!) as M.Instance;
     _r.dirty();
   }
 
   List<Element> _createShowMoreButton() {
-    if (_loadedInstance.count == null) {
+    if (_loadedInstance!.count == null) {
       return [];
     }
-    final count = _loadedInstance.count;
+    final count = _loadedInstance!.count;
     final button = new ButtonElement()..text = 'show next ${count}';
     button.onClick.listen((_) async {
       button.disabled = true;
       _loadedInstance =
-          await _objects.get(_isolate, _instance.id, count: count * 2);
+          await _objects.get(_isolate, _instance.id!) as M.Instance;
       _r.dirty();
     });
     return [button];
@@ -122,12 +122,12 @@ class InstanceRefElement extends HtmlElement implements Renderable {
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
             ..text = Utils.formatStringAsLiteral(
-                _instance.valueAsString, _instance.valueAsStringIsTruncated)
+                _instance.valueAsString!, _instance.valueAsStringIsTruncated!)
         ];
       case M.InstanceKind.type:
+      case M.InstanceKind.functionType:
       case M.InstanceKind.typeRef:
       case M.InstanceKind.typeParameter:
-      case M.InstanceKind.boundedType:
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
             ..text = _instance.name
@@ -135,37 +135,38 @@ class InstanceRefElement extends HtmlElement implements Renderable {
       case M.InstanceKind.closure:
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
-            ..children = [
+            ..children = <Element>[
               new SpanElement()
                 ..classes = ['emphasize']
                 ..text = 'Closure',
-              new SpanElement()..text = ' (${_instance.closureFunction.name})'
+              new SpanElement()..text = ' (${_instance.closureFunction!.name})'
             ]
         ];
       case M.InstanceKind.regExp:
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
-            ..children = [
+            ..children = <Element>[
               new SpanElement()
                 ..classes = ['emphasize']
-                ..text = _instance.clazz.name,
-              new SpanElement()..text = ' (${_instance.pattern.valueAsString})'
+                ..text = _instance.clazz!.name,
+              new SpanElement()..text = ' (${_instance.pattern!.valueAsString})'
             ]
         ];
       case M.InstanceKind.stackTrace:
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
-            ..children = [
+            ..children = <Element>[
               new SpanElement()
                 ..classes = ['emphasize']
-                ..text = _instance.clazz.name,
+                ..text = _instance.clazz!.name,
             ]
         ];
       case M.InstanceKind.plainInstance:
+      case M.InstanceKind.receivePort:
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
             ..classes = ['emphasize']
-            ..text = _instance.clazz.name
+            ..text = _instance.clazz!.name
         ];
       case M.InstanceKind.list:
       case M.InstanceKind.map:
@@ -185,10 +186,10 @@ class InstanceRefElement extends HtmlElement implements Renderable {
       case M.InstanceKind.float64x2List:
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
-            ..children = [
+            ..children = <Element>[
               new SpanElement()
                 ..classes = ['emphasize']
-                ..text = _instance.clazz.name,
+                ..text = _instance.clazz!.name,
               new SpanElement()..text = ' (${_instance.length})'
             ]
         ];
@@ -196,13 +197,13 @@ class InstanceRefElement extends HtmlElement implements Renderable {
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
             ..classes = ['emphasize']
-            ..text = _instance.clazz.name
+            ..text = _instance.clazz!.name
         ];
       case M.InstanceKind.weakProperty:
         return [
           new AnchorElement(href: Uris.inspect(_isolate, object: _instance))
             ..classes = ['emphasize']
-            ..text = _instance.clazz.name
+            ..text = _instance.clazz!.name
         ];
     }
     throw new Exception('Unknown InstanceKind: ${_instance.kind}');
@@ -232,7 +233,7 @@ class InstanceRefElement extends HtmlElement implements Renderable {
       case M.InstanceKind.int32x4List:
       case M.InstanceKind.float32x4List:
       case M.InstanceKind.float64x2List:
-        return _instance.length > 0;
+        return _instance.length! > 0;
       default:
         return false;
     }
@@ -244,44 +245,51 @@ class InstanceRefElement extends HtmlElement implements Renderable {
     }
     switch (_instance.kind) {
       case M.InstanceKind.closure:
-        return [
-          new DivElement()
-            ..children = [
-              new SpanElement()..text = 'function = ',
-              anyRef(_isolate, _loadedInstance.closureFunction, _objects,
-                  queue: _r.queue)
-            ],
-          new DivElement()
-            ..children = [
-              new SpanElement()..text = 'context = ',
-              anyRef(_isolate, _loadedInstance.closureContext, _objects,
-                  queue: _r.queue)
-            ],
-        ];
+        {
+          var members = <Element>[];
+          if (_loadedInstance!.closureFunction != null) {
+            members.add(new DivElement()
+              ..children = <Element>[
+                new SpanElement()..text = 'function = ',
+                anyRef(_isolate, _loadedInstance!.closureFunction, _objects,
+                    queue: _r.queue)
+              ]);
+          }
+          if (_loadedInstance!.closureContext != null) {
+            members.add(new DivElement()
+              ..children = <Element>[
+                new SpanElement()..text = 'context = ',
+                anyRef(_isolate, _loadedInstance!.closureContext, _objects,
+                    queue: _r.queue)
+              ]);
+          }
+          return members;
+        }
       case M.InstanceKind.plainInstance:
-        return _loadedInstance.fields
-            .map((f) => new DivElement()
-              ..children = [
-                new FieldRefElement(_isolate, f.decl, _objects,
-                    queue: _r.queue),
+        return _loadedInstance!.fields!
+            .map<Element>((f) => new DivElement()
+              ..children = <Element>[
+                new FieldRefElement(_isolate, f.decl!, _objects,
+                        queue: _r.queue)
+                    .element,
                 new SpanElement()..text = ' = ',
                 anyRef(_isolate, f.value, _objects, queue: _r.queue)
               ])
             .toList();
       case M.InstanceKind.list:
         var index = 0;
-        return _loadedInstance.elements
-            .map((element) => new DivElement()
-              ..children = [
+        return _loadedInstance!.elements!
+            .map<Element>((element) => new DivElement()
+              ..children = <Element>[
                 new SpanElement()..text = '[ ${index++} ] : ',
                 anyRef(_isolate, element, _objects, queue: _r.queue)
               ])
             .toList()
               ..addAll(_createShowMoreButton());
       case M.InstanceKind.map:
-        return _loadedInstance.associations
-            .map((association) => new DivElement()
-              ..children = [
+        return _loadedInstance!.associations!
+            .map<Element>((association) => new DivElement()
+              ..children = <Element>[
                 new SpanElement()..text = '[ ',
                 anyRef(_isolate, association.key, _objects, queue: _r.queue),
                 new SpanElement()..text = ' ] : ',
@@ -304,14 +312,14 @@ class InstanceRefElement extends HtmlElement implements Renderable {
       case M.InstanceKind.float32x4List:
       case M.InstanceKind.float64x2List:
         var index = 0;
-        return _loadedInstance.typedElements
-            .map((e) => new DivElement()..text = '[ ${index++} ] : $e')
+        return _loadedInstance!.typedElements!
+            .map<Element>((e) => new DivElement()..text = '[ ${index++} ] : $e')
             .toList()
               ..addAll(_createShowMoreButton());
       case M.InstanceKind.mirrorReference:
         return [
           new SpanElement()..text = '<referent> : ',
-          anyRef(_isolate, _loadedInstance.referent, _objects, queue: _r.queue)
+          anyRef(_isolate, _loadedInstance!.referent, _objects, queue: _r.queue)
         ];
       case M.InstanceKind.stackTrace:
         return [
@@ -322,12 +330,14 @@ class InstanceRefElement extends HtmlElement implements Renderable {
       case M.InstanceKind.weakProperty:
         return [
           new SpanElement()..text = '<key> : ',
-          new InstanceRefElement(_isolate, _loadedInstance.key, _objects,
-              queue: _r.queue),
+          new InstanceRefElement(_isolate, _loadedInstance!.key!, _objects,
+                  queue: _r.queue)
+              .element,
           new BRElement(),
           new SpanElement()..text = '<value> : ',
-          new InstanceRefElement(_isolate, _loadedInstance.value, _objects,
-              queue: _r.queue),
+          new InstanceRefElement(_isolate, _loadedInstance!.value!, _objects,
+                  queue: _r.queue)
+              .element,
         ];
       default:
         return [];

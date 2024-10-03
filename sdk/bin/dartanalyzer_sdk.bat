@@ -3,6 +3,8 @@ REM Copyright (c) 2013, the Dart project authors.  Please see the AUTHORS file
 REM for details. All rights reserved. Use of this source code is governed by a
 REM BSD-style license that can be found in the LICENSE file.
 
+echo Warning: 'dartanalyzer' is deprecated. Please use 'dart analyze'. 1>&2
+
 setlocal
 rem Handle the case where dart-sdk/bin has been symlinked to.
 set DIR_NAME_WITH_SLASH=%~dp0
@@ -42,7 +44,7 @@ setlocal
 for %%i in (%1) do set result=%%~fi
 set current=
 for /f "usebackq tokens=2 delims=[]" %%i in (`dir /a:l "%~dp1" 2^>nul ^
-                                             ^| find ">     %~n1 [" 2^>nul`) do (
+                                             ^| %SystemRoot%\System32\find.exe ">     %~n1 [" 2^>nul`) do (
   set current=%%i
 )
 if not "%current%"=="" call :follow_links "%current%", result

@@ -9,7 +9,7 @@ void main() {
   var number_of_ints = 134000000;
   var exception_thrown = false;
   try {
-    List<int> buf = new List<int>(number_of_ints);
+    List<int> buf = new List<int>.filled(number_of_ints, -1);
   } on OutOfMemoryError catch (exc) {
     exception_thrown = true;
   }

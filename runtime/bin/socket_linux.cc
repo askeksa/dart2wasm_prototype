@@ -2,29 +2,35 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "platform/globals.h"
-#if defined(HOST_OS_LINUX)
+#if defined(DART_HOST_OS_LINUX)
 
 #include "bin/socket.h"
 
-#include <errno.h>        // NOLINT
+#include <errno.h>  // NOLINT
 
 #include "bin/fdutils.h"
 #include "platform/signal_blocker.h"
+#include "platform/syslog.h"
+#include "platform/utils.h"
 
 namespace dart {
 namespace bin {
 
 Socket::Socket(intptr_t fd)
-    : ReferenceCounted(), fd_(fd), port_(ILLEGAL_PORT) {}
+    : ReferenceCounted(),
+      fd_(fd),
+      isolate_port_(Dart_GetMainPortId()),
+      port_(ILLEGAL_PORT),
+      udp_receive_buffer_(NULL) {}
 
+void Socket::CloseFd() {
+  SetClosedFd();
+}
 
 void Socket::SetClosedFd() {
   fd_ = kClosedFd;
 }
-
 
 static intptr_t Create(const RawAddr& addr) {
   intptr_t fd;
@@ -36,17 +42,15 @@ static intptr_t Create(const RawAddr& addr) {
   return fd;
 }
 
-
 static intptr_t Connect(intptr_t fd, const RawAddr& addr) {
   intptr_t result = TEMP_FAILURE_RETRY(
       connect(fd, &addr.addr, SocketAddress::GetAddrLength(addr)));
   if ((result == 0) || (errno == EINPROGRESS)) {
     return fd;
   }
-  FDUtils::FDUtils::SaveErrorAndClose(fd);
+  FDUtils::SaveErrorAndClose(fd);
   return -1;
 }
-
 
 intptr_t Socket::CreateConnect(const RawAddr& addr) {
   intptr_t fd = Create(addr);
@@ -56,6 +60,19 @@ intptr_t Socket::CreateConnect(const RawAddr& addr) {
   return Connect(fd, addr);
 }
 
+intptr_t Socket::CreateUnixDomainConnect(const RawAddr& addr) {
+  intptr_t fd = Create(addr);
+  if (fd < 0) {
+    return fd;
+  }
+  intptr_t result = TEMP_FAILURE_RETRY(connect(
+      fd, (struct sockaddr*)&addr.un, SocketAddress::GetAddrLength(addr)));
+  if (result == 0 || errno == EAGAIN) {
+    return fd;
+  }
+  FDUtils::SaveErrorAndClose(fd);
+  return -1;
+}
 
 intptr_t Socket::CreateBindConnect(const RawAddr& addr,
                                    const RawAddr& source_addr) {
@@ -66,7 +83,7 @@ intptr_t Socket::CreateBindConnect(const RawAddr& addr,
 
   intptr_t result = TEMP_FAILURE_RETRY(
       bind(fd, &source_addr.addr, SocketAddress::GetAddrLength(source_addr)));
-  if ((result != 0) && (errno != EINPROGRESS)) {
+  if (result != 0) {
     FDUtils::SaveErrorAndClose(fd);
     return -1;
   }
@@ -74,8 +91,33 @@ intptr_t Socket::CreateBindConnect(const RawAddr& addr,
   return Connect(fd, addr);
 }
 
+intptr_t Socket::CreateUnixDomainBindConnect(const RawAddr& addr,
+                                             const RawAddr& source_addr) {
+  intptr_t fd = Create(addr);
+  if (fd < 0) {
+    return fd;
+  }
 
-intptr_t Socket::CreateBindDatagram(const RawAddr& addr, bool reuseAddress) {
+  intptr_t result = TEMP_FAILURE_RETRY(
+      bind(fd, &source_addr.addr, SocketAddress::GetAddrLength(source_addr)));
+  if (result != 0) {
+    FDUtils::SaveErrorAndClose(fd);
+    return -1;
+  }
+
+  result = TEMP_FAILURE_RETRY(connect(fd, (struct sockaddr*)&addr.un,
+                                      SocketAddress::GetAddrLength(addr)));
+  if (result == 0 || errno == EAGAIN) {
+    return fd;
+  }
+  FDUtils::SaveErrorAndClose(fd);
+  return -1;
+}
+
+intptr_t Socket::CreateBindDatagram(const RawAddr& addr,
+                                    bool reuseAddress,
+                                    bool reusePort,
+                                    int ttl) {
   intptr_t fd;
 
   fd = NO_RETRY_EXPECTED(socket(addr.addr.sa_family,
@@ -91,6 +133,39 @@ intptr_t Socket::CreateBindDatagram(const RawAddr& addr, bool reuseAddress) {
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)));
   }
 
+  if (reusePort) {
+#ifdef SO_REUSEPORT  // Not all Linux versions support this.
+    int optval = 1;
+    int reuse_port_success =
+        setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
+    // Even if it's defined, we might be running on a kernel
+    // that doesn't support it at runtime.
+    if (reuse_port_success != 0) {
+      if (errno == EINTR) {
+        FATAL("Unexpected EINTR errno");
+      }
+      const int kBufferSize = 1024;
+      char error_buf[kBufferSize];
+      Syslog::PrintErr("Dart Socket ERROR: %s:%d: %s.", __FILE__, __LINE__,
+                       Utils::StrError(errno, error_buf, kBufferSize));
+    }
+#else   // !defined SO_REUSEPORT
+    Syslog::PrintErr(
+        "Dart Socket ERROR: %s:%d: `reusePort` not available on this Linux "
+        "version.",
+        __FILE__, __LINE__);
+#endif  // SO_REUSEPORT
+  }
+
+  if (!SocketBase::SetMulticastHops(fd,
+                                    addr.addr.sa_family == AF_INET
+                                        ? SocketAddress::TYPE_IPV4
+                                        : SocketAddress::TYPE_IPV6,
+                                    ttl)) {
+    FDUtils::SaveErrorAndClose(fd);
+    return -1;
+  }
+
   if (NO_RETRY_EXPECTED(
           bind(fd, &addr.addr, SocketAddress::GetAddrLength(addr))) < 0) {
     FDUtils::SaveErrorAndClose(fd);
@@ -98,7 +173,6 @@ intptr_t Socket::CreateBindDatagram(const RawAddr& addr, bool reuseAddress) {
   }
   return fd;
 }
-
 
 intptr_t ServerSocket::CreateBindListen(const RawAddr& addr,
                                         intptr_t backlog,
@@ -145,12 +219,25 @@ intptr_t ServerSocket::CreateBindListen(const RawAddr& addr,
   return fd;
 }
 
+intptr_t ServerSocket::CreateUnixDomainBindListen(const RawAddr& addr,
+                                                  intptr_t backlog) {
+  intptr_t fd = Create(addr);
+  if (NO_RETRY_EXPECTED(bind(fd, (struct sockaddr*)&addr.un,
+                             SocketAddress::GetAddrLength(addr))) < 0) {
+    FDUtils::SaveErrorAndClose(fd);
+    return -1;
+  }
+  if (NO_RETRY_EXPECTED(listen(fd, backlog > 0 ? backlog : SOMAXCONN)) != 0) {
+    FDUtils::SaveErrorAndClose(fd);
+    return -1;
+  }
+  return fd;
+}
 
 bool ServerSocket::StartAccept(intptr_t fd) {
   USE(fd);
   return true;
 }
-
 
 static bool IsTemporaryAcceptError(int error) {
   // On Linux a number of protocol errors should be treated as EAGAIN.
@@ -160,7 +247,6 @@ static bool IsTemporaryAcceptError(int error) {
          (error == EHOSTUNREACH) || (error == EOPNOTSUPP) ||
          (error == ENETUNREACH);
 }
-
 
 intptr_t ServerSocket::Accept(intptr_t fd) {
   intptr_t socket;
@@ -191,6 +277,4 @@ intptr_t ServerSocket::Accept(intptr_t fd) {
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_LINUX)
-
-#endif  // !defined(DART_IO_DISABLED)
+#endif  // defined(DART_HOST_OS_LINUX)

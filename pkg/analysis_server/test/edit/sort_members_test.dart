@@ -1,21 +1,17 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
-
-import 'package:analysis_server/protocol/protocol.dart';
 import 'package:analysis_server/protocol/protocol_generated.dart';
 import 'package:analysis_server/src/edit/edit_domain.dart';
 import 'package:analyzer_plugin/protocol/protocol_common.dart';
-import 'package:plugin/manager.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import '../analysis_abstract.dart';
 import '../mocks.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(SortMembersTest);
   });
@@ -23,49 +19,66 @@ main() {
 
 @reflectiveTest
 class SortMembersTest extends AbstractAnalysisTest {
-  SourceFileEdit fileEdit;
+  late SourceFileEdit fileEdit;
 
   @override
-  bool get enableNewAnalysisDriver => false;
-
-  @override
-  void setUp() {
+  Future<void> setUp() async {
     super.setUp();
-    createProject();
-    ExtensionManager manager = new ExtensionManager();
-    manager.processPlugins([server.serverPlugin]);
-    handler = new EditDomainHandler(server);
+    await createProject();
+    handler = EditDomainHandler(server);
   }
 
-  test_BAD_doesNotExist() async {
-    Request request =
-        new EditSortMembersParams('/no/such/file.dart').toRequest('0');
-    Response response = await waitResponse(request);
+  @failingTest
+  Future<void> test_BAD_doesNotExist() async {
+    // The analysis driver fails to return an error
+    var request =
+        EditSortMembersParams(convertPath('/no/such/file.dart')).toRequest('0');
+    var response = await waitResponse(request);
     expect(response,
         isResponseFailure('0', RequestErrorCode.SORT_MEMBERS_INVALID_FILE));
   }
 
-  test_BAD_hasParseError() async {
+  Future<void> test_BAD_hasParseError() async {
     addTestFile('''
 main() {
   print()
 }
 ''');
-    Request request = new EditSortMembersParams(testFile).toRequest('0');
-    Response response = await waitResponse(request);
+    var request = EditSortMembersParams(testFile).toRequest('0');
+    var response = await waitResponse(request);
     expect(response,
         isResponseFailure('0', RequestErrorCode.SORT_MEMBERS_PARSE_ERRORS));
   }
 
-  test_BAD_notDartFile() async {
-    Request request =
-        new EditSortMembersParams('/not-a-Dart-file.txt').toRequest('0');
-    Response response = await waitResponse(request);
+  Future<void> test_BAD_notDartFile() async {
+    var request = EditSortMembersParams(
+      convertPath('/not-a-Dart-file.txt'),
+    ).toRequest('0');
+    var response = await waitResponse(request);
     expect(response,
         isResponseFailure('0', RequestErrorCode.SORT_MEMBERS_INVALID_FILE));
   }
 
-  test_OK_afterWaitForAnalysis() async {
+  Future<void> test_invalidFilePathFormat_notAbsolute() async {
+    var request = EditSortMembersParams('test.dart').toRequest('0');
+    var response = await waitResponse(request);
+    expect(
+      response,
+      isResponseFailure('0', RequestErrorCode.INVALID_FILE_PATH_FORMAT),
+    );
+  }
+
+  Future<void> test_invalidFilePathFormat_notNormalized() async {
+    var request = EditSortMembersParams(convertPath('/foo/../bar/test.dart'))
+        .toRequest('0');
+    var response = await waitResponse(request);
+    expect(
+      response,
+      isResponseFailure('0', RequestErrorCode.INVALID_FILE_PATH_FORMAT),
+    );
+  }
+
+  Future<void> test_OK_afterWaitForAnalysis() async {
     addTestFile('''
 class C {}
 class A {}
@@ -79,7 +92,7 @@ class C {}
 ''');
   }
 
-  test_OK_classMembers_method() async {
+  Future<void> test_OK_classMembers_method() async {
     addTestFile('''
 class A {
   c() {}
@@ -96,7 +109,7 @@ class A {
 ''');
   }
 
-  test_OK_directives() async {
+  Future<void> test_OK_directives() async {
     addTestFile('''
 library lib;
 
@@ -147,7 +160,7 @@ main() {
 ''');
   }
 
-  test_OK_directives_withAnnotation() async {
+  Future<void> test_OK_directives_withAnnotation() async {
     addTestFile('''
 library lib;
 
@@ -181,11 +194,8 @@ class MyAnnotation {
 ''');
   }
 
-  @failingTest
-  test_OK_genericFunctionTypeInComments() async {
-    addFile(
-        projectPath + '/analysis_options.yaml',
-        '''
+  Future<void> test_OK_genericFunctionType() async {
+    newAnalysisOptionsYamlFile(projectPath, content: '''
 analyzer:
   strong-mode: true
 ''');
@@ -205,14 +215,14 @@ class Super {}
 
 typedef dynamic Func(String x, String y);
 
-Function/*=F*/ allowInterop/*<F extends Function>*/(Function/*=F*/ f) => null;
+F allowInterop<F extends Function>(F f) => null;
 
 Func bar(Func f) {
   return allowInterop(f);
 }
 ''');
     return _assertSorted('''
-Function/*=F*/ allowInterop/*<F extends Function>*/(Function/*=F*/ f) => null;
+F allowInterop<F extends Function>(F f) => null;
 
 Func bar(Func f) {
   return allowInterop(f);
@@ -235,7 +245,7 @@ class Super {}
 ''');
   }
 
-  test_OK_unitMembers_class() async {
+  Future<void> test_OK_unitMembers_class() async {
     addTestFile('''
 class C {}
 class A {}
@@ -250,14 +260,14 @@ class C {}
 
   Future _assertSorted(String expectedCode) async {
     await _requestSort();
-    String resultCode = SourceEdit.applySequence(testCode, fileEdit.edits);
+    var resultCode = SourceEdit.applySequence(testCode, fileEdit.edits);
     expect(resultCode, expectedCode);
   }
 
   Future _requestSort() async {
-    Request request = new EditSortMembersParams(testFile).toRequest('0');
-    Response response = await waitResponse(request);
-    var result = new EditSortMembersResult.fromResponse(response);
+    var request = EditSortMembersParams(testFile).toRequest('0');
+    var response = await waitResponse(request);
+    var result = EditSortMembersResult.fromResponse(response);
     fileEdit = result.edit;
   }
 }

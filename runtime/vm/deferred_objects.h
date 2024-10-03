@@ -6,13 +6,12 @@
 #define RUNTIME_VM_DEFERRED_OBJECTS_H_
 
 #include "platform/globals.h"
+#include "vm/tagged_pointer.h"
 
 namespace dart {
 
 // Forward declarations.
 class Object;
-class RawObject;
-class RawObject;
 class DeoptContext;
 
 // Used by the deoptimization infrastructure to defer allocation of
@@ -21,26 +20,25 @@ class DeoptContext;
 // the materialized object.
 class DeferredSlot {
  public:
-  DeferredSlot(RawObject** slot, DeferredSlot* next)
+  DeferredSlot(ObjectPtr* slot, DeferredSlot* next)
       : slot_(slot), next_(next) {}
   virtual ~DeferredSlot() {}
 
-  RawObject** slot() const { return slot_; }
+  ObjectPtr* slot() const { return slot_; }
   DeferredSlot* next() const { return next_; }
 
   virtual void Materialize(DeoptContext* deopt_context) = 0;
 
  private:
-  RawObject** const slot_;
+  ObjectPtr* const slot_;
   DeferredSlot* const next_;
 
   DISALLOW_COPY_AND_ASSIGN(DeferredSlot);
 };
 
-
 class DeferredDouble : public DeferredSlot {
  public:
-  DeferredDouble(double value, RawObject** slot, DeferredSlot* next)
+  DeferredDouble(double value, ObjectPtr* slot, DeferredSlot* next)
       : DeferredSlot(slot, next), value_(value) {}
 
   virtual void Materialize(DeoptContext* deopt_context);
@@ -53,10 +51,9 @@ class DeferredDouble : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredDouble);
 };
 
-
 class DeferredMint : public DeferredSlot {
  public:
-  DeferredMint(int64_t value, RawObject** slot, DeferredSlot* next)
+  DeferredMint(int64_t value, ObjectPtr* slot, DeferredSlot* next)
       : DeferredSlot(slot, next), value_(value) {}
 
   virtual void Materialize(DeoptContext* deopt_context);
@@ -69,10 +66,9 @@ class DeferredMint : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredMint);
 };
 
-
 class DeferredFloat32x4 : public DeferredSlot {
  public:
-  DeferredFloat32x4(simd128_value_t value, RawObject** slot, DeferredSlot* next)
+  DeferredFloat32x4(simd128_value_t value, ObjectPtr* slot, DeferredSlot* next)
       : DeferredSlot(slot, next), value_(value) {}
 
   virtual void Materialize(DeoptContext* deopt_context);
@@ -85,10 +81,9 @@ class DeferredFloat32x4 : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredFloat32x4);
 };
 
-
 class DeferredFloat64x2 : public DeferredSlot {
  public:
-  DeferredFloat64x2(simd128_value_t value, RawObject** slot, DeferredSlot* next)
+  DeferredFloat64x2(simd128_value_t value, ObjectPtr* slot, DeferredSlot* next)
       : DeferredSlot(slot, next), value_(value) {}
 
   virtual void Materialize(DeoptContext* deopt_context);
@@ -101,10 +96,9 @@ class DeferredFloat64x2 : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredFloat64x2);
 };
 
-
 class DeferredInt32x4 : public DeferredSlot {
  public:
-  DeferredInt32x4(simd128_value_t value, RawObject** slot, DeferredSlot* next)
+  DeferredInt32x4(simd128_value_t value, ObjectPtr* slot, DeferredSlot* next)
       : DeferredSlot(slot, next), value_(value) {}
 
   virtual void Materialize(DeoptContext* deopt_context);
@@ -117,13 +111,12 @@ class DeferredInt32x4 : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredInt32x4);
 };
 
-
 // Describes a slot that contains a reference to an object that had its
 // allocation removed by AllocationSinking pass.
 // Object itself is described and materialized by DeferredObject.
 class DeferredObjectRef : public DeferredSlot {
  public:
-  DeferredObjectRef(intptr_t index, RawObject** slot, DeferredSlot* next)
+  DeferredObjectRef(intptr_t index, ObjectPtr* slot, DeferredSlot* next)
       : DeferredSlot(slot, next), index_(index) {}
 
   virtual void Materialize(DeoptContext* deopt_context);
@@ -136,12 +129,11 @@ class DeferredObjectRef : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredObjectRef);
 };
 
-
 class DeferredRetAddr : public DeferredSlot {
  public:
   DeferredRetAddr(intptr_t index,
                   intptr_t deopt_id,
-                  RawObject** slot,
+                  ObjectPtr* slot,
                   DeferredSlot* next)
       : DeferredSlot(slot, next), index_(index), deopt_id_(deopt_id) {}
 
@@ -156,10 +148,9 @@ class DeferredRetAddr : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredRetAddr);
 };
 
-
 class DeferredPcMarker : public DeferredSlot {
  public:
-  DeferredPcMarker(intptr_t index, RawObject** slot, DeferredSlot* next)
+  DeferredPcMarker(intptr_t index, ObjectPtr* slot, DeferredSlot* next)
       : DeferredSlot(slot, next), index_(index) {}
 
   virtual void Materialize(DeoptContext* deopt_context);
@@ -172,10 +163,9 @@ class DeferredPcMarker : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredPcMarker);
 };
 
-
 class DeferredPp : public DeferredSlot {
  public:
-  DeferredPp(intptr_t index, RawObject** slot, DeferredSlot* next)
+  DeferredPp(intptr_t index, ObjectPtr* slot, DeferredSlot* next)
       : DeferredSlot(slot, next), index_(index) {}
 
   virtual void Materialize(DeoptContext* deopt_context);
@@ -188,7 +178,6 @@ class DeferredPp : public DeferredSlot {
   DISALLOW_COPY_AND_ASSIGN(DeferredPp);
 };
 
-
 // Describes an object which allocation was removed by AllocationSinking pass.
 // Arguments for materialization are stored as a part of expression stack
 // for the bottommost deoptimized frame so that GC could discover them.
@@ -197,14 +186,14 @@ class DeferredObject {
  public:
   DeferredObject(intptr_t field_count, intptr_t* args)
       : field_count_(field_count),
-        args_(reinterpret_cast<RawObject**>(args)),
+        args_(reinterpret_cast<ObjectPtr*>(args)),
         object_(NULL) {}
 
   intptr_t ArgumentCount() const {
     return kFieldsStartIndex + kFieldEntrySize * field_count_;
   }
 
-  RawObject* object();
+  ObjectPtr object();
 
   // Fill object with actual field values.
   void Fill();
@@ -212,7 +201,12 @@ class DeferredObject {
  private:
   enum {
     kClassIndex = 0,
-    kLengthIndex,  // Number of context variables for contexts, -1 otherwise.
+
+    // Number of context variables for contexts,
+    // number of elements for arrays and typed data objects,
+    // -1 otherwise.
+    kLengthIndex,
+
     kFieldsStartIndex
   };
 
@@ -228,23 +222,17 @@ class DeferredObject {
   // a graph which can contain cycles.
   void Create();
 
-  RawObject* GetArg(intptr_t index) const {
-#if !defined(TARGET_ARCH_DBC)
-    return args_[index];
-#else
-    return args_[-index];
-#endif
-  }
+  ObjectPtr GetArg(intptr_t index) const { return args_[index]; }
 
-  RawObject* GetClass() const { return GetArg(kClassIndex); }
+  ObjectPtr GetClass() const { return GetArg(kClassIndex); }
 
-  RawObject* GetLength() const { return GetArg(kLengthIndex); }
+  ObjectPtr GetLength() const { return GetArg(kLengthIndex); }
 
-  RawObject* GetFieldOffset(intptr_t index) const {
+  ObjectPtr GetFieldOffset(intptr_t index) const {
     return GetArg(kFieldsStartIndex + kFieldEntrySize * index + kOffsetIndex);
   }
 
-  RawObject* GetValue(intptr_t index) const {
+  ObjectPtr GetValue(intptr_t index) const {
     return GetArg(kFieldsStartIndex + kFieldEntrySize * index + kValueIndex);
   }
 
@@ -254,7 +242,7 @@ class DeferredObject {
   // Pointer to the first materialization argument on the stack.
   // The first argument is Class of the instance to materialize followed by
   // Field, value pairs.
-  RawObject** args_;
+  ObjectPtr* args_;
 
   // Object materialized from this description.
   const Object* object_;

@@ -3,6 +3,9 @@ REM Copyright (c) 2013, the Dart project authors.  Please see the AUTHORS file
 REM for details. All rights reserved. Use of this source code is governed by a
 REM BSD-style license that can be found in the LICENSE file.
 
+echo Warning: this 'dartdevc' script is deprecated and will be removed.  1>&2
+echo More details at https://github.com/dart-lang/sdk/issues/46100.      1>&2
+
 setlocal
 rem Handle the case where dart-sdk/bin has been symlinked to.
 set DIR_NAME_WITH_SLASH=%~dp0
@@ -22,7 +25,14 @@ if %SDK_DIR:~-1%==\ set SDK_DIR=%SDK_DIR:~0,-1%
 
 set SDK_ARG=--dart-sdk=%SDK_DIR%
 
-"%DART%" "%SNAPSHOT%" "%SDK_ARG%" %*
+set EXTRA_VM_OPTIONS=
+
+rem We allow extra vm options to be passed in through an environment variable.
+if not "_%DART_VM_OPTIONS%_" == "__" (
+  set EXTRA_VM_OPTIONS=%EXTRA_VM_OPTIONS% %DART_VM_OPTIONS%
+)
+
+"%DART%" %EXTRA_VM_OPTIONS% "%SNAPSHOT%" "%SDK_ARG%" %*
 
 endlocal
 
@@ -42,7 +52,7 @@ setlocal
 for %%i in (%1) do set result=%%~fi
 set current=
 for /f "usebackq tokens=2 delims=[]" %%i in (`dir /a:l "%~dp1" 2^>nul ^
-                                             ^| find ">     %~n1 ["`) do (
+                                             ^| %SystemRoot%\System32\find.exe ">     %~n1 ["`) do (
   set current=%%i
 )
 if not "%current%"=="" call :follow_links "%current%", result

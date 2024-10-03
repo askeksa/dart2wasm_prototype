@@ -5,6 +5,7 @@
 #include "vm/flags.h"
 
 #include "platform/assert.h"
+#include "vm/isolate.h"
 #include "vm/json_stream.h"
 #include "vm/os.h"
 
@@ -16,62 +17,60 @@ DEFINE_FLAG(bool,
             false,
             "Ignore unrecognized flags.");
 
-#define PRODUCT_FLAG_MARCO(name, type, default_value, comment)                 \
+#define PRODUCT_FLAG_MACRO(name, type, default_value, comment)                 \
   type FLAG_##name =                                                           \
       Flags::Register_##type(&FLAG_##name, #name, default_value, comment);
 
 #if defined(DEBUG)
-#define DEBUG_FLAG_MARCO(name, type, default_value, comment)                   \
+#define DEBUG_FLAG_MACRO(name, type, default_value, comment)                   \
   type FLAG_##name =                                                           \
       Flags::Register_##type(&FLAG_##name, #name, default_value, comment);
 #else  // defined(DEBUG)
-#define DEBUG_FLAG_MARCO(name, type, default_value, comment)
+#define DEBUG_FLAG_MACRO(name, type, default_value, comment)
 #endif  // defined(DEBUG)
 
 #if defined(PRODUCT) && defined(DART_PRECOMPILED_RUNTIME)
 // Nothing to be done for the product flag definitions.
-#define RELEASE_FLAG_MARCO(name, product_value, type, default_value, comment)
+#define RELEASE_FLAG_MACRO(name, product_value, type, default_value, comment)
 // Nothing to be done for the precompilation flag definitions.
-#define PRECOMPILE_FLAG_MARCO(name, pre_value, product_value, type,            \
+#define PRECOMPILE_FLAG_MACRO(name, pre_value, product_value, type,            \
                               default_value, comment)
 
 #elif defined(PRODUCT)  // !PRECOMPILED
 // Nothing to be done for the product flag definitions.
-#define RELEASE_FLAG_MARCO(name, product_value, type, default_value, comment)
+#define RELEASE_FLAG_MACRO(name, product_value, type, default_value, comment)
 // Nothing to be done for the precompilation flag definitions.
-#define PRECOMPILE_FLAG_MARCO(name, pre_value, product_value, type,            \
+#define PRECOMPILE_FLAG_MACRO(name, pre_value, product_value, type,            \
                               default_value, comment)
 
 #elif defined(DART_PRECOMPILED_RUNTIME)  // !PRODUCT
-#define RELEASE_FLAG_MARCO(name, product_value, type, default_value, comment)  \
+#define RELEASE_FLAG_MACRO(name, product_value, type, default_value, comment)  \
   type FLAG_##name =                                                           \
       Flags::Register_##type(&FLAG_##name, #name, default_value, comment);
 // Nothing to be done for the precompilation flag definitions.
-#define PRECOMPILE_FLAG_MARCO(name, pre_value, product_value, type,            \
+#define PRECOMPILE_FLAG_MACRO(name, pre_value, product_value, type,            \
                               default_value, comment)
 
 #else  // !PRODUCT && !PRECOMPILED
-#define RELEASE_FLAG_MARCO(name, product_value, type, default_value, comment)  \
+#define RELEASE_FLAG_MACRO(name, product_value, type, default_value, comment)  \
   type FLAG_##name =                                                           \
       Flags::Register_##type(&FLAG_##name, #name, default_value, comment);
-#define PRECOMPILE_FLAG_MARCO(name, pre_value, product_value, type,            \
+#define PRECOMPILE_FLAG_MACRO(name, pre_value, product_value, type,            \
                               default_value, comment)                          \
   type FLAG_##name =                                                           \
       Flags::Register_##type(&FLAG_##name, #name, default_value, comment);
 #endif
 
-
 // Define all of the non-product flags here.
-FLAG_LIST(PRODUCT_FLAG_MARCO,
-          RELEASE_FLAG_MARCO,
-          DEBUG_FLAG_MARCO,
-          PRECOMPILE_FLAG_MARCO)
+FLAG_LIST(PRODUCT_FLAG_MACRO,
+          RELEASE_FLAG_MACRO,
+          PRECOMPILE_FLAG_MACRO,
+          DEBUG_FLAG_MACRO)
 
-#undef RELEASE_FLAG_MARCO
-#undef DEBUG_FLAG_MARCO
-#undef PRODUCT_FLAG_MARCO
-#undef PRECOMPILE_FLAG_MARCO
-
+#undef PRODUCT_FLAG_MACRO
+#undef RELEASE_FLAG_MACRO
+#undef PRECOMPILE_FLAG_MACRO
+#undef DEBUG_FLAG_MACRO
 
 bool Flags::initialized_ = false;
 
@@ -82,16 +81,34 @@ intptr_t Flags::num_flags_ = 0;
 
 class Flag {
  public:
-  enum FlagType { kBoolean, kInteger, kUint64, kString, kFunc, kNumFlagTypes };
+  enum FlagType {
+    kBoolean,
+    kInteger,
+    kUint64,
+    kString,
+    kFlagHandler,
+    kOptionHandler,
+    kNumFlagTypes
+  };
 
   Flag(const char* name, const char* comment, void* addr, FlagType type)
       : name_(name), comment_(comment), addr_(addr), type_(type) {}
   Flag(const char* name, const char* comment, FlagHandler handler)
-      : name_(name), comment_(comment), handler_(handler), type_(kFunc) {}
+      : name_(name),
+        comment_(comment),
+        string_value_("false"),
+        flag_handler_(handler),
+        type_(kFlagHandler) {}
+  Flag(const char* name, const char* comment, OptionHandler handler)
+      : name_(name),
+        comment_(comment),
+        string_value_(nullptr),
+        option_handler_(handler),
+        type_(kOptionHandler) {}
 
   void Print() {
     if (IsUnrecognized()) {
-      OS::Print("%s: unrecognized\n", name_);
+      OS::PrintErr("%s: unrecognized\n", name_);
       return;
     }
     switch (type_) {
@@ -116,7 +133,8 @@ class Flag {
         }
         break;
       }
-      case kFunc: {
+      case kOptionHandler:
+      case kFlagHandler: {
         OS::Print("%s: (%s)\n", name_, comment_);
         break;
       }
@@ -132,18 +150,19 @@ class Flag {
 
   const char* name_;
   const char* comment_;
+  const char* string_value_;
   union {
     void* addr_;
     bool* bool_ptr_;
     int* int_ptr_;
     uint64_t* uint64_ptr_;
     charp* charp_ptr_;
-    FlagHandler handler_;
+    FlagHandler flag_handler_;
+    OptionHandler option_handler_;
   };
   FlagType type_;
-  bool changed_;
+  bool changed_ = false;
 };
-
 
 Flag* Flags::Lookup(const char* name) {
   for (intptr_t i = 0; i < num_flags_; i++) {
@@ -155,13 +174,16 @@ Flag* Flags::Lookup(const char* name) {
   return NULL;
 }
 
-
 bool Flags::IsSet(const char* name) {
   Flag* flag = Lookup(name);
   return (flag != NULL) && (flag->type_ == Flag::kBoolean) &&
          (flag->bool_ptr_ != NULL) && (*flag->bool_ptr_ == true);
 }
 
+void Flags::Cleanup() {
+  ASSERT(initialized_);
+  initialized_ = false;
+}
 
 void Flags::AddFlag(Flag* flag) {
   ASSERT(!initialized_);
@@ -183,7 +205,6 @@ void Flags::AddFlag(Flag* flag) {
   flags_[num_flags_++] = flag;
 }
 
-
 bool Flags::Register_bool(bool* addr,
                           const char* name,
                           bool default_value,
@@ -198,7 +219,6 @@ bool Flags::Register_bool(bool* addr,
   return default_value;
 }
 
-
 int Flags::Register_int(int* addr,
                         const char* name,
                         int default_value,
@@ -210,7 +230,6 @@ int Flags::Register_int(int* addr,
 
   return default_value;
 }
-
 
 uint64_t Flags::Register_uint64_t(uint64_t* addr,
                                   const char* name,
@@ -224,7 +243,6 @@ uint64_t Flags::Register_uint64_t(uint64_t* addr,
   return default_value;
 }
 
-
 const char* Flags::Register_charp(charp* addr,
                                   const char* name,
                                   const char* default_value,
@@ -235,16 +253,23 @@ const char* Flags::Register_charp(charp* addr,
   return default_value;
 }
 
-
-bool Flags::Register_func(FlagHandler handler,
-                          const char* name,
-                          const char* comment) {
+bool Flags::RegisterFlagHandler(FlagHandler handler,
+                                const char* name,
+                                const char* comment) {
   ASSERT(Lookup(name) == NULL);
   Flag* flag = new Flag(name, comment, handler);
   AddFlag(flag);
   return false;
 }
 
+bool Flags::RegisterOptionHandler(OptionHandler handler,
+                                  const char* name,
+                                  const char* comment) {
+  ASSERT(Lookup(name) == NULL);
+  Flag* flag = new Flag(name, comment, handler);
+  AddFlag(flag);
+  return false;
+}
 
 static void Normalize(char* s) {
   intptr_t len = strlen(s);
@@ -254,7 +279,6 @@ static void Normalize(char* s) {
     }
   }
 }
-
 
 bool Flags::SetFlagFromString(Flag* flag, const char* argument) {
   ASSERT(!flag->IsUnrecognized());
@@ -270,7 +294,7 @@ bool Flags::SetFlagFromString(Flag* flag, const char* argument) {
       break;
     }
     case Flag::kString: {
-      *flag->charp_ptr_ = argument == NULL ? NULL : strdup(argument);
+      *flag->charp_ptr_ = argument == NULL ? NULL : Utils::StrDup(argument);
       break;
     }
     case Flag::kInteger: {
@@ -303,14 +327,20 @@ bool Flags::SetFlagFromString(Flag* flag, const char* argument) {
       }
       break;
     }
-    case Flag::kFunc: {
+    case Flag::kFlagHandler: {
       if (strcmp(argument, "true") == 0) {
-        (flag->handler_)(true);
+        (flag->flag_handler_)(true);
       } else if (strcmp(argument, "false") == 0) {
-        (flag->handler_)(false);
+        (flag->flag_handler_)(false);
       } else {
         return false;
       }
+      flag->string_value_ = argument;
+      break;
+    }
+    case Flag::kOptionHandler: {
+      flag->string_value_ = argument;
+      (flag->option_handler_)(argument);
       break;
     }
     default: {
@@ -321,7 +351,6 @@ bool Flags::SetFlagFromString(Flag* flag, const char* argument) {
   flag->changed_ = true;
   return true;
 }
-
 
 void Flags::Parse(const char* option) {
   // Find the beginning of the option argument, if it exists.
@@ -373,15 +402,14 @@ void Flags::Parse(const char* option) {
     // unrecognized flags.
     if (!flag->IsUnrecognized()) {
       if (!SetFlagFromString(flag, argument)) {
-        OS::Print("Ignoring flag: %s is an invalid value for flag %s\n",
-                  argument, name);
+        OS::PrintErr("Ignoring flag: %s is an invalid value for flag %s\n",
+                     argument, name);
       }
     }
   }
 
   delete[] name;
 }
-
 
 static bool IsValidFlag(const char* name,
                         const char* prefix,
@@ -391,18 +419,16 @@ static bool IsValidFlag(const char* name,
           (strncmp(name, prefix, prefix_length) == 0));
 }
 
-
 int Flags::CompareFlagNames(const void* left, const void* right) {
   const Flag* left_flag = *reinterpret_cast<const Flag* const*>(left);
   const Flag* right_flag = *reinterpret_cast<const Flag* const*>(right);
   return strcmp(left_flag->name_, right_flag->name_);
 }
 
-
-bool Flags::ProcessCommandLineFlags(int number_of_vm_flags,
-                                    const char** vm_flags) {
+char* Flags::ProcessCommandLineFlags(int number_of_vm_flags,
+                                     const char** vm_flags) {
   if (initialized_) {
-    return false;
+    return Utils::StrDup("Flags already set");
   }
 
   qsort(flags_, num_flags_, sizeof flags_[0], CompareFlagNames);
@@ -420,20 +446,20 @@ bool Flags::ProcessCommandLineFlags(int number_of_vm_flags,
 
   if (!FLAG_ignore_unrecognized_flags) {
     int unrecognized_count = 0;
+    TextBuffer error(64);
     for (intptr_t j = 0; j < num_flags_; j++) {
       Flag* flag = flags_[j];
       if (flag->IsUnrecognized()) {
         if (unrecognized_count == 0) {
-          OS::PrintErr("Unrecognized flags: %s", flag->name_);
+          error.Printf("Unrecognized flags: %s", flag->name_);
         } else {
-          OS::PrintErr(", %s", flag->name_);
+          error.Printf(", %s", flag->name_);
         }
         unrecognized_count++;
       }
     }
     if (unrecognized_count > 0) {
-      OS::PrintErr("\n");
-      exit(255);
+      return error.Steal();
     }
   }
   if (FLAG_print_flags) {
@@ -441,9 +467,8 @@ bool Flags::ProcessCommandLineFlags(int number_of_vm_flags,
   }
 
   initialized_ = true;
-  return true;
+  return NULL;
 }
-
 
 bool Flags::SetFlag(const char* name, const char* value, const char** error) {
   Flag* flag = Lookup(name);
@@ -458,7 +483,6 @@ bool Flags::SetFlag(const char* name, const char* value, const char** error) {
   return true;
 }
 
-
 void Flags::PrintFlags() {
   OS::Print("Flag settings:\n");
   for (intptr_t i = 0; i < num_flags_; ++i) {
@@ -466,13 +490,9 @@ void Flags::PrintFlags() {
   }
 }
 
-
 #ifndef PRODUCT
 void Flags::PrintFlagToJSONArray(JSONArray* jsarr, const Flag* flag) {
-  if (!FLAG_support_service) {
-    return;
-  }
-  if (flag->IsUnrecognized() || flag->type_ == Flag::kFunc) {
+  if (flag->IsUnrecognized()) {
     return;
   }
   JSONObject jsflag(jsarr);
@@ -505,17 +525,27 @@ void Flags::PrintFlagToJSONArray(JSONArray* jsarr, const Flag* flag) {
       }
       break;
     }
+    case Flag::kFlagHandler: {
+      jsflag.AddProperty("_flagType", "Bool");
+      jsflag.AddProperty("valueAsString", flag->string_value_);
+      break;
+    }
+    case Flag::kOptionHandler: {
+      jsflag.AddProperty("_flagType", "String");
+      if (flag->string_value_ != nullptr) {
+        jsflag.AddProperty("valueAsString", flag->string_value_);
+      } else {
+        // valueAsString missing means NULL.
+      }
+      break;
+    }
     default:
       UNREACHABLE();
       break;
   }
 }
 
-
 void Flags::PrintJSON(JSONStream* js) {
-  if (!FLAG_support_service) {
-    return;
-  }
   JSONObject jsobj(js);
   jsobj.AddProperty("type", "FlagList");
   JSONArray jsarr(&jsobj, "flags");

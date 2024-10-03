@@ -63,11 +63,11 @@ const int _POW2_32 = 0x100000000;
 
 @patch
 class Random {
-  static final _secureRandom = new _JSSecureRandom();
+  static final Random _secureRandom = _JSSecureRandom();
 
   @patch
-  factory Random([int seed]) =>
-      (seed == null) ? const _JSRandom() : new _Random(seed);
+  factory Random([int? seed]) =>
+      (seed == null) ? const _JSRandom() : _Random(seed);
 
   @patch
   factory Random.secure() => _secureRandom;
@@ -79,21 +79,17 @@ class _JSRandom implements Random {
 
   int nextInt(int max) {
     if (max <= 0 || max > _POW2_32) {
-      throw new RangeError("max must be in range 0 < max ≤ 2^32, was $max");
+      throw new RangeError('max must be in range 0 < max ≤ 2^32, was $max');
     }
-    return JS("int", "(Math.random() * #) >>> 0", max);
+    return JS('int', '(Math.random() * #) >>> 0', max);
   }
 
-  /**
-   * Generates a positive random floating point value uniformly distributed on
-   * the range from 0.0, inclusive, to 1.0, exclusive.
-   */
-  double nextDouble() => JS("double", "Math.random()");
+  /// Generates a positive random floating point value uniformly distributed on
+  /// the range from 0.0, inclusive, to 1.0, exclusive.
+  double nextDouble() => JS('double', 'Math.random()');
 
-  /**
-   * Generates a random boolean value.
-   */
-  bool nextBool() => JS("bool", "Math.random() < 0.5");
+  /// Generates a random boolean value.
+  bool nextBool() => JS('bool', 'Math.random() < 0.5');
 }
 
 class _Random implements Random {
@@ -215,7 +211,7 @@ class _Random implements Random {
 
   int nextInt(int max) {
     if (max <= 0 || max > _POW2_32) {
-      throw new RangeError("max must be in range 0 < max ≤ 2^32, was $max");
+      throw new RangeError('max must be in range 0 < max ≤ 2^32, was $max');
     }
     if ((max & (max - 1)) == 0) {
       // Fast case for powers of two.
@@ -228,7 +224,7 @@ class _Random implements Random {
     do {
       _nextState();
       rnd32 = _lo;
-      result = rnd32.remainder(max); // % max;
+      result = rnd32.remainder(max) as int; // % max;
     } while ((rnd32 - result + max) >= _POW2_32);
     return result;
   }
@@ -252,20 +248,20 @@ class _JSSecureRandom implements Random {
   final _buffer = new ByteData(8);
 
   _JSSecureRandom() {
-    var crypto = JS("", "self.crypto");
+    var crypto = JS('', 'self.crypto');
     if (crypto != null) {
-      var getRandomValues = JS("", "#.getRandomValues", crypto);
+      var getRandomValues = JS('', '#.getRandomValues', crypto);
       if (getRandomValues != null) {
         return;
       }
     }
     throw new UnsupportedError(
-        "No source of cryptographically secure random numbers available.");
+        'No source of cryptographically secure random numbers available.');
   }
 
   /// Fill _buffer from [start] to `start + length` with random bytes.
   void _getRandomBytes(int start, int length) {
-    JS("void", "crypto.getRandomValues(#)",
+    JS('void', 'crypto.getRandomValues(#)',
         _buffer.buffer.asUint8List(start, length));
   }
 
@@ -296,7 +292,7 @@ class _JSSecureRandom implements Random {
 
   int nextInt(int max) {
     if (max <= 0 || max > _POW2_32) {
-      throw new RangeError("max must be in range 0 < max ≤ 2^32, was $max");
+      throw new RangeError('max must be in range 0 < max ≤ 2^32, was $max');
     }
     int byteCount = 1;
     if (max > 0xFF) {
@@ -310,7 +306,7 @@ class _JSSecureRandom implements Random {
     }
     _buffer.setUint32(0, 0);
     int start = 4 - byteCount;
-    int randomLimit = pow(256, byteCount);
+    int randomLimit = pow(256, byteCount) as int;
     while (true) {
       _getRandomBytes(start, byteCount);
       // The getUint32 method is big-endian as default.
@@ -319,7 +315,7 @@ class _JSSecureRandom implements Random {
         // Max is power of 2.
         return random & (max - 1);
       }
-      int result = random.remainder(max);
+      int result = random.remainder(max) as int;
       // Ensure results have equal probability by rejecting values in the
       // last range of k*max .. 256**byteCount.
       // TODO: Consider picking a higher byte count if the last range is a

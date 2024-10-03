@@ -5,10 +5,9 @@
 part of $LIBRARYNAME;
 
 $(ANNOTATIONS)$(NATIVESPEC)$(CLASS_MODIFIERS)class $CLASSNAME$EXTENDS$IMPLEMENTS {
-$if DART2JS
-  factory $CLASSNAME(Map rtcIceServers, [Map mediaConstraints]) {
-    var constructorName = JS('RtcPeerConnection', 'window[#]',
-        '${Device.propertyPrefix}RTCPeerConnection');
+  factory $CLASSNAME(Map rtcIceServers, [Map$NULLABLE mediaConstraints]) {
+    var constructorName =
+        JS('RtcPeerConnection', 'window[#]', 'RTCPeerConnection');
     if (mediaConstraints != null) {
       return JS('RtcPeerConnection', 'new #(#,#)', constructorName,
           convertDartToNative_SerializedScriptValue(rtcIceServers),
@@ -18,13 +17,11 @@ $if DART2JS
           convertDartToNative_SerializedScriptValue(rtcIceServers));
     }
   }
-$endif
 
   /**
    * Checks if Real Time Communication (RTC) APIs are supported and enabled on
    * the current platform.
    */
-$if DART2JS
   static bool get supported {
     // Currently in Firefox some of the RTC elements are defined but throw an
     // error unless the user has specifically enabled them in their
@@ -37,42 +34,26 @@ $if DART2JS
     } catch (_) { return false;}
     return false;
   }
-$else
-  static bool get supported => true;
-$endif
-  Future<RtcSessionDescription> createOffer([Map mediaConstraints]) {
-    var completer = new Completer<RtcSessionDescription>();
-    _createOffer(
-        (value) { completer.complete(value); },
-        (error) { completer.completeError(error); }, mediaConstraints);
-    return completer.future;
-  }
 
-  Future<RtcSessionDescription> createAnswer([Map mediaConstraints]) {
-    var completer = new Completer<RtcSessionDescription>();
-    _createAnswer(
-        (value) { completer.complete(value); },
-        (error) { completer.completeError(error); }, mediaConstraints);
-    return completer.future;
-  }
-
-  @DomName('RTCPeerConnection.getStats')
-  Future<RtcStatsResponse> getStats(MediaStreamTrack selector) {
+  /**
+  * Temporarily exposes _getStats and old getStats as getLegacyStats until Chrome fully supports
+  * new getStats API.
+  */
+  Future<RtcStatsResponse>
+      getLegacyStats([MediaStreamTrack$NULLABLE selector]) {
     var completer = new Completer<RtcStatsResponse>();
-    _getStats((value) { completer.complete(value); }, selector);
+    _getStats((value) {
+      completer.complete(value);
+    }, selector);
     return completer.future;
   }
+  @JSName('getStats')
+  Future _getStats(
+      [RtcStatsCallback$NULLABLE successCallback,
+       MediaStreamTrack$NULLABLE selector]) native;
 
-  @DomName('RTCPeerConnection.generateCertificate')
-  @DocsEditable()
-  @Experimental() // untriaged
   static Future generateCertificate(/*AlgorithmIdentifier*/ keygenAlgorithm) =>
-$if DART2JS
       JS('dynamic', 'generateCertificate(#)', keygenAlgorithm);
-$else
-      convertNativePromiseToDartFuture(_blink.BlinkRTCPeerConnection.instance
-          .generateCertificate_Callback_1_(keygenAlgorithm));
-$endif
 
 $!MEMBERS
 }

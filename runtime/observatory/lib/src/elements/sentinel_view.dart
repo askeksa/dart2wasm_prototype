@@ -8,32 +8,22 @@ import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/nav_bar.dart';
 import 'package:observatory/src/elements/helpers/nav_menu.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/nav/isolate_menu.dart';
 import 'package:observatory/src/elements/nav/notify.dart';
 import 'package:observatory/src/elements/nav/top_menu.dart';
 import 'package:observatory/src/elements/nav/vm_menu.dart';
-import 'package:observatory/src/elements/view_footer.dart';
 
-class SentinelViewElement extends HtmlElement implements Renderable {
-  static const tag =
-      const Tag<SentinelViewElement>('sentinel-view', dependencies: const [
-    NavTopMenuElement.tag,
-    NavVMMenuElement.tag,
-    NavIsolateMenuElement.tag,
-    NavNotifyElement.tag,
-    ViewFooterElement.tag
-  ]);
-
-  RenderingScheduler<SentinelViewElement> _r;
+class SentinelViewElement extends CustomElement implements Renderable {
+  late RenderingScheduler<SentinelViewElement> _r;
 
   Stream<RenderedEvent<SentinelViewElement>> get onRendered => _r.onRendered;
 
-  M.VM _vm;
-  M.IsolateRef _isolate;
-  M.Sentinel _sentinel;
-  M.EventRepository _events;
-  M.NotificationRepository _notifications;
+  late M.VM _vm;
+  late M.IsolateRef _isolate;
+  late M.Sentinel _sentinel;
+  late M.EventRepository _events;
+  late M.NotificationRepository _notifications;
 
   M.Sentinel get sentinel => _sentinel;
 
@@ -43,14 +33,14 @@ class SentinelViewElement extends HtmlElement implements Renderable {
       M.Sentinel sentinel,
       M.EventRepository events,
       M.NotificationRepository notifications,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(vm != null);
     assert(isolate != null);
     assert(sentinel != null);
     assert(events != null);
     assert(notifications != null);
-    SentinelViewElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    SentinelViewElement e = new SentinelViewElement.created();
+    e._r = new RenderingScheduler<SentinelViewElement>(e, queue: queue);
     e._vm = vm;
     e._isolate = isolate;
     e._sentinel = sentinel;
@@ -59,7 +49,7 @@ class SentinelViewElement extends HtmlElement implements Renderable {
     return e;
   }
 
-  SentinelViewElement.created() : super.created();
+  SentinelViewElement.created() : super.created('sentinel-view');
 
   @override
   void attached() {
@@ -76,23 +66,21 @@ class SentinelViewElement extends HtmlElement implements Renderable {
   }
 
   void render() {
-    children = [
-      navBar([
-        new NavTopMenuElement(queue: _r.queue),
-        new NavVMMenuElement(_vm, _events, queue: _r.queue),
-        new NavIsolateMenuElement(_isolate, _events, queue: _r.queue),
+    children = <Element>[
+      navBar(<Element>[
+        new NavTopMenuElement(queue: _r.queue).element,
+        new NavVMMenuElement(_vm, _events, queue: _r.queue).element,
+        new NavIsolateMenuElement(_isolate, _events, queue: _r.queue).element,
         navMenu('sentinel'),
-        new NavNotifyElement(_notifications, queue: _r.queue)
+        new NavNotifyElement(_notifications, queue: _r.queue).element
       ]),
       new DivElement()
         ..classes = ['content-centered-big']
-        ..children = [
+        ..children = <Element>[
           new HeadingElement.h2()
             ..text = 'Sentinel: #{_sentinel.valueAsString}',
           new HRElement(),
           new DivElement()..text = _sentinelKindToDescription(_sentinel.kind),
-          new HRElement(),
-          new ViewFooterElement(queue: _r.queue)
         ]
     ];
   }

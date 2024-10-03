@@ -9,16 +9,13 @@
 
 #if defined(USING_SIMULATOR)
 #if defined(TARGET_ARCH_IA32) || defined(TARGET_ARCH_X64)
-// No simulator used.
-#error Simulator not supported.
+#error Simulator not implemented.
 #elif defined(TARGET_ARCH_ARM)
 #include "vm/simulator_arm.h"
 #elif defined(TARGET_ARCH_ARM64)
 #include "vm/simulator_arm64.h"
-#elif defined(TARGET_ARCH_MIPS)
-#include "vm/simulator_mips.h"
-#elif defined(TARGET_ARCH_DBC)
-#include "vm/simulator_dbc.h"
+#elif defined(TARGET_ARCH_RISCV32) || defined(TARGET_ARCH_RISCV64)
+#include "vm/simulator_riscv.h"
 #else
 #error Unknown architecture.
 #endif  // defined(TARGET_ARCH_...)

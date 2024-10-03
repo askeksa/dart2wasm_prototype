@@ -5,77 +5,93 @@
 #ifndef RUNTIME_VM_REGEXP_ASSEMBLER_H_
 #define RUNTIME_VM_REGEXP_ASSEMBLER_H_
 
-#include "vm/assembler.h"
-#include "vm/intermediate_language.h"
 #include "vm/object.h"
+
+#if !defined(DART_PRECOMPILED_RUNTIME)
+#include "vm/compiler/assembler/assembler.h"
+#include "vm/compiler/backend/il.h"
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
 namespace dart {
 
 // Utility function for the DotPrinter
 void PrintUtf16(uint16_t c);
 
+extern "C" {
+// Compares two-byte strings case insensitively as UCS2.
+// Called from generated RegExp code.
+uword /*BoolPtr*/ CaseInsensitiveCompareUCS2(uword /*StringPtr*/ str_raw,
+                                             uword /*SmiPtr*/ lhs_index_raw,
+                                             uword /*SmiPtr*/ rhs_index_raw,
+                                             uword /*SmiPtr*/ length_raw);
+
+// Compares two-byte strings case insensitively as UTF16.
+// Called from generated RegExp code.
+uword /*BoolPtr*/ CaseInsensitiveCompareUTF16(uword /*StringPtr*/ str_raw,
+                                              uword /*SmiPtr*/ lhs_index_raw,
+                                              uword /*SmiPtr*/ rhs_index_raw,
+                                              uword /*SmiPtr*/ length_raw);
+}
 
 /// Convenience wrapper around a BlockEntryInstr pointer.
 class BlockLabel : public ValueObject {
   // Used by the IR assembler.
  public:
   BlockLabel();
-
-  JoinEntryInstr* block() const { return block_; }
-
-  bool IsBound() const { return is_bound_; }
-  void SetBound(intptr_t block_id) {
-    ASSERT(!is_bound_);
-    block_->set_block_id(block_id);
-    is_bound_ = true;
-  }
-
-  bool IsLinked() const { return !is_bound_ && is_linked_; }
-  void SetLinked() { is_linked_ = true; }
-
-  intptr_t Position() const {
-    ASSERT(IsBound());
-    return block_->block_id();
-  }
-
- private:
-  JoinEntryInstr* block_;
-
-  bool is_bound_;
-  bool is_linked_;
-
-  // Used by the bytecode assembler.
- public:
   ~BlockLabel() { ASSERT(!is_linked()); }
 
   intptr_t pos() const { return pos_; }
-  bool is_bound() const { return IsBound(); }
-  bool is_linked() const { return IsLinked(); }
+  bool is_bound() const { return is_bound_; }
+  bool is_linked() const { return !is_bound_ && is_linked_; }
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  JoinEntryInstr* block() const { return block_; }
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
   void Unuse() {
-    pos_ = 0;
+    pos_ = -1;
     is_bound_ = false;
     is_linked_ = false;
   }
 
-  void bind_to(intptr_t pos) {
+  void BindTo(intptr_t pos) {
     pos_ = pos;
+#if !defined(DART_PRECOMPILED_RUNTIME)
+    if (block_ != nullptr) block_->set_block_id(pos);
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
     is_bound_ = true;
     is_linked_ = false;
     ASSERT(is_bound());
   }
 
-  void link_to(intptr_t pos) {
+  // Used by bytecode assembler to form a linked list out of
+  // forward jumps to an unbound label.
+  void LinkTo(intptr_t pos) {
+#if !defined(DART_PRECOMPILED_RUNTIME)
+    ASSERT(block_ == nullptr);
+#endif
+    ASSERT(!is_bound_);
     pos_ = pos;
-    is_bound_ = false;
     is_linked_ = true;
-    ASSERT(is_linked());
+  }
+
+  // Used by IR builder to mark block label as used.
+  void SetLinked() {
+#if !defined(DART_PRECOMPILED_RUNTIME)
+    ASSERT(block_ != nullptr);
+#endif
+    if (!is_bound_) {
+      is_linked_ = true;
+    }
   }
 
  private:
-  intptr_t pos_;
+  bool is_bound_ = false;
+  bool is_linked_ = false;
+  intptr_t pos_ = -1;
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  JoinEntryInstr* block_ = nullptr;
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 };
-
 
 class RegExpMacroAssembler : public ZoneAllocated {
  public:
@@ -122,10 +138,14 @@ class RegExpMacroAssembler : public ZoneAllocated {
   virtual void CheckCharacterGT(uint16_t limit, BlockLabel* on_greater) = 0;
   virtual void CheckCharacterLT(uint16_t limit, BlockLabel* on_less) = 0;
   virtual void CheckGreedyLoop(BlockLabel* on_tos_equals_current_position) = 0;
-  virtual void CheckNotAtStart(BlockLabel* on_not_at_start) = 0;
+  virtual void CheckNotAtStart(intptr_t cp_offset,
+                               BlockLabel* on_not_at_start) = 0;
   virtual void CheckNotBackReference(intptr_t start_reg,
+                                     bool read_backward,
                                      BlockLabel* on_no_match) = 0;
   virtual void CheckNotBackReferenceIgnoreCase(intptr_t start_reg,
+                                               bool read_backward,
+                                               bool unicode,
                                                BlockLabel* on_no_match) = 0;
   // Check the current character for a match with a literal character.  If we
   // fail to match then goto the on_failure label.  End of input always
@@ -152,6 +172,9 @@ class RegExpMacroAssembler : public ZoneAllocated {
   // array, and if the found byte is non-zero, we jump to the on_bit_set label.
   virtual void CheckBitInTable(const TypedData& table,
                                BlockLabel* on_bit_set) = 0;
+
+  // Checks for preemption and serves as an OSR entry.
+  virtual void CheckPreemption(bool is_backtrack) {}
 
   // Checks whether the given offset from the current position is before
   // the end of the string.  May overwrite the current character.
@@ -211,22 +234,33 @@ class RegExpMacroAssembler : public ZoneAllocated {
   virtual void ClearRegisters(intptr_t reg_from, intptr_t reg_to) = 0;
   virtual void WriteStackPointerToRegister(intptr_t reg) = 0;
 
+  // Check that we are not in the middle of a surrogate pair.
+  void CheckNotInSurrogatePair(intptr_t cp_offset, BlockLabel* on_failure);
+
   // Controls the generation of large inlined constants in the code.
   void set_slow_safe(bool ssc) { slow_safe_compiler_ = ssc; }
   bool slow_safe() { return slow_safe_compiler_; }
 
-  enum GlobalMode { NOT_GLOBAL, GLOBAL, GLOBAL_NO_ZERO_LENGTH_CHECK };
+  enum GlobalMode {
+    NOT_GLOBAL,
+    GLOBAL,
+    GLOBAL_NO_ZERO_LENGTH_CHECK,
+    GLOBAL_UNICODE
+  };
   // Set whether the regular expression has the global flag.  Exiting due to
   // a failure in a global regexp may still mean success overall.
   inline void set_global_mode(GlobalMode mode) { global_mode_ = mode; }
   inline bool global() { return global_mode_ != NOT_GLOBAL; }
-  inline bool global_with_zero_length_check() { return global_mode_ == GLOBAL; }
+  inline bool global_with_zero_length_check() {
+    return global_mode_ == GLOBAL || global_mode_ == GLOBAL_UNICODE;
+  }
+  inline bool global_unicode() { return global_mode_ == GLOBAL_UNICODE; }
 
   Zone* zone() const { return zone_; }
 
  private:
   bool slow_safe_compiler_;
-  bool global_mode_;
+  GlobalMode global_mode_;
   Zone* zone_;
 };
 

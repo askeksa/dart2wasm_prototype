@@ -12,7 +12,7 @@ main() {
   Completer done = new Completer();
 
   var events = [];
-  StreamController controller;
+  late StreamController controller;
   Stream stream;
   // Test `StreamController.broadcast` streams.
   catchErrors(() {

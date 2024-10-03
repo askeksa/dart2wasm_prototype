@@ -1,24 +1,22 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
-
-import 'package:analysis_server/protocol/protocol.dart';
 import 'package:analysis_server/protocol/protocol_generated.dart';
 import 'package:analysis_server/src/edit/edit_domain.dart';
 import 'package:analysis_server/src/plugin/plugin_manager.dart';
+import 'package:analyzer/instrumentation/service.dart';
 import 'package:analyzer_plugin/protocol/protocol.dart' as plugin;
 import 'package:analyzer_plugin/protocol/protocol_common.dart';
 import 'package:analyzer_plugin/protocol/protocol_generated.dart' as plugin;
-import 'package:analyzer_plugin/src/protocol/protocol_internal.dart' as plugin;
-import 'package:plugin/manager.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import '../analysis_abstract.dart';
+import '../mocks.dart';
+import '../src/plugin/plugin_manager_test.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(FixesTest);
   });
@@ -29,50 +27,69 @@ class FixesTest extends AbstractAnalysisTest {
   @override
   void setUp() {
     super.setUp();
-    ExtensionManager manager = new ExtensionManager();
-    manager.processPlugins([server.serverPlugin]);
-    handler = new EditDomainHandler(server);
+    handler = EditDomainHandler(server);
   }
 
-  test_fixUndefinedClass() async {
-    createProject();
+  Future<void> test_fileOutsideRoot() async {
+    final outsideFile = '/foo/test.dart';
+    newFile(outsideFile, content: 'bad code to create error');
+
+    // Set up the original project, as the code fix code won't run at all
+    // if there are no contexts.
+    await createProject();
+    await waitForTasksFinished();
+
+    var request =
+        EditGetFixesParams(convertPath(outsideFile), 0).toRequest('0');
+    var response = await waitResponse(request);
+    expect(
+      response,
+      isResponseFailure('0', RequestErrorCode.GET_FIXES_INVALID_FILE),
+    );
+  }
+
+  Future<void> test_fixUndefinedClass() async {
+    await createProject();
     addTestFile('''
 main() {
-  Future<String> x = null;
+  Completer<String> x = null;
+  print(x);
 }
 ''');
     await waitForTasksFinished();
-    List<AnalysisErrorFixes> errorFixes = await _getFixesAt('Future<String>');
+    doAllDeclarationsTrackerWork();
+    var errorFixes = await _getFixesAt('Completer<String>');
     expect(errorFixes, hasLength(1));
-    AnalysisError error = errorFixes[0].error;
-    expect(error.severity, AnalysisErrorSeverity.WARNING);
-    expect(error.type, AnalysisErrorType.STATIC_WARNING);
-    List<SourceChange> fixes = errorFixes[0].fixes;
-    expect(fixes, hasLength(2));
+    var fixes = errorFixes[0].fixes;
+    expect(fixes, hasLength(3));
     expect(fixes[0].message, matches('Import library'));
     expect(fixes[1].message, matches('Create class'));
+    expect(fixes[2].message, matches('Create mixin'));
   }
 
-  test_fromPlugins() async {
-    PluginInfo info = new DiscoveredPluginInfo('a', 'b', 'c', null, null);
-    plugin.AnalysisErrorFixes fixes = new plugin.AnalysisErrorFixes(
-        new AnalysisError(AnalysisErrorSeverity.ERROR, AnalysisErrorType.HINT,
-            new Location('', 0, 0, 0, 0), 'message', 'code'));
-    plugin.EditGetFixesResult result =
-        new plugin.EditGetFixesResult(<plugin.AnalysisErrorFixes>[fixes]);
+  Future<void> test_fromPlugins() async {
+    PluginInfo info = DiscoveredPluginInfo('a', 'b', 'c',
+        TestNotificationManager(), InstrumentationService.NULL_SERVICE);
+    var fixes = plugin.AnalysisErrorFixes(AnalysisError(
+        AnalysisErrorSeverity.ERROR,
+        AnalysisErrorType.HINT,
+        Location('', 0, 0, 0, 0, endLine: 0, endColumn: 0),
+        'message',
+        'code'));
+    var result = plugin.EditGetFixesResult(<plugin.AnalysisErrorFixes>[fixes]);
     pluginManager.broadcastResults = <PluginInfo, Future<plugin.Response>>{
-      info: new Future.value(result.toResponse('-', 1))
+      info: Future.value(result.toResponse('-', 1))
     };
 
-    createProject();
+    await createProject();
     addTestFile('main() {}');
     await waitForTasksFinished();
-    List<AnalysisErrorFixes> errorFixes = await _getFixesAt('in(');
+    var errorFixes = await _getFixesAt('in(');
     expect(errorFixes, hasLength(1));
   }
 
-  test_hasFixes() async {
-    createProject();
+  Future<void> test_hasFixes() async {
+    await createProject();
     addTestFile('''
 foo() {
   print(1)
@@ -84,21 +101,40 @@ bar() {
     await waitForTasksFinished();
     // print(1)
     {
-      List<AnalysisErrorFixes> errorFixes = await _getFixesAt('print(1)');
+      var errorFixes = await _getFixesAt('print(1)');
       expect(errorFixes, hasLength(1));
       _isSyntacticErrorWithSingleFix(errorFixes[0]);
     }
     // print(10)
     {
-      List<AnalysisErrorFixes> errorFixes = await _getFixesAt('print(10)');
+      var errorFixes = await _getFixesAt('print(10)');
       expect(errorFixes, hasLength(2));
       _isSyntacticErrorWithSingleFix(errorFixes[0]);
       _isSyntacticErrorWithSingleFix(errorFixes[1]);
     }
   }
 
-  test_overlayOnlyFile() async {
-    createProject();
+  Future<void> test_invalidFilePathFormat_notAbsolute() async {
+    var request = EditGetFixesParams('test.dart', 0).toRequest('0');
+    var response = await waitResponse(request);
+    expect(
+      response,
+      isResponseFailure('0', RequestErrorCode.INVALID_FILE_PATH_FORMAT),
+    );
+  }
+
+  Future<void> test_invalidFilePathFormat_notNormalized() async {
+    var request = EditGetFixesParams(convertPath('/foo/../bar/test.dart'), 0)
+        .toRequest('0');
+    var response = await waitResponse(request);
+    expect(
+      response,
+      isResponseFailure('0', RequestErrorCode.INVALID_FILE_PATH_FORMAT),
+    );
+  }
+
+  Future<void> test_overlayOnlyFile() async {
+    await createProject();
     testCode = '''
 main() {
 print(1)
@@ -107,59 +143,76 @@ print(1)
     _addOverlay(testFile, testCode);
     // ask for fixes
     await waitForTasksFinished();
-    List<AnalysisErrorFixes> errorFixes = await _getFixesAt('print(1)');
+    var errorFixes = await _getFixesAt('print(1)');
     expect(errorFixes, hasLength(1));
     _isSyntacticErrorWithSingleFix(errorFixes[0]);
   }
 
-  test_suggestImportFromDifferentAnalysisRoot() async {
-    // Set up two projects.
-    resourceProvider..newFolder("/project1")..newFolder("/project2");
-    handleSuccessfulRequest(
-        new AnalysisSetAnalysisRootsParams(["/project1", "/project2"], [])
-            .toRequest('0'),
-        handler: analysisHandler);
+  Future<void> test_suggestImportFromDifferentAnalysisRoot() async {
+    newFolder('/aaa');
+    newDotPackagesFile('/aaa', content: '''
+aaa:${toUri('/aaa/lib')}
+bbb:${toUri('/bbb/lib')}
+''');
+    newPubspecYamlFile('/aaa', r'''
+dependencies:
+  bbb: any
+''');
 
-    // Set up files.
-    testFile = "/project1/main.dart";
-    testCode = "main() { print(new Foo()); }";
+    newFolder('/bbb');
+    newDotPackagesFile('/bbb', content: '''
+bbb:${toUri('/bbb/lib')}
+''');
+    newFile('/bbb/lib/target.dart', content: 'class Foo() {}');
+    newFile('/bbb/lib/target.generated.dart', content: 'class Foo() {}');
+    newFile('/bbb/lib/target.template.dart', content: 'class Foo() {}');
+
+    await setRoots(
+        included: [convertPath('/aaa'), convertPath('/bbb')], excluded: []);
+
+    // Configure the test file.
+    testFile = convertPath('/aaa/main.dart');
+    testCode = 'main() { new Foo(); }';
     _addOverlay(testFile, testCode);
-    // Add another file in the same project that imports the target file.
-    // This ensures it will be analyzed as an implicit Source.
-    _addOverlay("/project1/another.dart", 'import "../project2/target.dart";');
-    _addOverlay("/project2/target.dart", "class Foo() {}");
 
     await waitForTasksFinished();
+    doAllDeclarationsTrackerWork();
 
-    List<String> fixes = (await _getFixesAt('Foo()'))
+    var fixes = (await _getFixesAt('Foo()'))
         .single
         .fixes
         .map((f) => f.message)
         .toList();
-    expect(fixes, contains("Import library '../project2/target.dart'"));
+    expect(fixes, contains("Import library 'package:bbb/target.dart'"));
+    expect(
+        fixes, contains("Import library 'package:bbb/target.generated.dart'"));
+
+    // Context: http://dartbug.com/39401
+    expect(fixes.contains("Import library 'package:bbb/target.template.dart'"),
+        isFalse);
   }
 
   void _addOverlay(String name, String contents) {
-    Request request =
-        new AnalysisUpdateContentParams({name: new AddContentOverlay(contents)})
+    var request =
+        AnalysisUpdateContentParams({name: AddContentOverlay(contents)})
             .toRequest('0');
     handleSuccessfulRequest(request, handler: analysisHandler);
   }
 
   Future<List<AnalysisErrorFixes>> _getFixes(int offset) async {
-    Request request = new EditGetFixesParams(testFile, offset).toRequest('0');
-    Response response = await waitResponse(request);
-    var result = new EditGetFixesResult.fromResponse(response);
+    var request = EditGetFixesParams(testFile, offset).toRequest('0');
+    var response = await waitResponse(request);
+    var result = EditGetFixesResult.fromResponse(response);
     return result.fixes;
   }
 
   Future<List<AnalysisErrorFixes>> _getFixesAt(String search) async {
-    int offset = findOffset(search);
+    var offset = findOffset(search);
     return await _getFixes(offset);
   }
 
   void _isSyntacticErrorWithSingleFix(AnalysisErrorFixes fixes) {
-    AnalysisError error = fixes.error;
+    var error = fixes.error;
     expect(error.severity, AnalysisErrorSeverity.ERROR);
     expect(error.type, AnalysisErrorType.SYNTACTIC_ERROR);
     expect(fixes.fixes, hasLength(1));

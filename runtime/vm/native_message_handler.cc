@@ -4,22 +4,23 @@
 
 #include "vm/native_message_handler.h"
 
+#include <memory>
+
 #include "vm/dart_api_message.h"
 #include "vm/isolate.h"
 #include "vm/message.h"
+#include "vm/message_snapshot.h"
 #include "vm/snapshot.h"
 
 namespace dart {
 
 NativeMessageHandler::NativeMessageHandler(const char* name,
                                            Dart_NativeMessageHandler func)
-    : name_(strdup(name)), func_(func) {}
-
+    : name_(Utils::StrDup(name)), func_(func) {}
 
 NativeMessageHandler::~NativeMessageHandler() {
   free(name_);
 }
-
 
 #if defined(DEBUG)
 void NativeMessageHandler::CheckAccess() {
@@ -27,9 +28,8 @@ void NativeMessageHandler::CheckAccess() {
 }
 #endif
 
-
 MessageHandler::MessageStatus NativeMessageHandler::HandleMessage(
-    Message* message) {
+    std::unique_ptr<Message> message) {
   if (message->IsOOB()) {
     // We currently do not use OOB messages for native ports.
     UNREACHABLE();
@@ -38,11 +38,8 @@ MessageHandler::MessageStatus NativeMessageHandler::HandleMessage(
   // All allocation of objects for decoding the message is done in the
   // zone associated with this scope.
   ApiNativeScope scope;
-  Dart_CObject* object;
-  ApiMessageReader reader(message);
-  object = reader.ReadMessage();
+  Dart_CObject* object = ReadApiMessage(scope.zone(), message.get());
   (*func())(message->dest_port(), object);
-  delete message;
   return kOK;
 }
 

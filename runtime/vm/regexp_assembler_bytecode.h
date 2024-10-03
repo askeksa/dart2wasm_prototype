@@ -62,7 +62,7 @@ class BytecodeRegExpMacroAssembler : public RegExpMacroAssembler {
   virtual void CheckCharacterLT(uint16_t limit, BlockLabel* on_less);
   virtual void CheckGreedyLoop(BlockLabel* on_tos_equals_current_position);
   virtual void CheckAtStart(BlockLabel* on_at_start);
-  virtual void CheckNotAtStart(BlockLabel* on_not_at_start);
+  virtual void CheckNotAtStart(intptr_t cp_offset, BlockLabel* on_not_at_start);
   virtual void CheckNotCharacter(unsigned c, BlockLabel* on_not_equal);
   virtual void CheckNotCharacterAfterAnd(unsigned c,
                                          unsigned mask,
@@ -79,8 +79,11 @@ class BytecodeRegExpMacroAssembler : public RegExpMacroAssembler {
                                         BlockLabel* on_not_in_range);
   virtual void CheckBitInTable(const TypedData& table, BlockLabel* on_bit_set);
   virtual void CheckNotBackReference(intptr_t start_reg,
+                                     bool read_backward,
                                      BlockLabel* on_no_match);
   virtual void CheckNotBackReferenceIgnoreCase(intptr_t start_reg,
+                                               bool read_backward,
+                                               bool unicode,
                                                BlockLabel* on_no_match);
   virtual void IfRegisterLT(intptr_t register_index,
                             intptr_t comparand,
@@ -92,7 +95,7 @@ class BytecodeRegExpMacroAssembler : public RegExpMacroAssembler {
 
   virtual IrregexpImplementation Implementation();
   // virtual Handle<HeapObject> GetCode(Handle<String> source);
-  RawTypedData* GetBytecode();
+  TypedDataPtr GetBytecode();
 
   // New
   virtual bool IsClosed() const {
@@ -104,11 +107,11 @@ class BytecodeRegExpMacroAssembler : public RegExpMacroAssembler {
   virtual void PrintBlocks() { UNIMPLEMENTED(); }
   /////
 
-  static RawInstance* Interpret(const RegExp& regexp,
-                                const String& str,
-                                const Smi& start_index,
-                                bool is_sticky,
-                                Zone* zone);
+  static ObjectPtr Interpret(const RegExp& regexp,
+                             const String& str,
+                             const Smi& start_index,
+                             bool is_sticky,
+                             Zone* zone);
 
  private:
   void Expand();
@@ -137,7 +140,6 @@ class BytecodeRegExpMacroAssembler : public RegExpMacroAssembler {
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(BytecodeRegExpMacroAssembler);
 };
-
 
 }  // namespace dart
 

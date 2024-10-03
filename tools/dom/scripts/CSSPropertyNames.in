@@ -2,6 +2,7 @@
 // https://codereview.chromium.org/444453006/ has been committed, in which case
 // it will be pulled in from DEPS!
 // Copied from http://trac.webkit.org/browser/trunk/WebCore/css/CSSPropertyNames.in
+// via. http://web.archive.org/web/20100722083519/http://trac.webkit.org/browser/trunk/WebCore/css/CSSPropertyNames.in
 //
 // CSS property names
 //
@@ -287,7 +288,8 @@ backface-visibility
 -webkit-column-break-inside
 -webkit-column-count
 column-fill
--webkit-column-gap
+column-gap
+-webkit-column-gap alias_for=column-gap
 -webkit-column-rule
 -webkit-column-rule-color
 -webkit-column-rule-style
@@ -320,6 +322,7 @@ flex-wrap
 justify-content
 -webkit-justify-content alias_for=justify-content
 -webkit-font-size-delta
+gap
 grid-auto-columns
 grid-auto-flow
 grid-auto-rows
@@ -386,6 +389,7 @@ perspective-origin
 -webkit-perspective-origin-x
 -webkit-perspective-origin-y
 -webkit-print-color-adjust
+row-gap
 -webkit-rtl-ordering
 -webkit-ruby-position
 -webkit-text-combine

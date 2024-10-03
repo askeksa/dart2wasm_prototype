@@ -1,225 +1,301 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
-
-import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/dart/element/visitor.dart';
-import 'package:analyzer/exception/exception.dart';
+import 'package:analyzer/dart/analysis/analysis_context.dart';
+import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/analysis/session.dart';
 import 'package:analyzer/file_system/file_system.dart';
-import 'package:analyzer/file_system/memory_file_system.dart';
-import 'package:analyzer/source/package_map_resolver.dart';
+import 'package:analyzer/src/dart/analysis/analysis_context_collection.dart';
+import 'package:analyzer/src/dart/analysis/byte_store.dart';
 import 'package:analyzer/src/dart/analysis/driver.dart';
-import 'package:analyzer/src/dart/analysis/file_state.dart';
-import 'package:analyzer/src/generated/engine.dart';
-import 'package:analyzer/src/generated/engine.dart' as engine;
-import 'package:analyzer/src/generated/sdk.dart';
-import 'package:analyzer/src/generated/source_io.dart';
-import 'package:front_end/src/base/performace_logger.dart';
-import 'package:front_end/src/incremental/byte_store.dart';
+import 'package:analyzer/src/dart/analysis/driver_based_analysis_context.dart';
+import 'package:analyzer/src/dart/analysis/experiments.dart';
+import 'package:analyzer/src/generated/engine.dart' show AnalysisEngine;
+import 'package:analyzer/src/test_utilities/mock_sdk.dart';
+import 'package:analyzer/src/test_utilities/package_config_file_builder.dart';
+import 'package:analyzer/src/test_utilities/resource_provider_mixin.dart';
+import 'package:analyzer/src/util/file_paths.dart' as file_paths;
+import 'package:linter/src/rules.dart';
+import 'package:meta/meta.dart';
 
-import 'mock_sdk.dart';
+import 'src/utilities/mock_packages.dart';
 
-/**
- * Finds an [Element] with the given [name].
- */
-Element findChildElement(Element root, String name, [ElementKind kind]) {
-  Element result = null;
-  root.accept(new _ElementVisitorFunctionWrapper((Element element) {
-    if (element.name != name) {
-      return;
-    }
-    if (kind != null && element.kind != kind) {
-      return;
-    }
-    result = element;
-  }));
-  return result;
-}
+class AbstractContextTest with ResourceProviderMixin {
+  static bool _lintRulesAreRegistered = false;
 
-/**
- * A function to be called for every [Element].
- */
-typedef void _ElementVisitorFunction(Element element);
+  final ByteStore _byteStore = MemoryByteStore();
 
-class AbstractContextTest {
-  MemoryResourceProvider provider;
-  DartSdk sdk;
-  Map<String, List<Folder>> packageMap;
-  UriResolver resourceResolver;
+  final Map<String, String> _declaredVariables = {};
+  AnalysisContextCollectionImpl? _analysisContextCollection;
 
-  AnalysisContext _context;
-
-  StringBuffer _logBuffer = new StringBuffer();
-  FileContentOverlay _fileContentOverlay = new FileContentOverlay();
-  AnalysisDriver _driver;
-
-  AnalysisContext get context {
-    if (enableNewAnalysisDriver) {
-      throw new StateError('Should not be used with the new analysis driver.');
-    }
-    return _context;
+  List<AnalysisDriver> get allDrivers {
+    _createAnalysisContexts();
+    return _analysisContextCollection!.contexts.map((e) => e.driver).toList();
   }
 
+  /// The file system specific `/home/test/analysis_options.yaml` path.
+  String get analysisOptionsPath =>
+      convertPath('/home/test/analysis_options.yaml');
+
+  List<String> get collectionIncludedPaths => [workspaceRootPath];
+
+  @deprecated
   AnalysisDriver get driver {
-    if (enableNewAnalysisDriver) {
-      return _driver;
+    throw 0;
+  }
+
+  /// Return a list of the experiments that are to be enabled for tests in this
+  /// class, an empty list if there are no experiments that should be enabled.
+  List<String> get experiments => [
+        EnableString.constructor_tearoffs,
+        EnableString.named_arguments_anywhere,
+        EnableString.super_parameters,
+      ];
+
+  String get latestLanguageVersion =>
+      '${ExperimentStatus.currentVersion.major}.'
+      '${ExperimentStatus.currentVersion.minor}';
+
+  /// The path that is not in [workspaceRootPath], contains external packages.
+  String get packagesRootPath => '/packages';
+
+  Folder get sdkRoot => newFolder('/sdk');
+
+  AnalysisSession get session => contextFor('/home/test').currentSession;
+
+  String? get testPackageLanguageVersion => latestLanguageVersion;
+
+  String get testPackageLibPath => '$testPackageRootPath/lib';
+
+  String get testPackageRootPath => '$workspaceRootPath/test';
+
+  String get testPackageTestPath => '$testPackageRootPath/test';
+
+  /// The file system specific `/home/test/pubspec.yaml` path.
+  String get testPubspecPath => convertPath('/home/test/pubspec.yaml');
+
+  String get workspaceRootPath => '/home';
+
+  void addSource(String path, String content) {
+    newFile(path, content: content);
+  }
+
+  Future<void> analyzeTestPackageFiles() async {
+    var analysisContext = contextFor(testPackageRootPath);
+    var files = analysisContext.contextRoot.analyzedFiles().toList();
+    for (var path in files) {
+      await analysisContext.currentSession.getResolvedUnit(path);
     }
-    throw new StateError('Should be used with the new analysis driver.');
   }
 
-  /**
-   * Return `true` if the new analysis driver should be used by these tests.
-   *
-   * Remove this after there are no subclasses that override it.
-   */
-  bool get enableNewAnalysisDriver => true;
-
-  Source addMetaPackageSource() => addPackageSource(
-      'meta',
-      'meta.dart',
-      r'''
-library meta;
-
-const Required required = const Required();
-
-class Required {
-  final String reason;
-  const Required([this.reason]);
-}
-''');
-
-  Source addPackageSource(String packageName, String filePath, String content) {
-    packageMap[packageName] = [(newFolder('/pubcache/$packageName'))];
-    File file = newFile('/pubcache/$packageName/$filePath', content);
-    return file.createSource();
+  void changeFile(String path) {
+    path = convertPath(path);
+    driverFor(path).changeFile(path);
   }
 
-  Source addSource(String path, String content, [Uri uri]) {
-    File file = newFile(path, content);
-    Source source = file.createSource(uri);
-    if (enableNewAnalysisDriver) {
-      driver.addFile(path);
-      driver.changeFile(path);
-      _fileContentOverlay[path] = content;
+  AnalysisContext contextFor(String path) {
+    return _contextFor(path);
+  }
+
+  /// Create an analysis options file based on the given arguments.
+  void createAnalysisOptionsFile({
+    List<String>? experiments,
+    bool? implicitCasts,
+    List<String>? lints,
+  }) {
+    var buffer = StringBuffer();
+
+    if (experiments != null || implicitCasts != null) {
+      buffer.writeln('analyzer:');
+    }
+
+    if (experiments != null) {
+      buffer.writeln('  enable-experiment:');
+      for (var experiment in experiments) {
+        buffer.writeln('    - $experiment');
+      }
+    }
+
+    if (implicitCasts != null) {
+      buffer.writeln('  strong-mode:');
+      buffer.writeln('    implicit-casts: $implicitCasts');
+    }
+
+    if (lints != null) {
+      buffer.writeln('linter:');
+      buffer.writeln('  rules:');
+      for (var lint in lints) {
+        buffer.writeln('    - $lint');
+      }
+    }
+
+    newFile(analysisOptionsPath, content: buffer.toString());
+  }
+
+  AnalysisDriver driverFor(String path) {
+    return _contextFor(path).driver;
+  }
+
+  /// Return the existing analysis context that should be used to analyze the
+  /// given [path], or throw [StateError] if the [path] is not analyzed in any
+  /// of the created analysis contexts.
+  DriverBasedAnalysisContext getContext(String path) {
+    path = convertPath(path);
+    return _analysisContextCollection!.contextFor(path);
+  }
+
+  /// Return the existing analysis driver that should be used to analyze the
+  /// given [path], or throw [StateError] if the [path] is not analyzed in any
+  /// of the created analysis contexts.
+  AnalysisDriver getDriver(String path) {
+    var context = getContext(path);
+    return context.driver;
+  }
+
+  @override
+  File newFile(String path, {String content = ''}) {
+    if (_analysisContextCollection != null && !path.endsWith('.dart')) {
+      throw StateError('Only dart files can be changed after analysis.');
+    }
+
+    path = convertPath(path);
+    _addAnalyzedFileToDrivers(path);
+    return super.newFile(path, content: content);
+  }
+
+  Future<ResolvedUnitResult> resolveFile(String path) async {
+    path = convertPath(path);
+    var session = contextFor(path).currentSession;
+    return await session.getResolvedUnit(path) as ResolvedUnitResult;
+  }
+
+  @mustCallSuper
+  void setUp() {
+    if (!_lintRulesAreRegistered) {
+      registerLintRules();
+      _lintRulesAreRegistered = true;
+    }
+
+    setupResourceProvider();
+
+    createMockSdk(
+      resourceProvider: resourceProvider,
+      root: sdkRoot,
+    );
+
+    writeTestPackageConfig();
+
+    createAnalysisOptionsFile(
+      experiments: experiments,
+    );
+  }
+
+  void setupResourceProvider() {}
+
+  void tearDown() {
+    AnalysisEngine.instance.clearCaches();
+  }
+
+  /// Update `/home/test/pubspec.yaml` and create the driver.
+  void updateTestPubspecFile(String content) {
+    newFile(testPubspecPath, content: content);
+  }
+
+  void verifyCreatedCollection() {}
+
+  void writePackageConfig(String path, PackageConfigFileBuilder config) {
+    newFile(path, content: config.toContent(toUriStr: toUriStr));
+  }
+
+  void writeTestPackageConfig({
+    PackageConfigFileBuilder? config,
+    String? languageVersion,
+    bool flutter = false,
+    bool meta = false,
+    bool vector_math = false,
+  }) {
+    if (config == null) {
+      config = PackageConfigFileBuilder();
     } else {
-      ChangeSet changeSet = new ChangeSet();
-      changeSet.addedSource(source);
-      context.applyChanges(changeSet);
-      context.setContents(source, content);
+      config = config.copy();
     }
-    return source;
+
+    config.add(
+      name: 'test',
+      rootPath: testPackageRootPath,
+      languageVersion: languageVersion ?? testPackageLanguageVersion,
+    );
+
+    if (meta || flutter) {
+      var libFolder = MockPackages.instance.addMeta(resourceProvider);
+      config.add(name: 'meta', rootPath: libFolder.parent2.path);
+    }
+
+    if (flutter) {
+      {
+        var libFolder = MockPackages.instance.addUI(resourceProvider);
+        config.add(name: 'ui', rootPath: libFolder.parent2.path);
+      }
+      {
+        var libFolder = MockPackages.instance.addFlutter(resourceProvider);
+        config.add(name: 'flutter', rootPath: libFolder.parent2.path);
+      }
+    }
+
+    if (vector_math) {
+      var libFolder = MockPackages.instance.addVectorMath(resourceProvider);
+      config.add(name: 'vector_math', rootPath: libFolder.parent2.path);
+    }
+
+    var path = '$testPackageRootPath/.dart_tool/package_config.json';
+    writePackageConfig(path, config);
   }
 
-  File newFile(String path, [String content]) =>
-      provider.newFile(provider.convertPath(path), content ?? '');
-
-  Folder newFolder(String path) =>
-      provider.newFolder(provider.convertPath(path));
-
-  /**
-   * Performs all analysis tasks in [context].
-   */
-  void performAllAnalysisTasks() {
-    if (enableNewAnalysisDriver) {
-      return;
-    }
-    while (true) {
-      engine.AnalysisResult result = context.performAnalysisTask();
-      if (!result.hasMoreWork) {
-        break;
+  void _addAnalyzedFilesToDrivers() {
+    for (var analysisContext in _analysisContextCollection!.contexts) {
+      for (var path in analysisContext.contextRoot.analyzedFiles()) {
+        if (file_paths.isDart(resourceProvider.pathContext, path)) {
+          analysisContext.driver.addFile(path);
+        }
       }
     }
   }
 
-  void processRequiredPlugins() {
-    AnalysisEngine.instance.processRequiredPlugins();
-  }
-
-  Future<CompilationUnit> resolveLibraryUnit(Source source) async {
-    if (enableNewAnalysisDriver) {
-      return (await driver.getResult(source.fullName))?.unit;
-    } else {
-      return context.resolveCompilationUnit2(source, source);
+  void _addAnalyzedFileToDrivers(String path) {
+    var collection = _analysisContextCollection;
+    if (collection != null) {
+      for (var analysisContext in collection.contexts) {
+        if (analysisContext.contextRoot.isAnalyzed(path)) {
+          analysisContext.driver.addFile(path);
+        }
+      }
     }
   }
 
-  void setUp() {
-    processRequiredPlugins();
-    setupResourceProvider();
-    sdk = new MockSdk(resourceProvider: provider);
-    resourceResolver = new ResourceUriResolver(provider);
-    packageMap = new Map<String, List<Folder>>();
-    PackageMapUriResolver packageResolver =
-        new PackageMapUriResolver(provider, packageMap);
-    SourceFactory sourceFactory = new SourceFactory(
-        [new DartUriResolver(sdk), packageResolver, resourceResolver]);
-    if (enableNewAnalysisDriver) {
-      PerformanceLog log = new PerformanceLog(_logBuffer);
-      AnalysisDriverScheduler scheduler = new AnalysisDriverScheduler(log);
-      _driver = new AnalysisDriver(
-          scheduler,
-          log,
-          provider,
-          new MemoryByteStore(),
-          _fileContentOverlay,
-          null,
-          sourceFactory,
-          new AnalysisOptionsImpl());
-      scheduler.start();
-    } else {
-      _context = AnalysisEngine.instance.createAnalysisContext();
-      context.sourceFactory = sourceFactory;
+  DriverBasedAnalysisContext _contextFor(String path) {
+    _createAnalysisContexts();
+
+    path = convertPath(path);
+    return _analysisContextCollection!.contextFor(path);
+  }
+
+  /// Create all analysis contexts in [collectionIncludedPaths].
+  void _createAnalysisContexts() {
+    if (_analysisContextCollection != null) {
+      return;
     }
-    AnalysisEngine.instance.logger = PrintLogger.instance;
-  }
 
-  void setupResourceProvider() {
-    provider = new MemoryResourceProvider();
-  }
+    _analysisContextCollection = AnalysisContextCollectionImpl(
+      byteStore: _byteStore,
+      declaredVariables: _declaredVariables,
+      enableIndex: true,
+      includedPaths: collectionIncludedPaths.map(convertPath).toList(),
+      resourceProvider: resourceProvider,
+      sdkPath: sdkRoot.path,
+    );
 
-  void tearDown() {
-    _context = null;
-    provider = null;
-    AnalysisEngine.instance.clearCaches();
-    AnalysisEngine.instance.logger = null;
-  }
-}
-
-/**
- * Instances of the class [PrintLogger] print all of the errors.
- */
-class PrintLogger implements Logger {
-  static final Logger instance = new PrintLogger();
-
-  @override
-  void logError(String message, [CaughtException exception]) {
-    print(message);
-    if (exception != null) {
-      print(exception);
-    }
-  }
-
-  @override
-  void logInformation(String message, [CaughtException exception]) {
-    print(message);
-    if (exception != null) {
-      print(exception);
-    }
-  }
-}
-
-/**
- * Wraps the given [_ElementVisitorFunction] into an instance of
- * [engine.GeneralizingElementVisitor].
- */
-class _ElementVisitorFunctionWrapper extends GeneralizingElementVisitor {
-  final _ElementVisitorFunction function;
-  _ElementVisitorFunctionWrapper(this.function);
-  visitElement(Element element) {
-    function(element);
-    super.visitElement(element);
+    _addAnalyzedFilesToDrivers();
+    verifyCreatedCollection();
   }
 }

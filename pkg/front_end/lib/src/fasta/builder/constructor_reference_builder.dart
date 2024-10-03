@@ -4,55 +4,82 @@
 
 library fasta.constructor_reference_builder;
 
-import 'builder.dart'
-    show Builder, ClassBuilder, PrefixBuilder, Scope, TypeBuilder;
+import '../messages.dart' show noLength, templateConstructorNotFound;
 
-import '../messages.dart' show warning;
+import '../identifiers.dart' show QualifiedName, flattenName;
 
-class ConstructorReferenceBuilder extends Builder {
-  final String name;
+import '../scope.dart';
 
-  final List<TypeBuilder> typeArguments;
+import 'builder.dart';
+import 'class_builder.dart';
+import 'library_builder.dart';
+import 'prefix_builder.dart';
+import 'type_alias_builder.dart';
+import 'type_builder.dart';
+
+class ConstructorReferenceBuilder {
+  final int charOffset;
+
+  final Uri fileUri;
+
+  final Object name;
+
+  final List<TypeBuilder>? typeArguments;
 
   /// This is the name of a named constructor. As `bar` in `new Foo<T>.bar()`.
-  final String suffix;
+  final String? suffix;
 
-  Builder target;
+  Builder? target;
 
   ConstructorReferenceBuilder(this.name, this.typeArguments, this.suffix,
-      Builder parent, int charOffset)
-      : super(parent, charOffset, parent.fileUri);
+      Builder parent, this.charOffset)
+      : fileUri = parent.fileUri!;
 
-  String get fullNameForErrors => "$name${suffix == null ? '' : '.$suffix'}";
+  String get fullNameForErrors {
+    return "${flattenName(name, charOffset, fileUri)}"
+        "${suffix == null ? '' : '.$suffix'}";
+  }
 
-  void resolveIn(Scope scope) {
-    int index = name.indexOf(".");
-    Builder builder;
-    if (index == -1) {
-      builder = scope.lookup(name, charOffset, fileUri);
-    } else {
-      String prefix = name.substring(0, index);
-      String middle = name.substring(index + 1);
-      builder = scope.lookup(prefix, charOffset, fileUri);
-      if (builder is PrefixBuilder) {
-        PrefixBuilder prefix = builder;
-        builder = prefix.lookup(middle, charOffset, fileUri);
-      } else if (builder is ClassBuilder) {
-        ClassBuilder cls = builder;
-        builder = cls.findConstructorOrFactory(middle, charOffset, fileUri);
+  void resolveIn(Scope scope, LibraryBuilder accessingLibrary) {
+    final Object name = this.name;
+    Builder? declaration;
+    if (name is QualifiedName) {
+      String prefix = name.qualifier as String;
+      String middle = name.name;
+      declaration = scope.lookup(prefix, charOffset, fileUri);
+      if (declaration is TypeAliasBuilder) {
+        TypeAliasBuilder aliasBuilder = declaration;
+        declaration = aliasBuilder.unaliasDeclaration(typeArguments);
+      }
+      if (declaration is PrefixBuilder) {
+        PrefixBuilder prefix = declaration;
+        declaration = prefix.lookup(middle, name.charOffset, fileUri);
+      } else if (declaration is ClassBuilder) {
+        ClassBuilder cls = declaration;
+        declaration = cls.findConstructorOrFactory(
+            middle, name.charOffset, fileUri, accessingLibrary);
         if (suffix == null) {
-          target = builder;
+          target = declaration;
           return;
         }
       }
+    } else {
+      declaration = scope.lookup(name as String, charOffset, fileUri);
+      if (declaration is TypeAliasBuilder) {
+        TypeAliasBuilder aliasBuilder = declaration;
+        declaration = aliasBuilder.unaliasDeclaration(typeArguments);
+      }
     }
-    if (builder is ClassBuilder) {
-      target =
-          builder.findConstructorOrFactory(suffix ?? "", charOffset, fileUri);
+    if (declaration is ClassBuilder) {
+      target = declaration.findConstructorOrFactory(
+          suffix ?? "", charOffset, fileUri, accessingLibrary);
     }
     if (target == null) {
-      warning(fileUri, charOffset,
-          "Couldn't find constructor '$fullNameForErrors'.");
+      accessingLibrary.addProblem(
+          templateConstructorNotFound.withArguments(fullNameForErrors),
+          charOffset,
+          noLength,
+          fileUri);
     }
   }
 }

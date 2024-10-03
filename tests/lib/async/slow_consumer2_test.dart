@@ -2,7 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-// VMOptions=--old_gen_heap_size=64
+// VMOptions=--old_gen_heap_size=64 --no-background-compilation
 
 library slow_consumer2_test;
 
@@ -20,7 +20,7 @@ class SlowConsumer extends StreamConsumer {
   final int bufferSize;
   final List bufferedData = [];
   int usedBufferSize = 0;
-  int finalCount;
+  late int finalCount;
 
   SlowConsumer(int this.bytesPerSecond, int this.bufferSize);
 
@@ -31,7 +31,8 @@ class SlowConsumer extends StreamConsumer {
   Future addStream(Stream stream) {
     Completer result = new Completer();
     var subscription;
-    subscription = stream.listen((List<int> data) {
+    subscription = stream.listen((dynamic _data) {
+      List<int> data = _data;
       receivedCount += data.length;
       usedBufferSize += data.length;
       bufferedData.add(data);
@@ -65,7 +66,7 @@ class DataProvider {
   final int bytesPerSecond;
   int sentCount = 0;
   int targetCount;
-  StreamController controller;
+  late StreamController controller;
 
   DataProvider(int this.bytesPerSecond, int this.targetCount, this.chunkSize) {
     controller = new StreamController(
@@ -87,7 +88,7 @@ class DataProvider {
       listSize -= sentCount - targetCount;
       sentCount = targetCount;
     }
-    controller.add(new List(listSize));
+    controller.add(List.filled(listSize, -1));
     int ms = listSize * 1000 ~/ bytesPerSecond;
     Duration duration = new Duration(milliseconds: ms);
     if (!controller.isPaused) new Timer(duration, send);

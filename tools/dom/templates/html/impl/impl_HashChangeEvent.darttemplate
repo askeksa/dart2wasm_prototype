@@ -7,21 +7,16 @@
 part of $LIBRARYNAME;
 $(ANNOTATIONS)$(NATIVESPEC)$(CLASS_MODIFIERS)class $CLASSNAME$EXTENDS$IMPLEMENTS {
   factory $CLASSNAME(String type,
-      {bool canBubble: true, bool cancelable: true, String oldUrl,
-      String newUrl}) {
+      {bool canBubble: true, bool cancelable: true, String$NULLABLE oldUrl,
+      String$NULLABLE newUrl}) {
     var options = {
       'canBubble' : canBubble,
       'cancelable' : cancelable,
       'oldURL': oldUrl,
       'newURL': newUrl,
     };
-$if DART2JS
     return JS('HashChangeEvent', 'new HashChangeEvent(#, #)',
         type, convertDartToNative_Dictionary(options));
-$else
-    return _blink.BlinkHashChangeEvent.instance
-        .constructorCallback_2_(type, convertDartToNative_Dictionary(options));
-$endif
   }
 
 $!MEMBERS

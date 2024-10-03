@@ -6,8 +6,7 @@ import 'dart:async';
 import 'dart:html';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
-import 'package:observatory/src/elements/helpers/uris.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/utils.dart';
 
 class SampleBufferControlChangedElement {
@@ -15,11 +14,8 @@ class SampleBufferControlChangedElement {
   SampleBufferControlChangedElement(this.element);
 }
 
-class SampleBufferControlElement extends HtmlElement implements Renderable {
-  static const tag =
-      const Tag<SampleBufferControlElement>('sample-buffer-control');
-
-  RenderingScheduler<SampleBufferControlElement> _r;
+class SampleBufferControlElement extends CustomElement implements Renderable {
+  late RenderingScheduler<SampleBufferControlElement> _r;
 
   Stream<RenderedEvent<SampleBufferControlElement>> get onRendered =>
       _r.onRendered;
@@ -29,12 +25,13 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
   Stream<SampleBufferControlChangedElement> get onTagChange =>
       _onTagChange.stream;
 
-  Stream<M.SampleProfileLoadingProgressEvent> _progressStream;
-  M.SampleProfileLoadingProgress _progress;
-  M.SampleProfileTag _tag;
+  late M.VM _vm;
+  late Stream<M.SampleProfileLoadingProgressEvent> _progressStream;
+  late M.SampleProfileLoadingProgress _progress;
+  late M.SampleProfileTag _tag;
   bool _showTag = false;
   bool _profileVM = false;
-  StreamSubscription _subscription;
+  late StreamSubscription _subscription;
 
   M.SampleProfileLoadingProgress get progress => _progress;
   M.SampleProfileTag get selectedTag => _tag;
@@ -46,17 +43,20 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
   set showTag(bool value) => _showTag = _r.checkAndReact(_showTag, value);
   set profileVM(bool value) => _profileVM = _r.checkAndReact(_profileVM, value);
 
-  factory SampleBufferControlElement(M.SampleProfileLoadingProgress progress,
+  factory SampleBufferControlElement(
+      M.VM vm,
+      M.SampleProfileLoadingProgress progress,
       Stream<M.SampleProfileLoadingProgressEvent> progressStream,
       {M.SampleProfileTag selectedTag: M.SampleProfileTag.none,
       bool showTag: true,
-      RenderingQueue queue}) {
+      RenderingQueue? queue}) {
     assert(progress != null);
     assert(progressStream != null);
     assert(selectedTag != null);
     assert(showTag != null);
-    SampleBufferControlElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    SampleBufferControlElement e = new SampleBufferControlElement.created();
+    e._r = new RenderingScheduler<SampleBufferControlElement>(e, queue: queue);
+    e._vm = vm;
     e._progress = progress;
     e._progressStream = progressStream;
     e._tag = selectedTag;
@@ -64,7 +64,7 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
     return e;
   }
 
-  SampleBufferControlElement.created() : super.created();
+  SampleBufferControlElement.created() : super.created('sample-buffer-control');
 
   @override
   void attached() {
@@ -104,7 +104,7 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
         content.addAll(_createStatusReport());
         break;
     }
-    children = [
+    children = <Element>[
       new DivElement()
         ..classes = ['content-centered-big']
         ..children = content
@@ -116,7 +116,7 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
     return [
       new DivElement()
         ..classes = ['statusBox', 'shadow', 'center']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['statusMessage']
             ..text = message,
@@ -129,21 +129,24 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
     ];
   }
 
-  static List<Element> _createDisabledMessage() {
+  List<Element> _createDisabledMessage() {
     return [
       new DivElement()
         ..classes = ['statusBox' 'shadow' 'center']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
-            ..children = [
+            ..children = <Element>[
               new HeadingElement.h1()..text = 'Profiling is disabled',
               new BRElement(),
               new DivElement()
                 ..innerHtml = 'Perhaps the <b>profile</b> '
                     'flag has been disabled for this VM.',
               new BRElement(),
-              new SpanElement()..text = 'See all ',
-              new AnchorElement(href: Uris.flags())..text = 'vm flags'
+              new ButtonElement()
+                ..text = 'Enable profiler'
+                ..onClick.listen((_) {
+                  _enableProfiler();
+                })
             ]
         ]
     ];
@@ -154,7 +157,7 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
     final loadT = Utils.formatDurationInSeconds(_progress.loadingTime);
     final sampleCount = _progress.profile.sampleCount;
     final refreshT = new DateTime.now();
-    final stackDepth = _progress.profile.stackDepth;
+    final maxStackDepth = _progress.profile.maxStackDepth;
     final sampleRate = _progress.profile.sampleRate.toStringAsFixed(0);
     final timeSpan = _progress.profile.sampleCount == 0
         ? '0s'
@@ -163,7 +166,7 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
     var content = <Element>[
       new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'Refreshed at',
@@ -173,7 +176,7 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
         ],
       new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'Profile contains ',
@@ -183,19 +186,19 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
         ],
       new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'Sampling',
           new DivElement()
             ..classes = ['memberValue']
-            ..text = '$stackDepth stack frames @ ${sampleRate}Hz'
+            ..text = '$maxStackDepth stack frames @ ${sampleRate}Hz'
         ],
     ];
     if (_showTag) {
       content.add(new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'Tag Order',
@@ -214,7 +217,11 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
   List<Element> _createTagSelect() {
     var values = M.SampleProfileTag.values;
     if (!_profileVM) {
-      values = const [M.SampleProfileTag.userOnly, M.SampleProfileTag.none];
+      values = const [
+        M.SampleProfileTag.userOnly,
+        M.SampleProfileTag.vmOnly,
+        M.SampleProfileTag.none
+      ];
     }
     var s;
     return [
@@ -251,6 +258,12 @@ class SampleBufferControlElement extends HtmlElement implements Renderable {
 
   SampleBufferControlChangedElement _toEvent(_) {
     return new SampleBufferControlChangedElement(this);
+  }
+
+  void _enableProfiler() {
+    _vm.enableProfiler().then((_) {
+      _triggerModeChange(_toEvent(null));
+    });
   }
 
   void _triggerModeChange(e) => _onTagChange.add(e);

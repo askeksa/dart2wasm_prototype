@@ -4,7 +4,6 @@
 
 library test.generic_function_typedef;
 
-@MirrorsUsed(targets: "test.generic_function_typedef")
 import 'dart:mirrors';
 
 import 'package:expect/expect.dart';
@@ -13,13 +12,13 @@ import 'generics_helper.dart';
 
 class C<T> {
   makeClosure1() {
-    T closure1(T t) {}
+    T closure1(T t) => t;
     return closure1;
   }
 
   makeClosure2() {
     enclosing() {
-      T closure2(T t) {}
+      T closure2(T t) => t;
       return closure2;
     }
 
@@ -29,11 +28,13 @@ class C<T> {
 }
 
 main() {
-  ClosureMirror closure1 = reflect(new C<String>().makeClosure1());
+  ClosureMirror closure1 =
+      reflect(new C<String>().makeClosure1()) as ClosureMirror;
   Expect.equals(reflectClass(String), closure1.function.returnType);
   Expect.equals(reflectClass(String), closure1.function.parameters[0].type);
 
-  ClosureMirror closure2 = reflect(new C<String>().makeClosure2());
+  ClosureMirror closure2 =
+      reflect(new C<String>().makeClosure2()) as ClosureMirror;
   Expect.equals(reflectClass(String), closure2.function.returnType);
   Expect.equals(reflectClass(String), closure2.function.parameters[0].type);
 }

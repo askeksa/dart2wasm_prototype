@@ -5,9 +5,6 @@
 // Test that the default PRNG does converge towards Pi when doing a Monte Carlo
 // simulation.
 
-// Library tag to allow Dartium to run the test.
-library pi_test;
-
 import "package:expect/expect.dart";
 import 'dart:math';
 
@@ -48,5 +45,5 @@ void main([args]) {
   // Mmmmh, Pie!
   var pie = 4.0 * (inside / (inside + outside));
   print("$pie");
-  Expect.isTrue(((PI - 0.009) < pie) && (pie < (PI + 0.009)));
+  Expect.isTrue(((pi - 0.009) < pie) && (pie < (pi + 0.009)));
 }

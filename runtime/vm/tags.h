@@ -5,7 +5,10 @@
 #ifndef RUNTIME_VM_TAGS_H_
 #define RUNTIME_VM_TAGS_H_
 
+#include "platform/growable_array.h"
 #include "vm/allocation.h"
+#include "vm/os_thread.h"
+#include "vm/thread_stack_resource.h"
 
 namespace dart {
 
@@ -19,15 +22,12 @@ class RuntimeEntry;
   V(VM)       /* Catch all */                                                  \
   V(CompileOptimized)                                                          \
   V(CompileUnoptimized)                                                        \
-  V(CompileClass)                                                              \
-  V(CompileTopLevel)                                                           \
-  V(CompileScanner)                                                            \
-  V(CompileParseFunction)                                                      \
+  V(ClassLoading)                                                              \
   V(CompileParseRegExp)                                                        \
-  V(CompileFlowGraphBuilder)                                                   \
   V(Dart)                                                                      \
   V(GCNewSpace)                                                                \
   V(GCOldSpace)                                                                \
+  V(GCIdle)                                                                    \
   V(Embedder)                                                                  \
   V(Runtime)                                                                   \
   V(Native)
@@ -73,11 +73,10 @@ class VMTag : public AllStatic {
     const char* name;
     uword id;
   };
-  static TagEntry entries_[];
+  static const TagEntry entries_[];
 };
 
-
-class VMTagScope : StackResource {
+class VMTagScope : ThreadStackResource {
  public:
   VMTagScope(Thread* thread, uword tag, bool conditional_set = true);
   ~VMTagScope();
@@ -88,7 +87,6 @@ class VMTagScope : StackResource {
   DISALLOW_ALLOCATION();
   DISALLOW_IMPLICIT_CONSTRUCTORS(VMTagScope);
 };
-
 
 class VMTagCounters {
  public:
@@ -106,7 +104,6 @@ class VMTagCounters {
   int64_t counters_[VMTag::kNumVMTags];
 };
 
-
 class UserTags : public AllStatic {
  public:
   // UserTag id space: [kUserTagIdOffset, kUserTagIdOffset + kMaxUserTags).
@@ -118,8 +115,16 @@ class UserTags : public AllStatic {
     return (tag_id >= kUserTagIdOffset) &&
            (tag_id < kUserTagIdOffset + kMaxUserTags);
   }
-};
+  static void AddStreamableTagName(const char* tag);
+  static void RemoveStreamableTagName(const char* tag);
+  static bool IsTagNameStreamable(const char* tag);
+  static void Init();
+  static void Cleanup();
 
+ private:
+  static Mutex* subscribed_tags_lock_;
+  static MallocGrowableArray<const char*> subscribed_tags_;
+};
 
 }  // namespace dart
 

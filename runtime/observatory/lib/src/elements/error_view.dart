@@ -9,41 +9,33 @@ import 'dart:async';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/nav_bar.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/nav/notify.dart';
 import 'package:observatory/src/elements/nav/top_menu.dart';
-import 'package:observatory/src/elements/view_footer.dart';
 
-class ErrorViewElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<ErrorViewElement>('error-view',
-      dependencies: const [
-        NavTopMenuElement.tag,
-        NavNotifyElement.tag,
-        ViewFooterElement.tag
-      ]);
-
-  RenderingScheduler _r;
+class ErrorViewElement extends CustomElement implements Renderable {
+  late RenderingScheduler<ErrorViewElement> _r;
 
   Stream<RenderedEvent<ErrorViewElement>> get onRendered => _r.onRendered;
 
-  M.Error _error;
-  M.NotificationRepository _notifications;
+  late M.Error _error;
+  late M.NotificationRepository _notifications;
 
   M.Error get error => _error;
 
   factory ErrorViewElement(
       M.NotificationRepository notifications, M.Error error,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(error != null);
     assert(notifications != null);
-    ErrorViewElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    ErrorViewElement e = new ErrorViewElement.created();
+    e._r = new RenderingScheduler<ErrorViewElement>(e, queue: queue);
     e._error = error;
     e._notifications = notifications;
     return e;
   }
 
-  ErrorViewElement.created() : super.created();
+  ErrorViewElement.created() : super.created('error-view');
 
   @override
   void attached() {
@@ -54,31 +46,30 @@ class ErrorViewElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [
-      navBar([
-        new NavTopMenuElement(queue: _r.queue),
-        new NavNotifyElement(_notifications, queue: _r.queue)
+    children = <Element>[
+      navBar(<Element>[
+        new NavTopMenuElement(queue: _r.queue).element,
+        new NavNotifyElement(_notifications, queue: _r.queue).element
       ]),
       new DivElement()
         ..classes = ['content-centered']
-        ..children = [
+        ..children = <Element>[
           new HeadingElement.h1()
             ..text = 'Error: ${_kindToString(_error.kind)}',
           new BRElement(),
           new DivElement()
             ..classes = ['well']
-            ..children = [new PreElement()..text = error.message]
+            ..children = <Element>[new PreElement()..text = error.message]
         ],
-      new ViewFooterElement(queue: _r.queue)
     ];
   }
 
-  static String _kindToString(M.ErrorKind kind) {
+  static String _kindToString(M.ErrorKind? kind) {
     switch (kind) {
       case M.ErrorKind.unhandledException:
         return 'Unhandled Exception';

@@ -49,13 +49,19 @@
  * ## Status: Unstable
  *
  * The dart:mirrors library is unstable and its API might change slightly as a
- * result of user feedback. This library is platform dependent and therefore it
- * has implementations for both dart2js and the Dart VM. Both are under
- * development and may not support all operations yet.
+ * result of user feedback. This library is only supported by the Dart VM and
+ * only available on some platforms.
+ *
+ * {@category VM}
  */
 library dart.mirrors;
 
+import "dart:core";
 import 'dart:async' show Future;
+import "dart:_internal" show Since;
+
+// TODO: Move AbstractClassInstantiationError here when removed from dart:core.
+export "dart:core" show AbstractClassInstantiationError;
 
 /**
  * A [MirrorSystem] is the main interface used to reflect on a set of
@@ -107,6 +113,12 @@ abstract class MirrorSystem {
   TypeMirror get voidType;
 
   /**
+   * A mirror on the [:Never:] type.
+   */
+  @Since("2.8")
+  TypeMirror get neverType;
+
+  /**
    * Returns the name of [symbol].
    *
    * The following text is non-normative:
@@ -128,7 +140,7 @@ abstract class MirrorSystem {
    * Using this method may result in larger output.  If possible, use
    * the const constructor of [Symbol] or symbol literals.
    */
-  external static Symbol getSymbol(String name, [LibraryMirror library]);
+  external static Symbol getSymbol(String name, [LibraryMirror? library]);
 }
 
 /**
@@ -147,7 +159,7 @@ external MirrorSystem currentMirrorSystem();
  * function can only be used to obtain  mirrors on objects of the current
  * isolate.
  */
-external InstanceMirror reflect(Object reflectee);
+external InstanceMirror reflect(dynamic reflectee);
 
 /**
  * Reflects a class declaration.
@@ -173,14 +185,14 @@ external ClassMirror reflectClass(Type key);
  *
  * Optionally takes a list of [typeArguments] for generic classes. If the list
  * is provided, then the [key] must be a generic class type, and the number of
- * the provided type arguments must be equal to the number of type variables 
+ * the provided type arguments must be equal to the number of type variables
  * declared by the class.
  *
  * Note that since one cannot obtain a [Type] object from another isolate, this
  * function can only be used to obtain type mirrors on types of the current
  * isolate.
  */
-external TypeMirror reflectType(Type key, [List<Type> typeArguments]);
+external TypeMirror reflectType(Type key, [List<Type>? typeArguments]);
 
 /**
  * A [Mirror] reflects some Dart language entity.
@@ -217,7 +229,24 @@ abstract class IsolateMirror implements Mirror {
    * 2. the isolate being reflected by this mirror is the same isolate being
    *    reflected by [other].
    */
-  bool operator ==(other);
+  bool operator ==(Object other);
+
+  /**
+   * Loads the library at the given uri into this isolate.
+   *
+   * WARNING: You are strongly encouraged to use Isolate.spawnUri instead when
+   * possible. IsolateMirror.loadUri should only be used when synchronous
+   * communication or shared state with dynamically loaded code is needed.
+   *
+   * If a library with the same canonicalized uri has already been loaded,
+   * the existing library will be returned. (The isolate will not load a new
+   * copy of the library.)
+   *
+   * This behavior is similar to the behavior of an import statement that
+   * appears in the root library, except that the import scope of the root
+   * library is not changed.
+   */
+  Future<LibraryMirror> loadUri(Uri uri);
 }
 
 /**
@@ -272,7 +301,7 @@ abstract class DeclarationMirror implements Mirror {
    * * For a parameter, local variable or local function the owner is the
    *   immediately enclosing function.
    */
-  DeclarationMirror get owner;
+  DeclarationMirror? get owner;
 
   /**
    * Whether this declaration is library private.
@@ -324,7 +353,7 @@ abstract class DeclarationMirror implements Mirror {
    *
    * This operation is optional and may throw an [UnsupportedError].
    */
-  SourceLocation get location;
+  SourceLocation? get location;
 
   /**
    * A list of the metadata associated with this declaration.
@@ -365,8 +394,8 @@ abstract class ObjectMirror implements Mirror {
    * Let *o* be the object reflected by this mirror, let *f* be the simple name
    * of the member denoted by [memberName], let *a1, ..., an* be the elements
    * of [positionalArguments], let *k1, ..., km* be the identifiers denoted by
-   * the elements of [namedArguments.keys], and let *v1, ..., vm* be the
-   * elements of [namedArguments.values]. Then this method will perform the
+   * the elements of [namedArguments].keys, and let *v1, ..., vm* be the
+   * elements of [namedArguments].values. Then this method will perform the
    * method invocation *o.f(a1, ..., an, k1: v1, ..., km: vm)* in a scope that
    * has access to the private members of *o* (if *o* is a class or library) or
    * the private members of the class of *o* (otherwise).
@@ -380,12 +409,8 @@ abstract class ObjectMirror implements Mirror {
    * If the invocation throws an exception *e* (that it does not catch), this
    * method throws *e*.
    */
-  /*
-   * TODO(turnidge): Handle ambiguous names.
-   * TODO(turnidge): Handle optional & named arguments.
-   */
-  InstanceMirror invoke(Symbol memberName, List positionalArguments,
-      [Map<Symbol, dynamic> namedArguments]);
+  InstanceMirror invoke(Symbol memberName, List<dynamic> positionalArguments,
+      [Map<Symbol, dynamic> namedArguments = const <Symbol, dynamic>{}]);
 
   /**
    * Invokes a getter and returns a mirror on the result.
@@ -448,11 +473,10 @@ abstract class ObjectMirror implements Mirror {
    * If the invocation throws an exception *e* (that it does not catch) this
    * method throws *e*.
    */
-  /* TODO(turnidge): Handle ambiguous names.*/
-  InstanceMirror setField(Symbol fieldName, Object value);
+  InstanceMirror setField(Symbol fieldName, dynamic value);
 
   /**
-   * Performs [invocation] on [reflectee].
+   * Performs [invocation] on the reflectee of this [ObjectMirror].
    *
    * Equivalent to
    *
@@ -460,7 +484,7 @@ abstract class ObjectMirror implements Mirror {
    *       return this.getField(invocation.memberName).reflectee;
    *     } else if (invocation.isSetter) {
    *       return this.setField(invocation.memberName,
-   *                            invocation.positionArguments[0]).reflectee;
+   *                            invocation.positionalArguments[0]).reflectee;
    *     } else {
    *       return this.invoke(invocation.memberName,
    *                          invocation.positionalArguments,
@@ -508,7 +532,7 @@ abstract class InstanceMirror implements ObjectMirror {
    * If you access [reflectee] when [hasReflectee] is false, an
    * exception is thrown.
    */
-  get reflectee;
+  dynamic get reflectee;
 
   /**
    * Whether this mirror is equal to [other].
@@ -524,7 +548,7 @@ abstract class InstanceMirror implements ObjectMirror {
    *    b. the remote objects reflected by this mirror and by [other] are
    *    identical.
    */
-  bool operator ==(other);
+  bool operator ==(Object other);
 }
 
 /**
@@ -561,8 +585,8 @@ abstract class ClosureMirror implements InstanceMirror {
    * Let *f* be the closure reflected by this mirror,
    * let *a1, ..., an* be the elements of [positionalArguments],
    * let *k1, ..., km* be the identifiers denoted by the elements of
-   * [namedArguments.keys],
-   * and let *v1, ..., vm* be the elements of [namedArguments.values].
+   * [namedArguments].keys,
+   * and let *v1, ..., vm* be the elements of [namedArguments].values.
    *
    * Then this method will perform the method invocation
    * *f(a1, ..., an, k1: v1, ..., km: vm)*.
@@ -576,8 +600,8 @@ abstract class ClosureMirror implements InstanceMirror {
    * If the invocation throws an exception *e* (that it does not catch), this
    * method throws *e*.
    */
-  InstanceMirror apply(List positionalArguments,
-      [Map<Symbol, dynamic> namedArguments]);
+  InstanceMirror apply(List<dynamic> positionalArguments,
+      [Map<Symbol, dynamic> namedArguments = const <Symbol, dynamic>{}]);
 }
 
 /**
@@ -609,7 +633,7 @@ abstract class LibraryMirror implements DeclarationMirror, ObjectMirror {
    * 2. The library being reflected by this mirror and the library being
    *    reflected by [other] are the same library in the same isolate.
    */
-  bool operator ==(other);
+  bool operator ==(Object other);
 
   /**
    * Returns a list of the imports and exports in this library;
@@ -635,17 +659,17 @@ abstract class LibraryDependencyMirror implements Mirror {
 
   /// Returns the library mirror of the library that is imported or exported,
   /// or null if the library is not loaded.
-  LibraryMirror get targetLibrary;
+  LibraryMirror? get targetLibrary;
 
   /// Returns the prefix if this is a prefixed import and `null` otherwise.
-  Symbol get prefix;
+  Symbol? get prefix;
 
   /// Returns the list of show/hide combinators on the import/export
   /// declaration.
   List<CombinatorMirror> get combinators;
 
   /// Returns the source location for this import/export declaration.
-  SourceLocation get location;
+  SourceLocation? get location;
 
   List<InstanceMirror> get metadata;
 
@@ -760,7 +784,7 @@ abstract class ClassMirror implements TypeMirror, ObjectMirror {
    *
    * If this type is [:Object:], the superclass will be null.
    */
-  ClassMirror get superclass;
+  ClassMirror? get superclass;
 
   /**
    * A list of mirrors on the superinterfaces of the reflectee.
@@ -820,14 +844,9 @@ abstract class ClassMirror implements TypeMirror, ObjectMirror {
    *
    * If this class is the result of a mixin application of the form S with M,
    * returns a class mirror on M. Otherwise returns a class mirror on
-   * [reflectee].
+   * the reflectee.
    */
   ClassMirror get mixin;
-
-  // TODO(ahe): What about:
-  // /// Finds the instance member named [name] declared or inherited in the
-  // /// reflected class.
-  // DeclarationMirror instanceLookup(Symbol name);
 
   /**
    * Invokes the named constructor and returns a mirror on the result.
@@ -835,8 +854,8 @@ abstract class ClassMirror implements TypeMirror, ObjectMirror {
    * Let *c* be the class reflected by this mirror,
    * let *a1, ..., an* be the elements of [positionalArguments],
    * let *k1, ..., km* be the identifiers denoted by the elements of
-   * [namedArguments.keys],
-   * and let *v1, ..., vm* be the elements of [namedArguments.values].
+   * [namedArguments].keys,
+   * and let *v1, ..., vm* be the elements of [namedArguments].values.
    *
    * If [constructorName] was created from the empty string, then this method
    * will execute the instance creation expression
@@ -857,8 +876,9 @@ abstract class ClassMirror implements TypeMirror, ObjectMirror {
    * * If evaluating the expression throws an exception *e* (that it does not
    *   catch), this method throws *e*.
    */
-  InstanceMirror newInstance(Symbol constructorName, List positionalArguments,
-      [Map<Symbol, dynamic> namedArguments]);
+  InstanceMirror newInstance(
+      Symbol constructorName, List<dynamic> positionalArguments,
+      [Map<Symbol, dynamic> namedArguments = const <Symbol, dynamic>{}]);
 
   /**
    * Whether this mirror is equal to [other].
@@ -871,7 +891,7 @@ abstract class ClassMirror implements TypeMirror, ObjectMirror {
    * Note that if the reflected class is an invocation of a generic class, 2.
    * implies that the reflected class and [other] have equal type arguments.
    */
-  bool operator ==(other);
+  bool operator ==(Object other);
 
   /**
    * Returns whether the class denoted by the receiver is a subclass of the
@@ -931,7 +951,7 @@ abstract class TypeVariableMirror extends TypeMirror {
    * 1. [other] is a mirror of the same kind, and
    * 2. [:simpleName == other.simpleName:] and [:owner == other.owner:].
    */
-  bool operator ==(other);
+  bool operator ==(Object other);
 }
 
 /**
@@ -962,7 +982,7 @@ abstract class MethodMirror implements DeclarationMirror {
   /**
    * The source code for the reflectee, if available. Otherwise null.
    */
-  String get source;
+  String? get source;
 
   /**
    * A list of mirrors on the parameters for the reflectee.
@@ -1052,6 +1072,11 @@ abstract class MethodMirror implements DeclarationMirror {
   bool get isFactoryConstructor;
 
   /**
+   * Is the reflectee an extension method?
+   */
+  bool get isExtensionMember;
+
+  /**
    * Whether this mirror is equal to [other].
    *
    * The equality holds if and only if
@@ -1059,7 +1084,7 @@ abstract class MethodMirror implements DeclarationMirror {
    * 1. [other] is a mirror of the same kind, and
    * 2. [:simpleName == other.simpleName:] and [:owner == other.owner:].
    */
-  bool operator ==(other);
+  bool operator ==(Object other);
 }
 
 /**
@@ -1093,6 +1118,11 @@ abstract class VariableMirror implements DeclarationMirror {
   bool get isConst;
 
   /**
+   * Is the reflectee an extension member?
+   */
+  bool get isExtensionMember;
+
+  /**
    * Whether this mirror is equal to [other].
    *
    * The equality holds if and only if
@@ -1100,7 +1130,7 @@ abstract class VariableMirror implements DeclarationMirror {
    * 1. [other] is a mirror of the same kind, and
    * 2. [:simpleName == other.simpleName:] and [:owner == other.owner:].
    */
-  bool operator ==(other);
+  bool operator ==(Object other);
 }
 
 /**
@@ -1140,7 +1170,7 @@ abstract class ParameterMirror implements VariableMirror {
    *
    * Returns `null` for a required parameter.
    */
-  InstanceMirror get defaultValue;
+  InstanceMirror? get defaultValue;
 }
 
 /**
@@ -1239,6 +1269,7 @@ class Comment {
  * will ensure that the target `Bar` from the current library and from library
  * `foo` is available for reflection. See also [override].
  */
+@Deprecated("No longer has any effect. Will be removed in a later release.")
 class MirrorsUsed {
   // Note: the fields of this class are untyped.  This is because the most
   // convenient way to specify symbols today is using a single string. In

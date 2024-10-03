@@ -4,54 +4,90 @@
 
 library fasta.mixin_application_builder;
 
-import '../errors.dart' show internalError;
+import 'package:kernel/ast.dart' show InterfaceType, Supertype, TypedefType;
 
-import 'builder.dart'
-    show Scope, TypeBuilder, TypeDeclarationBuilder, TypeVariableBuilder;
+import '../problems.dart' show unsupported;
+import '../source/source_library_builder.dart';
 
-abstract class MixinApplicationBuilder<T extends TypeBuilder>
-    extends TypeBuilder {
-  final T supertype;
-  final List<T> mixins;
+import 'library_builder.dart';
+import 'named_type_builder.dart';
+import 'nullability_builder.dart';
+import 'type_builder.dart';
+import 'type_variable_builder.dart';
+
+class MixinApplicationBuilder extends TypeBuilder {
+  final TypeBuilder? supertype;
+  final List<TypeBuilder> mixins;
+  @override
+  final Uri fileUri;
+  @override
+  final int charOffset;
+  Supertype? builtType;
+
+  List<TypeVariableBuilder>? typeVariables;
 
   MixinApplicationBuilder(
-      this.supertype, this.mixins, int charOffset, Uri fileUri)
-      : super(charOffset, fileUri);
+      this.supertype, this.mixins, this.fileUri, this.charOffset);
 
-  void set typeVariables(List<TypeVariableBuilder> variables);
+  @override
+  String? get name => null;
 
-  /// If this mixin application uses type variables, it needs a unique name
-  /// based on its subclass. If this name is provided, the name will be
-  /// `name^mixin`, otherwise it'll be `superclass&mixin`.
-  //
-  // TODO(ahe): This is to reduce diff against dartk. Consider if this is
-  // necessary.
-  void set subclassName(String value);
-
-  String get name => null;
-
-  void resolveIn(Scope scope) {
-    supertype.resolveIn(scope);
-    for (T t in mixins) {
-      t.resolveIn(scope);
-    }
+  @override
+  NullabilityBuilder get nullabilityBuilder {
+    return unsupported("nullabilityBuilder", -1, null);
   }
 
-  void bind(TypeDeclarationBuilder builder) {
-    internalError("Internal error: can't bind a mixin application.");
-  }
-
+  @override
   String get debugName => "MixinApplicationBuilder";
 
+  @override
+  bool get isVoidType => false;
+
+  @override
   StringBuffer printOn(StringBuffer buffer) {
     buffer.write(supertype);
     buffer.write(" with ");
     bool first = true;
-    for (T t in mixins) {
+    for (TypeBuilder t in mixins) {
       if (!first) buffer.write(", ");
       first = false;
       t.printOn(buffer);
     }
     return buffer;
+  }
+
+  @override
+  InterfaceType build(LibraryBuilder library, {TypedefType? origin}) {
+    int charOffset = -1; // TODO(ahe): Provide these.
+    Uri? fileUri = null; // TODO(ahe): Provide these.
+    return unsupported("build", charOffset, fileUri);
+  }
+
+  @override
+  Supertype buildSupertype(
+      LibraryBuilder library, int charOffset, Uri fileUri) {
+    return unsupported("buildSupertype", charOffset, fileUri);
+  }
+
+  @override
+  Supertype buildMixedInType(
+      LibraryBuilder library, int charOffset, Uri fileUri) {
+    return unsupported("buildMixedInType", charOffset, fileUri);
+  }
+
+  @override
+  MixinApplicationBuilder withNullabilityBuilder(
+      NullabilityBuilder nullabilityBuilder) {
+    return unsupported("withNullabilityBuilder", -1, null);
+  }
+
+  @override
+  MixinApplicationBuilder clone(
+      List<NamedTypeBuilder> newTypes,
+      SourceLibraryBuilder contextLibrary,
+      TypeParameterScopeBuilder contextDeclaration) {
+    int charOffset = -1; // TODO(dmitryas): Provide these.
+    Uri? fileUri = null; // TODO(dmitryas): Provide these.
+    return unsupported("clone", charOffset, fileUri);
   }
 }

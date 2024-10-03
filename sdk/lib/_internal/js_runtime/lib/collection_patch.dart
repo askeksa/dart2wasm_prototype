@@ -7,25 +7,25 @@ import 'dart:_foreign_helper' show JS;
 import 'dart:_js_helper'
     show
         fillLiteralMap,
+        fillLiteralSet,
         InternalMap,
-        NoInline,
-        NoSideEffects,
-        NoThrows,
         patch,
         JsLinkedHashMap,
         LinkedHashMapCell,
         LinkedHashMapKeyIterable,
         LinkedHashMapKeyIterator;
 
-const _USE_ES6_MAPS = const bool.fromEnvironment("dart2js.use.es6.maps");
+import 'dart:_internal' hide Symbol;
+
+const int _mask30 = 0x3fffffff; // Low 30 bits.
 
 @patch
 class HashMap<K, V> {
   @patch
   factory HashMap(
-      {bool equals(K key1, K key2),
-      int hashCode(K key),
-      bool isValidKey(potentialKey)}) {
+      {bool equals(K key1, K key2)?,
+      int hashCode(K key)?,
+      bool isValidKey(potentialKey)?}) {
     if (isValidKey == null) {
       if (hashCode == null) {
         if (equals == null) {
@@ -56,7 +56,7 @@ class HashMap<K, V> {
   factory HashMap.identity() = _IdentityHashMap<K, V>;
 }
 
-class _HashMap<K, V> implements HashMap<K, V> {
+class _HashMap<K, V> extends MapBase<K, V> implements HashMap<K, V> {
   int _length = 0;
 
   // The hash map contents are divided into three parts: one part for
@@ -75,7 +75,7 @@ class _HashMap<K, V> implements HashMap<K, V> {
   // list of all the keys. We cache that on the instance and clear the
   // the cache whenever the key set changes. This is also used to
   // guard against concurrent modifications.
-  List _keys;
+  List? _keys;
 
   _HashMap();
 
@@ -88,10 +88,10 @@ class _HashMap<K, V> implements HashMap<K, V> {
   }
 
   Iterable<V> get values {
-    return new MappedIterable<K, V>(keys, (each) => this[each]);
+    return new MappedIterable<K, V>(keys, (each) => this[each] as V);
   }
 
-  bool containsKey(Object key) {
+  bool containsKey(Object? key) {
     if (_isStringKey(key)) {
       var strings = _strings;
       return (strings == null) ? false : _hasTableEntry(strings, key);
@@ -103,14 +103,14 @@ class _HashMap<K, V> implements HashMap<K, V> {
     }
   }
 
-  bool _containsKey(Object key) {
+  bool _containsKey(Object? key) {
     var rest = _rest;
     if (rest == null) return false;
     var bucket = _getBucket(rest, key);
     return _findBucketIndex(bucket, key) >= 0;
   }
 
-  bool containsValue(Object value) {
+  bool containsValue(Object? value) {
     return _computeKeys().any((each) => this[each] == value);
   }
 
@@ -120,24 +120,24 @@ class _HashMap<K, V> implements HashMap<K, V> {
     });
   }
 
-  V operator [](Object key) {
+  V? operator [](Object? key) {
     if (_isStringKey(key)) {
       var strings = _strings;
-      return (strings == null) ? null : _getTableEntry(strings, key);
+      return JS('', '#', strings == null ? null : _getTableEntry(strings, key));
     } else if (_isNumericKey(key)) {
       var nums = _nums;
-      return (nums == null) ? null : _getTableEntry(nums, key);
+      return JS('', '#', nums == null ? null : _getTableEntry(nums, key));
     } else {
       return _get(key);
     }
   }
 
-  V _get(Object key) {
+  V? _get(Object? key) {
     var rest = _rest;
     if (rest == null) return null;
     var bucket = _getBucket(rest, key);
     int index = _findBucketIndex(bucket, key);
-    return (index < 0) ? null : JS('var', '#[#]', bucket, index + 1);
+    return (index < 0) ? null : JS('', '#[#]', bucket, index + 1);
   }
 
   void operator []=(K key, V value) {
@@ -176,13 +176,13 @@ class _HashMap<K, V> implements HashMap<K, V> {
   }
 
   V putIfAbsent(K key, V ifAbsent()) {
-    if (containsKey(key)) return this[key];
+    if (containsKey(key)) return this[key] as V;
     V value = ifAbsent();
     this[key] = value;
     return value;
   }
 
-  V remove(Object key) {
+  V? remove(Object? key) {
     if (_isStringKey(key)) {
       return _removeHashTableEntry(_strings, key);
     } else if (_isNumericKey(key)) {
@@ -192,19 +192,22 @@ class _HashMap<K, V> implements HashMap<K, V> {
     }
   }
 
-  V _remove(Object key) {
+  V? _remove(Object? key) {
     var rest = _rest;
     if (rest == null) return null;
-    var bucket = _getBucket(rest, key);
+    var hash = _computeHashCode(key);
+    var bucket = JS('var', '#[#]', rest, hash);
     int index = _findBucketIndex(bucket, key);
     if (index < 0) return null;
-    // TODO(kasperl): Consider getting rid of the bucket list when
-    // the length reaches zero.
     _length--;
     _keys = null;
-    // Use splice to remove the two [key, value] elements at the
-    // index and return the value.
-    return JS('var', '#.splice(#, 2)[1]', bucket, index);
+    // Use splice to remove the two [key, value] elements at the index and
+    // return the value.
+    V result = JS('', '#.splice(#, 2)[1]', bucket, index);
+    if (0 == JS('int', '#.length', bucket)) {
+      _deleteTableEntry(rest, hash);
+    }
+    return result;
   }
 
   void clear() {
@@ -218,7 +221,7 @@ class _HashMap<K, V> implements HashMap<K, V> {
     List keys = _computeKeys();
     for (int i = 0, length = keys.length; i < length; i++) {
       var key = JS('var', '#[#]', keys, i);
-      action(key, this[key]);
+      action(key, this[key] as V);
       if (JS('bool', '# !== #', keys, _keys)) {
         throw new ConcurrentModificationError(this);
       }
@@ -226,8 +229,9 @@ class _HashMap<K, V> implements HashMap<K, V> {
   }
 
   List _computeKeys() {
-    if (_keys != null) return _keys;
-    List result = new List(_length);
+    var result = _keys;
+    if (result != null) return result;
+    result = List.filled(_length, null);
     int index = 0;
 
     // Add all string keys to the list.
@@ -273,7 +277,8 @@ class _HashMap<K, V> implements HashMap<K, V> {
       }
     }
     assert(index == _length);
-    return _keys = result;
+    _keys = result;
+    return result;
   }
 
   void _addHashTableEntry(var table, K key, V value) {
@@ -284,7 +289,7 @@ class _HashMap<K, V> implements HashMap<K, V> {
     _setTableEntry(table, key, value);
   }
 
-  V _removeHashTableEntry(var table, Object key) {
+  V? _removeHashTableEntry(var table, Object? key) {
     if (table != null && _hasTableEntry(table, key)) {
       V value = _getTableEntry(table, key);
       _deleteTableEntry(table, key);
@@ -304,14 +309,14 @@ class _HashMap<K, V> implements HashMap<K, V> {
     // Only treat unsigned 30-bit integers as numeric keys. This way,
     // we avoid converting them to strings when we use them as keys in
     // the JavaScript hash table object.
-    return key is num && JS('bool', '(# & 0x3ffffff) === #', key, key);
+    return key is num && JS('bool', '(# & #) === #', key, _mask30, key);
   }
 
   int _computeHashCode(var key) {
     // We force the hash codes to be unsigned 30-bit integers to avoid
     // issues with problematic keys like '__proto__'. Another option
     // would be to throw an exception if the hash code isn't a number.
-    return JS('int', '# & 0x3ffffff', key.hashCode);
+    return JS('int', '# & #', key.hashCode, _mask30);
   }
 
   static bool _hasTableEntry(var table, var key) {
@@ -347,7 +352,7 @@ class _HashMap<K, V> implements HashMap<K, V> {
     JS('void', 'delete #[#]', table, key);
   }
 
-  List _getBucket(var table, var key) {
+  List? _getBucket(var table, var key) {
     var hash = _computeHashCode(key);
     return JS('var', '#[#]', table, hash);
   }
@@ -380,7 +385,7 @@ class _IdentityHashMap<K, V> extends _HashMap<K, V> {
     // We force the hash codes to be unsigned 30-bit integers to avoid
     // issues with problematic keys like '__proto__'. Another option
     // would be to throw an exception if the hash code isn't a number.
-    return JS('int', '# & 0x3ffffff', identityHashCode(key));
+    return JS('int', '# & #', identityHashCode(key), _mask30);
   }
 
   int _findBucketIndex(var bucket, var key) {
@@ -398,10 +403,10 @@ class _CustomHashMap<K, V> extends _HashMap<K, V> {
   final _Hasher<K> _hashCode;
   final _Predicate _validKey;
 
-  _CustomHashMap(this._equals, this._hashCode, bool validKey(potentialKey))
+  _CustomHashMap(this._equals, this._hashCode, bool validKey(potentialKey)?)
       : _validKey = (validKey != null) ? validKey : ((v) => v is K);
 
-  V operator [](Object key) {
+  V? operator [](Object? key) {
     if (!_validKey(key)) return null;
     return super._get(key);
   }
@@ -410,12 +415,12 @@ class _CustomHashMap<K, V> extends _HashMap<K, V> {
     super._set(key, value);
   }
 
-  bool containsKey(Object key) {
+  bool containsKey(Object? key) {
     if (!_validKey(key)) return false;
     return super._containsKey(key);
   }
 
-  V remove(Object key) {
+  V? remove(Object? key) {
     if (!_validKey(key)) return null;
     return super._remove(key);
   }
@@ -424,7 +429,7 @@ class _CustomHashMap<K, V> extends _HashMap<K, V> {
     // We force the hash codes to be unsigned 30-bit integers to avoid
     // issues with problematic keys like '__proto__'. Another option
     // would be to throw an exception if the hash code isn't a number.
-    return JS('int', '# & 0x3ffffff', _hashCode(key));
+    return JS('int', '# & #', _hashCode(key), _mask30);
   }
 
   int _findBucketIndex(var bucket, var key) {
@@ -435,12 +440,10 @@ class _CustomHashMap<K, V> extends _HashMap<K, V> {
     }
     return -1;
   }
-
-  String toString() => Maps.mapToString(this);
 }
 
 class _HashMapKeyIterable<E> extends EfficientLengthIterable<E> {
-  final _map;
+  final _HashMap _map;
   _HashMapKeyIterable(this._map);
 
   int get length => _map._length;
@@ -450,7 +453,7 @@ class _HashMapKeyIterable<E> extends EfficientLengthIterable<E> {
     return new _HashMapKeyIterator<E>(_map, _map._computeKeys());
   }
 
-  bool contains(Object element) {
+  bool contains(Object? element) {
     return _map.containsKey(element);
   }
 
@@ -466,14 +469,14 @@ class _HashMapKeyIterable<E> extends EfficientLengthIterable<E> {
 }
 
 class _HashMapKeyIterator<E> implements Iterator<E> {
-  final _map;
+  final _HashMap _map;
   final List _keys;
   int _offset = 0;
-  E _current;
+  E? _current;
 
   _HashMapKeyIterator(this._map, this._keys);
 
-  E get current => _current;
+  E get current => _current as E;
 
   bool moveNext() {
     var keys = _keys;
@@ -498,19 +501,19 @@ class _HashMapKeyIterator<E> implements Iterator<E> {
 class LinkedHashMap<K, V> {
   @patch
   factory LinkedHashMap(
-      {bool equals(K key1, K key2),
-      int hashCode(K key),
-      bool isValidKey(potentialKey)}) {
+      {bool equals(K key1, K key2)?,
+      int hashCode(K key)?,
+      bool isValidKey(potentialKey)?}) {
     if (isValidKey == null) {
       if (hashCode == null) {
         if (equals == null) {
-          return new JsLinkedHashMap<K, V>.es6();
+          return new JsLinkedHashMap<K, V>();
         }
         hashCode = _defaultHashCode;
       } else {
         if (identical(identityHashCode, hashCode) &&
             identical(identical, equals)) {
-          return new _LinkedIdentityHashMap<K, V>.es6();
+          return new _LinkedIdentityHashMap<K, V>();
         }
         if (equals == null) {
           equals = _defaultEquals;
@@ -528,55 +531,44 @@ class LinkedHashMap<K, V> {
   }
 
   @patch
-  factory LinkedHashMap.identity() = _LinkedIdentityHashMap<K, V>.es6;
+  factory LinkedHashMap.identity() = _LinkedIdentityHashMap<K, V>;
 
   // Private factory constructor called by generated code for map literals.
-  @NoInline()
+  @pragma('dart2js:noInline')
   factory LinkedHashMap._literal(List keyValuePairs) {
-    return fillLiteralMap(keyValuePairs, new JsLinkedHashMap<K, V>.es6());
+    return fillLiteralMap(keyValuePairs, new JsLinkedHashMap<K, V>());
   }
 
   // Private factory constructor called by generated code for map literals.
-  @NoThrows()
-  @NoInline()
-  @NoSideEffects()
+  @pragma('dart2js:noThrows')
+  @pragma('dart2js:noInline')
+  @pragma('dart2js:noSideEffects')
   factory LinkedHashMap._empty() {
-    return new JsLinkedHashMap<K, V>.es6();
+    return new JsLinkedHashMap<K, V>();
   }
 
   // Private factory static function called by generated code for map literals.
   // This version is for map literals without type parameters.
-  @NoThrows()
-  @NoInline()
-  @NoSideEffects()
+  @pragma('dart2js:noThrows')
+  @pragma('dart2js:noInline')
+  @pragma('dart2js:noSideEffects')
   static _makeEmpty() => new JsLinkedHashMap();
 
   // Private factory static function called by generated code for map literals.
   // This version is for map literals without type parameters.
-  @NoInline()
+  @pragma('dart2js:noInline')
   static _makeLiteral(keyValuePairs) =>
       fillLiteralMap(keyValuePairs, new JsLinkedHashMap());
 }
 
 class _LinkedIdentityHashMap<K, V> extends JsLinkedHashMap<K, V> {
-  static bool get _supportsEs6Maps {
-    return JS('returns:bool;depends:none;effects:none;throws:never;gvn:true',
-        'typeof Map != "undefined"');
-  }
-
-  factory _LinkedIdentityHashMap.es6() {
-    return (_USE_ES6_MAPS && _LinkedIdentityHashMap._supportsEs6Maps)
-        ? new _Es6LinkedIdentityHashMap<K, V>()
-        : new _LinkedIdentityHashMap<K, V>();
-  }
-
   _LinkedIdentityHashMap();
 
   int internalComputeHashCode(var key) {
     // We force the hash codes to be unsigned 30-bit integers to avoid
     // issues with problematic keys like '__proto__'. Another option
     // would be to throw an exception if the hash code isn't a number.
-    return JS('int', '# & 0x3ffffff', identityHashCode(key));
+    return JS('int', '# & #', identityHashCode(key), _mask30);
   }
 
   int internalFindBucketIndex(var bucket, var key) {
@@ -590,164 +582,6 @@ class _LinkedIdentityHashMap<K, V> extends JsLinkedHashMap<K, V> {
   }
 }
 
-class _Es6LinkedIdentityHashMap<K, V> extends _LinkedIdentityHashMap<K, V>
-    implements InternalMap {
-  final _map;
-  int _modifications = 0;
-
-  _Es6LinkedIdentityHashMap() : _map = JS('var', 'new Map()');
-
-  int get length => JS('int', '#.size', _map);
-  bool get isEmpty => length == 0;
-  bool get isNotEmpty => !isEmpty;
-
-  Iterable<K> get keys => new _Es6MapIterable<K>(this, true);
-
-  Iterable<V> get values => new _Es6MapIterable<V>(this, false);
-
-  bool containsKey(Object key) {
-    return JS('bool', '#.has(#)', _map, key);
-  }
-
-  bool containsValue(Object value) {
-    return values.any((each) => each == value);
-  }
-
-  void addAll(Map<K, V> other) {
-    other.forEach((K key, V value) {
-      this[key] = value;
-    });
-  }
-
-  V operator [](Object key) {
-    return JS('var', '#.get(#)', _map, key);
-  }
-
-  void operator []=(K key, V value) {
-    JS('var', '#.set(#, #)', _map, key, value);
-    _modified();
-  }
-
-  V putIfAbsent(K key, V ifAbsent()) {
-    if (containsKey(key)) return this[key];
-    V value = ifAbsent();
-    this[key] = value;
-    return value;
-  }
-
-  V remove(Object key) {
-    V value = this[key];
-    JS('bool', '#.delete(#)', _map, key);
-    _modified();
-    return value;
-  }
-
-  void clear() {
-    JS('void', '#.clear()', _map);
-    _modified();
-  }
-
-  void forEach(void action(K key, V value)) {
-    var jsEntries = JS('var', '#.entries()', _map);
-    int modifications = _modifications;
-    while (true) {
-      var next = JS('var', '#.next()', jsEntries);
-      bool done = JS('bool', '#.done', next);
-      if (done) break;
-      var entry = JS('var', '#.value', next);
-      var key = JS('var', '#[0]', entry);
-      var value = JS('var', '#[1]', entry);
-      action(key, value);
-      if (modifications != _modifications) {
-        throw new ConcurrentModificationError(this);
-      }
-    }
-  }
-
-  void _modified() {
-    // Value cycles after 2^30 modifications so that modification counts are
-    // always unboxed (Smi) values. Modification detection will be missed if you
-    // make exactly some multiple of 2^30 modifications between advances of an
-    // iterator.
-    _modifications = (_modifications + 1) & 0x3ffffff;
-  }
-
-  String toString() => Maps.mapToString(this);
-}
-
-class _Es6MapIterable<E> extends EfficientLengthIterable<E> {
-  final _map;
-  final bool _isKeys;
-
-  _Es6MapIterable(this._map, this._isKeys);
-
-  int get length => _map.length;
-  bool get isEmpty => _map.isEmpty;
-
-  Iterator<E> get iterator =>
-      new _Es6MapIterator<E>(_map, _map._modifications, _isKeys);
-
-  bool contains(Object element) => _map.containsKey(element);
-
-  void forEach(void f(E element)) {
-    var jsIterator;
-    if (_isKeys) {
-      jsIterator = JS('var', '#.keys()', _map._map);
-    } else {
-      jsIterator = JS('var', '#.values()', _map._map);
-    }
-    int modifications = _map._modifications;
-    while (true) {
-      var next = JS('var', '#.next()', jsIterator);
-      bool done = JS('bool', '#.done', next);
-      if (done) break;
-      var value = JS('var', '#.value', next);
-      f(value);
-      if (modifications != _map._modifications) {
-        throw new ConcurrentModificationError(_map);
-      }
-    }
-  }
-}
-
-class _Es6MapIterator<E> implements Iterator<E> {
-  final _map;
-  final int _modifications;
-  final bool _isKeys;
-  var _jsIterator;
-  var _next;
-  E _current;
-  bool _done;
-
-  _Es6MapIterator(this._map, this._modifications, this._isKeys) {
-    if (_isKeys) {
-      _jsIterator = JS('var', '#.keys()', _map._map);
-    } else {
-      _jsIterator = JS('var', '#.values()', _map._map);
-    }
-    _done = false;
-  }
-
-  E get current => _current;
-
-  bool moveNext() {
-    if (_modifications != _map._modifications) {
-      throw new ConcurrentModificationError(_map);
-    }
-    if (_done) return false;
-    _next = JS('var', '#.next()', _jsIterator);
-    bool done = JS('bool', '#.done', _next);
-    if (done) {
-      _current = null;
-      _done = true;
-      return false;
-    } else {
-      _current = JS('var', '#.value', _next);
-      return true;
-    }
-  }
-}
-
 // TODO(floitsch): use ES6 maps when available.
 class _LinkedCustomHashMap<K, V> extends JsLinkedHashMap<K, V> {
   final _Equality<K> _equals;
@@ -755,10 +589,10 @@ class _LinkedCustomHashMap<K, V> extends JsLinkedHashMap<K, V> {
   final _Predicate _validKey;
 
   _LinkedCustomHashMap(
-      this._equals, this._hashCode, bool validKey(potentialKey))
+      this._equals, this._hashCode, bool validKey(potentialKey)?)
       : _validKey = (validKey != null) ? validKey : ((v) => v is K);
 
-  V operator [](Object key) {
+  V? operator [](Object? key) {
     if (!_validKey(key)) return null;
     return super.internalGet(key);
   }
@@ -767,12 +601,12 @@ class _LinkedCustomHashMap<K, V> extends JsLinkedHashMap<K, V> {
     super.internalSet(key, value);
   }
 
-  bool containsKey(Object key) {
+  bool containsKey(Object? key) {
     if (!_validKey(key)) return false;
     return super.internalContainsKey(key);
   }
 
-  V remove(Object key) {
+  V? remove(Object? key) {
     if (!_validKey(key)) return null;
     return super.internalRemove(key);
   }
@@ -781,7 +615,7 @@ class _LinkedCustomHashMap<K, V> extends JsLinkedHashMap<K, V> {
     // We force the hash codes to be unsigned 30-bit integers to avoid
     // issues with problematic keys like '__proto__'. Another option
     // would be to throw an exception if the hash code isn't a number.
-    return JS('int', '# & 0x3ffffff', _hashCode(key));
+    return JS('int', '# & #', _hashCode(key), _mask30);
   }
 
   int internalFindBucketIndex(var bucket, var key) {
@@ -799,9 +633,9 @@ class _LinkedCustomHashMap<K, V> extends JsLinkedHashMap<K, V> {
 class HashSet<E> {
   @patch
   factory HashSet(
-      {bool equals(E e1, E e2),
-      int hashCode(E e),
-      bool isValidKey(potentialKey)}) {
+      {bool equals(E e1, E e2)?,
+      int hashCode(E e)?,
+      bool isValidKey(potentialKey)?}) {
     if (isValidKey == null) {
       if (hashCode == null) {
         if (equals == null) {
@@ -832,7 +666,7 @@ class HashSet<E> {
   factory HashSet.identity() = _IdentityHashSet<E>;
 }
 
-class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
+class _HashSet<E> extends _SetBase<E> implements HashSet<E> {
   int _length = 0;
 
   // The hash set contents are divided into three parts: one part for
@@ -852,11 +686,12 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
   // list of all the elements. We cache that on the instance and clear
   // the cache whenever the set changes. This is also used to
   // guard against concurrent modifications.
-  List _elements;
+  List? _elements;
 
   _HashSet();
 
   Set<E> _newSet() => new _HashSet<E>();
+  Set<R> _newSimilarSet<R>() => new _HashSet<R>();
 
   // Iterable.
   Iterator<E> get iterator {
@@ -867,7 +702,7 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
   bool get isEmpty => _length == 0;
   bool get isNotEmpty => !isEmpty;
 
-  bool contains(Object object) {
+  bool contains(Object? object) {
     if (_isStringElement(object)) {
       var strings = _strings;
       return (strings == null) ? false : _hasTableEntry(strings, object);
@@ -879,27 +714,27 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
     }
   }
 
-  bool _contains(Object object) {
+  bool _contains(Object? object) {
     var rest = _rest;
     if (rest == null) return false;
     var bucket = _getBucket(rest, object);
     return _findBucketIndex(bucket, object) >= 0;
   }
 
-  E lookup(Object object) {
+  E? lookup(Object? object) {
     if (_isStringElement(object) || _isNumericElement(object)) {
-      return this.contains(object) ? object : null;
+      return this.contains(object) ? object as E : null;
     }
     return _lookup(object);
   }
 
-  E _lookup(Object object) {
+  E? _lookup(Object? object) {
     var rest = _rest;
     if (rest == null) return null;
     var bucket = _getBucket(rest, object);
     var index = _findBucketIndex(bucket, object);
     if (index < 0) return null;
-    return bucket[index];
+    return JS('', '#[#]', bucket, index);
   }
 
   // Collection.
@@ -940,7 +775,7 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
     }
   }
 
-  bool remove(Object object) {
+  bool remove(Object? object) {
     if (_isStringElement(object)) {
       return _removeHashTableEntry(_strings, object);
     } else if (_isNumericElement(object)) {
@@ -950,19 +785,23 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
     }
   }
 
-  bool _remove(Object object) {
+  bool _remove(Object? object) {
     var rest = _rest;
     if (rest == null) return false;
-    var bucket = _getBucket(rest, object);
+    var hash = _computeHashCode(object);
+    var bucket = JS('var', '#[#]', rest, hash);
     int index = _findBucketIndex(bucket, object);
     if (index < 0) return false;
     // TODO(kasperl): Consider getting rid of the bucket list when
     // the length reaches zero.
     _length--;
     _elements = null;
-    // TODO(kasperl): It would probably be faster to move the
-    // element to the end and reduce the length of the bucket list.
+    // TODO(kasperl): It would probably be faster to move the element to the end
+    // and reduce the length of the bucket list.
     JS('void', '#.splice(#, 1)', bucket, index);
+    if (0 == JS('int', '#.length', bucket)) {
+      _deleteTableEntry(rest, hash);
+    }
     return true;
   }
 
@@ -974,8 +813,9 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
   }
 
   List _computeElements() {
-    if (_elements != null) return _elements;
-    List result = new List(_length);
+    var result = _elements;
+    if (result != null) return result;
+    result = List.filled(_length, null);
     int index = 0;
 
     // Add all string elements to the list.
@@ -1020,7 +860,8 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
       }
     }
     assert(index == _length);
-    return _elements = result;
+    _elements = result;
+    return result;
   }
 
   bool _addHashTableEntry(var table, E element) {
@@ -1031,7 +872,7 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
     return true;
   }
 
-  bool _removeHashTableEntry(var table, Object element) {
+  bool _removeHashTableEntry(var table, Object? element) {
     if (table != null && _hasTableEntry(table, element)) {
       _deleteTableEntry(table, element);
       _length--;
@@ -1051,7 +892,7 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
     // way, we avoid converting them to strings when we use them as
     // keys in the JavaScript hash table object.
     return element is num &&
-        JS('bool', '(# & 0x3ffffff) === #', element, element);
+        JS('bool', '(# & #) === #', element, _mask30, element);
   }
 
   int _computeHashCode(var element) {
@@ -1059,7 +900,7 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
     // issues with problematic elements like '__proto__'. Another
     // option would be to throw an exception if the hash code isn't a
     // number.
-    return JS('int', '# & 0x3ffffff', element.hashCode);
+    return JS('int', '# & #', element.hashCode, _mask30);
   }
 
   static bool _hasTableEntry(var table, var key) {
@@ -1079,7 +920,7 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
     JS('void', 'delete #[#]', table, key);
   }
 
-  List _getBucket(var table, var element) {
+  List? _getBucket(var table, var element) {
     var hash = _computeHashCode(element);
     return JS('var', '#[#]', table, hash);
   }
@@ -1109,12 +950,13 @@ class _HashSet<E> extends _HashSetBase<E> implements HashSet<E> {
 
 class _IdentityHashSet<E> extends _HashSet<E> {
   Set<E> _newSet() => new _IdentityHashSet<E>();
+  Set<R> _newSimilarSet<R>() => new _IdentityHashSet<R>();
 
   int _computeHashCode(var key) {
     // We force the hash codes to be unsigned 30-bit integers to avoid
     // issues with problematic keys like '__proto__'. Another option
     // would be to throw an exception if the hash code isn't a number.
-    return JS('int', '# & 0x3ffffff', identityHashCode(key));
+    return JS('int', '# & #', identityHashCode(key), _mask30);
   }
 
   int _findBucketIndex(var bucket, var element) {
@@ -1131,10 +973,11 @@ class _CustomHashSet<E> extends _HashSet<E> {
   _Equality<E> _equality;
   _Hasher<E> _hasher;
   _Predicate _validKey;
-  _CustomHashSet(this._equality, this._hasher, bool validKey(potentialKey))
+  _CustomHashSet(this._equality, this._hasher, bool validKey(potentialKey)?)
       : _validKey = (validKey != null) ? validKey : ((x) => x is E);
 
   Set<E> _newSet() => new _CustomHashSet<E>(_equality, _hasher, _validKey);
+  Set<R> _newSimilarSet<R>() => new _HashSet<R>();
 
   int _findBucketIndex(var bucket, var element) {
     if (bucket == null) return -1;
@@ -1150,22 +993,22 @@ class _CustomHashSet<E> extends _HashSet<E> {
     // issues with problematic elements like '__proto__'. Another
     // option would be to throw an exception if the hash code isn't a
     // number.
-    return JS('int', '# & 0x3ffffff', _hasher(element));
+    return JS('int', '# & #', _hasher(element), _mask30);
   }
 
   bool add(E object) => super._add(object);
 
-  bool contains(Object object) {
+  bool contains(Object? object) {
     if (!_validKey(object)) return false;
     return super._contains(object);
   }
 
-  E lookup(Object object) {
+  E? lookup(Object? object) {
     if (!_validKey(object)) return null;
     return super._lookup(object);
   }
 
-  bool remove(Object object) {
+  bool remove(Object? object) {
     if (!_validKey(object)) return false;
     return super._remove(object);
   }
@@ -1173,14 +1016,14 @@ class _CustomHashSet<E> extends _HashSet<E> {
 
 // TODO(kasperl): Share this code with _HashMapKeyIterator<E>?
 class _HashSetIterator<E> implements Iterator<E> {
-  final _set;
+  final _HashSet<E> _set;
   final List _elements;
   int _offset = 0;
-  E _current;
+  E? _current;
 
   _HashSetIterator(this._set, this._elements);
 
-  E get current => _current;
+  E get current => _current as E;
 
   bool moveNext() {
     var elements = _elements;
@@ -1205,9 +1048,9 @@ class _HashSetIterator<E> implements Iterator<E> {
 class LinkedHashSet<E> {
   @patch
   factory LinkedHashSet(
-      {bool equals(E e1, E e2),
-      int hashCode(E e),
-      bool isValidKey(potentialKey)}) {
+      {bool equals(E e1, E e2)?,
+      int hashCode(E e)?,
+      bool isValidKey(potentialKey)?}) {
     if (isValidKey == null) {
       if (hashCode == null) {
         if (equals == null) {
@@ -1236,9 +1079,33 @@ class LinkedHashSet<E> {
 
   @patch
   factory LinkedHashSet.identity() = _LinkedIdentityHashSet<E>;
+
+  // Private factory constructor called by generated code for set literals.
+  @pragma('dart2js:noThrows')
+  @pragma('dart2js:noInline')
+  @pragma('dart2js:noSideEffects')
+  factory LinkedHashSet._empty() => new _LinkedHashSet<E>();
+
+  // Private factory constructor called by generated code for set literals.
+  @pragma('dart2js:noInline')
+  factory LinkedHashSet._literal(List values) =>
+      fillLiteralSet(values, new _LinkedHashSet<E>());
+
+  // Private factory static function called by generated code for set literals.
+  // This version is for set literals without type parameters.
+  @pragma('dart2js:noThrows')
+  @pragma('dart2js:noInline')
+  @pragma('dart2js:noSideEffects')
+  static _makeEmpty() => new _LinkedHashSet();
+
+  // Private factory static function called by generated code for set literals.
+  // This version is for set literals without type parameters.
+  @pragma('dart2js:noInline')
+  static _makeLiteral(List values) =>
+      fillLiteralSet(values, new _LinkedHashSet());
 }
 
-class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
+class _LinkedHashSet<E> extends _SetBase<E> implements LinkedHashSet<E> {
   int _length = 0;
 
   // The hash set contents are divided into three parts: one part for
@@ -1256,8 +1123,8 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
 
   // The elements are stored in cells that are linked together
   // to form a double linked list.
-  _LinkedHashSetCell _first;
-  _LinkedHashSetCell _last;
+  _LinkedHashSetCell? _first;
+  _LinkedHashSetCell? _last;
 
   // We track the number of modifications done to the element set to
   // be able to throw when the set is modified while being iterated
@@ -1267,6 +1134,7 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
   _LinkedHashSet();
 
   Set<E> _newSet() => new _LinkedHashSet<E>();
+  Set<R> _newSimilarSet<R>() => new _LinkedHashSet<R>();
 
   void _unsupported(String operation) {
     throw 'LinkedHashSet: unsupported $operation';
@@ -1281,48 +1149,48 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
   bool get isEmpty => _length == 0;
   bool get isNotEmpty => !isEmpty;
 
-  bool contains(Object object) {
+  bool contains(Object? object) {
     if (_isStringElement(object)) {
       var strings = _strings;
       if (strings == null) return false;
-      _LinkedHashSetCell cell = _getTableEntry(strings, object);
+      _LinkedHashSetCell? cell = _getTableEntry(strings, object);
       return cell != null;
     } else if (_isNumericElement(object)) {
       var nums = _nums;
       if (nums == null) return false;
-      _LinkedHashSetCell cell = _getTableEntry(nums, object);
+      _LinkedHashSetCell? cell = _getTableEntry(nums, object);
       return cell != null;
     } else {
       return _contains(object);
     }
   }
 
-  bool _contains(Object object) {
+  bool _contains(Object? object) {
     var rest = _rest;
     if (rest == null) return false;
     var bucket = _getBucket(rest, object);
     return _findBucketIndex(bucket, object) >= 0;
   }
 
-  E lookup(Object object) {
+  E? lookup(Object? object) {
     if (_isStringElement(object) || _isNumericElement(object)) {
-      return this.contains(object) ? object : null;
+      return this.contains(object) ? object as E : null;
     } else {
       return _lookup(object);
     }
   }
 
-  E _lookup(Object object) {
+  E? _lookup(Object? object) {
     var rest = _rest;
     if (rest == null) return null;
     var bucket = _getBucket(rest, object);
     var index = _findBucketIndex(bucket, object);
     if (index < 0) return null;
-    return bucket[index]._element;
+    return JS<_LinkedHashSetCell>('', '#[#]', bucket, index)._element;
   }
 
   void forEach(void action(E element)) {
-    _LinkedHashSetCell cell = _first;
+    _LinkedHashSetCell? cell = _first;
     int modifications = _modifications;
     while (cell != null) {
       action(cell._element);
@@ -1334,13 +1202,15 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
   }
 
   E get first {
-    if (_first == null) throw new StateError("No elements");
-    return _first._element;
+    var first = _first;
+    if (first == null) throw new StateError("No elements");
+    return first._element;
   }
 
   E get last {
-    if (_last == null) throw new StateError("No elements");
-    return _last._element;
+    var last = _last;
+    if (last == null) throw new StateError("No elements");
+    return last._element;
   }
 
   // Collection.
@@ -1375,7 +1245,7 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
     return true;
   }
 
-  bool remove(Object object) {
+  bool remove(Object? object) {
     if (_isStringElement(object)) {
       return _removeHashTableEntry(_strings, object);
     } else if (_isNumericElement(object)) {
@@ -1385,15 +1255,18 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
     }
   }
 
-  bool _remove(Object object) {
+  bool _remove(Object? object) {
     var rest = _rest;
     if (rest == null) return false;
-    var bucket = _getBucket(rest, object);
+    var hash = _computeHashCode(object);
+    var bucket = JS('var', '#[#]', rest, hash);
     int index = _findBucketIndex(bucket, object);
     if (index < 0) return false;
-    // Use splice to remove the [cell] element at the index and
-    // unlink it.
+    // Use splice to remove the [cell] element at the index and unlink it.
     _LinkedHashSetCell cell = JS('var', '#.splice(#, 1)[0]', bucket, index);
+    if (0 == JS('int', '#.length', bucket)) {
+      _deleteTableEntry(rest, hash);
+    }
     _unlinkCell(cell);
     return true;
   }
@@ -1407,10 +1280,10 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
   }
 
   void _filterWhere(bool test(E element), bool removeMatching) {
-    _LinkedHashSetCell cell = _first;
+    _LinkedHashSetCell? cell = _first;
     while (cell != null) {
       E element = cell._element;
-      _LinkedHashSetCell next = cell._next;
+      _LinkedHashSetCell? next = cell._next;
       int modifications = _modifications;
       bool shouldRemove = (removeMatching == test(element));
       if (modifications != _modifications) {
@@ -1430,15 +1303,15 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
   }
 
   bool _addHashTableEntry(var table, E element) {
-    _LinkedHashSetCell cell = _getTableEntry(table, element);
+    _LinkedHashSetCell? cell = _getTableEntry(table, element);
     if (cell != null) return false;
     _setTableEntry(table, element, _newLinkedCell(element));
     return true;
   }
 
-  bool _removeHashTableEntry(var table, Object element) {
+  bool _removeHashTableEntry(var table, Object? element) {
     if (table == null) return false;
-    _LinkedHashSetCell cell = _getTableEntry(table, element);
+    _LinkedHashSetCell? cell = _getTableEntry(table, element);
     if (cell == null) return false;
     _unlinkCell(cell);
     _deleteTableEntry(table, element);
@@ -1449,7 +1322,7 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
     // Value cycles after 2^30 modifications. If you keep hold of an
     // iterator for that long, you might miss a modification
     // detection, and iteration can go sour. Don't do that.
-    _modifications = (_modifications + 1) & 0x3ffffff;
+    _modifications = _mask30 & (_modifications + 1);
   }
 
   // Create a new cell and link it in as the last one in the list.
@@ -1458,7 +1331,7 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
     if (_first == null) {
       _first = _last = cell;
     } else {
-      _LinkedHashSetCell last = _last;
+      _LinkedHashSetCell last = _last!;
       cell._previous = last;
       _last = last._next = cell;
     }
@@ -1469,8 +1342,8 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
 
   // Unlink the given cell from the linked list of cells.
   void _unlinkCell(_LinkedHashSetCell cell) {
-    _LinkedHashSetCell previous = cell._previous;
-    _LinkedHashSetCell next = cell._next;
+    _LinkedHashSetCell? previous = cell._previous;
+    _LinkedHashSetCell? next = cell._next;
     if (previous == null) {
       assert(cell == _first);
       _first = next;
@@ -1496,7 +1369,7 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
     // way, we avoid converting them to strings when we use them as
     // keys in the JavaScript hash table object.
     return element is num &&
-        JS('bool', '(# & 0x3ffffff) === #', element, element);
+        JS('bool', '(# & #) === #', element, _mask30, element);
   }
 
   int _computeHashCode(var element) {
@@ -1504,7 +1377,7 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
     // issues with problematic elements like '__proto__'. Another
     // option would be to throw an exception if the hash code isn't a
     // number.
-    return JS('int', '# & 0x3ffffff', element.hashCode);
+    return JS('int', '# & #', element.hashCode, _mask30);
   }
 
   static _getTableEntry(var table, var key) {
@@ -1520,7 +1393,7 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
     JS('void', 'delete #[#]', table, key);
   }
 
-  List _getBucket(var table, var element) {
+  List? _getBucket(var table, var element) {
     var hash = _computeHashCode(element);
     return JS('var', '#[#]', table, hash);
   }
@@ -1551,12 +1424,13 @@ class _LinkedHashSet<E> extends _HashSetBase<E> implements LinkedHashSet<E> {
 
 class _LinkedIdentityHashSet<E> extends _LinkedHashSet<E> {
   Set<E> _newSet() => new _LinkedIdentityHashSet<E>();
+  Set<R> _newSimilarSet<R>() => new _LinkedIdentityHashSet<R>();
 
   int _computeHashCode(var key) {
     // We force the hash codes to be unsigned 30-bit integers to avoid
     // issues with problematic keys like '__proto__'. Another option
     // would be to throw an exception if the hash code isn't a number.
-    return JS('int', '# & 0x3ffffff', identityHashCode(key));
+    return JS('int', '# & #', identityHashCode(key), _mask30);
   }
 
   int _findBucketIndex(var bucket, var element) {
@@ -1575,11 +1449,12 @@ class _LinkedCustomHashSet<E> extends _LinkedHashSet<E> {
   _Hasher<E> _hasher;
   _Predicate _validKey;
   _LinkedCustomHashSet(
-      this._equality, this._hasher, bool validKey(potentialKey))
+      this._equality, this._hasher, bool validKey(potentialKey)?)
       : _validKey = (validKey != null) ? validKey : ((x) => x is E);
 
   Set<E> _newSet() =>
       new _LinkedCustomHashSet<E>(_equality, _hasher, _validKey);
+  Set<R> _newSimilarSet<R>() => new _LinkedHashSet<R>();
 
   int _findBucketIndex(var bucket, var element) {
     if (bucket == null) return -1;
@@ -1596,35 +1471,35 @@ class _LinkedCustomHashSet<E> extends _LinkedHashSet<E> {
     // issues with problematic elements like '__proto__'. Another
     // option would be to throw an exception if the hash code isn't a
     // number.
-    return JS('int', '# & 0x3ffffff', _hasher(element));
+    return JS('int', '# & #', _hasher(element), _mask30);
   }
 
   bool add(E element) => super._add(element);
 
-  bool contains(Object object) {
+  bool contains(Object? object) {
     if (!_validKey(object)) return false;
     return super._contains(object);
   }
 
-  E lookup(Object object) {
+  E? lookup(Object? object) {
     if (!_validKey(object)) return null;
     return super._lookup(object);
   }
 
-  bool remove(Object object) {
+  bool remove(Object? object) {
     if (!_validKey(object)) return false;
     return super._remove(object);
   }
 
-  bool containsAll(Iterable<Object> elements) {
-    for (Object element in elements) {
+  bool containsAll(Iterable<Object?> elements) {
+    for (Object? element in elements) {
       if (!_validKey(element) || !this.contains(element)) return false;
     }
     return true;
   }
 
-  void removeAll(Iterable<Object> elements) {
-    for (Object element in elements) {
+  void removeAll(Iterable<Object?> elements) {
+    for (Object? element in elements) {
       if (_validKey(element)) {
         super._remove(element);
       }
@@ -1635,34 +1510,35 @@ class _LinkedCustomHashSet<E> extends _LinkedHashSet<E> {
 class _LinkedHashSetCell {
   final _element;
 
-  _LinkedHashSetCell _next;
-  _LinkedHashSetCell _previous;
+  _LinkedHashSetCell? _next;
+  _LinkedHashSetCell? _previous;
 
   _LinkedHashSetCell(this._element);
 }
 
 // TODO(kasperl): Share this code with LinkedHashMapKeyIterator<E>?
 class _LinkedHashSetIterator<E> implements Iterator<E> {
-  final _set;
+  final _LinkedHashSet<E> _set;
   final int _modifications;
-  _LinkedHashSetCell _cell;
-  E _current;
+  _LinkedHashSetCell? _cell;
+  E? _current;
 
   _LinkedHashSetIterator(this._set, this._modifications) {
     _cell = _set._first;
   }
 
-  E get current => _current;
+  E get current => _current as E;
 
   bool moveNext() {
+    var cell = _cell;
     if (_modifications != _set._modifications) {
       throw new ConcurrentModificationError(_set);
-    } else if (_cell == null) {
+    } else if (cell == null) {
       _current = null;
       return false;
     } else {
-      _current = _cell._element;
-      _cell = _cell._next;
+      _current = cell._element;
+      _cell = cell._next;
       return true;
     }
   }

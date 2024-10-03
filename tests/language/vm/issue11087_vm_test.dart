@@ -8,7 +8,7 @@
 // VMOptions=--optimization-counter-threshold=10 --no-background-compilation
 
 class A {
-  int x;
+  late int x;
 }
 
 f() {

@@ -1,17 +1,9 @@
 /*
- * Copyright (c) 2015, the Dart project authors.
+ * Copyright (c) 2019, the Dart project authors. Please see the AUTHORS file
+ * for details. All rights reserved. Use of this source code is governed by a
+ * BSD-style license that can be found in the LICENSE file.
  *
- * Licensed under the Eclipse Public License v1.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.eclipse.org/legal/epl-v10.html
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the License
- * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
- * or implied. See the License for the specific language governing permissions and limitations under
- * the License.
- *
- * This file has been automatically generated.  Please do not edit it manually.
+ * This file has been automatically generated. Please do not edit it manually.
  * To regenerate the file, use the script "pkg/analysis_server/tool/spec/generate_files".
  */
 package com.google.dart.server.generated;
@@ -37,6 +29,22 @@ public interface AnalysisServer {
    * @param listener the listener to be added
    */
   public void addAnalysisServerListener(AnalysisServerListener listener);
+
+  /**
+   * Add the given listener to the list of listeners that will receive notification when
+     * requests are made by an analysis server client.
+   *
+   * @param listener the listener to be added
+   */
+  public void addRequestListener(RequestListener listener);
+
+  /**
+   * Add the given listener to the list of listeners that will receive notification when
+   * responses are received by an analysis server client.
+   *
+   * @param listener the listener to be added
+   */
+  public void addResponseListener(ResponseListener listener);
 
   /**
    * Add the given listener to the list of listeners that will receive notification when the server
@@ -80,6 +88,23 @@ public interface AnalysisServer {
    * @param offset The offset for which hover information is being requested.
    */
   public void analysis_getHover(String file, int offset, GetHoverConsumer consumer);
+
+  /**
+   * {@code analysis.getImportedElements}
+   *
+   * Return a description of all of the elements referenced in a given region of a given file that
+   * come from imported libraries.
+   *
+   * If a request is made for a file that does not exist, or that is not currently subject to
+   * analysis (e.g. because it is not associated with any analysis root specified via
+   * analysis.setAnalysisRoots), an error of type GET_IMPORTED_ELEMENTS_INVALID_FILE will be
+   * generated.
+   *
+   * @param file The file in which import information is being requested.
+   * @param offset The offset of the region for which import information is being requested.
+   * @param length The length of the region for which import information is being requested.
+   */
+  public void analysis_getImportedElements(String file, int offset, int length, GetImportedElementsConsumer consumer);
 
   /**
    * {@code analysis.getLibraryDependencies}
@@ -129,24 +154,39 @@ public interface AnalysisServer {
    * generated.
    *
    * @param file The file for which reachable source information is being requested.
+   *
+   * @deprecated
    */
   public void analysis_getReachableSources(String file, GetReachableSourcesConsumer consumer);
 
   /**
+   * {@code analysis.getSignature}
+   *
+   * Return the signature information associated with the given location in the given file. If the
+   * signature information for the given file has not yet been computed, or the most recently
+   * computed signature information for the given file is out of date, then the response for this
+   * request will be delayed until it has been computed. If a request is made for a file which does
+   * not exist, or which is not currently subject to analysis (e.g. because it is not associated with
+   * any analysis root specified to analysis.setAnalysisRoots), an error of type
+   * GET_SIGNATURE_INVALID_FILE will be generated. If the location given is not inside the argument
+   * list for a function (including method and constructor) invocation, then an error of type
+   * GET_SIGNATURE_INVALID_OFFSET will be generated. If the location is inside an argument list but
+   * the function is not defined or cannot be determined (such as a method invocation where the
+   * target has type 'dynamic') then an error of type GET_SIGNATURE_UNKNOWN_FUNCTION will be
+   * generated.
+   *
+   * @param file The file in which signature information is being requested.
+   * @param offset The location for which signature information is being requested.
+   */
+  public void analysis_getSignature(String file, int offset, GetSignatureConsumer consumer);
+
+  /**
    * {@code analysis.reanalyze}
    *
-   * Force the re-analysis of everything contained in the specified analysis roots. This will cause
-   * all previously computed analysis results to be discarded and recomputed, and will cause all
-   * subscribed notifications to be re-sent.
-   *
-   * If no analysis roots are provided, then all current analysis roots will be re-analyzed. If an
-   * empty list of analysis roots is provided, then nothing will be re-analyzed. If the list contains
-   * one or more paths that are not currently analysis roots, then an error of type
-   * INVALID_ANALYSIS_ROOT will be generated.
-   *
-   * @param roots A list of the analysis roots that are to be re-analyzed.
+   * Force re-reading of all potentially changed files, re-resolving of all referenced URIs, and
+   * corresponding re-analysis of everything affected in the current analysis roots.
    */
-  public void analysis_reanalyze(List<String> roots);
+  public void analysis_reanalyze();
 
   /**
    * {@code analysis.setAnalysisRoots}
@@ -175,16 +215,11 @@ public interface AnalysisServer {
    * @param excluded A list of the files and directories within the included directories that should
    *         not be analyzed.
    * @param packageRoots A mapping from source directories to package roots that should override the
-   *         normal package: URI resolution mechanism. If a package root is a directory, then the
-   *         analyzer will behave as though the associated source directory in the map contains a
-   *         special pubspec.yaml file which resolves any package: URI to the corresponding path
-   *         within that package root directory. The effect is the same as specifying the package
-   *         root directory as a "--package_root" parameter to the Dart VM when executing any Dart
-   *         file inside the source directory. If a package root is a file, then the analyzer will
-   *         behave as though that file is a ".packages" file in the source directory. The effect is
-   *         the same as specifying the file as a "--packages" parameter to the Dart VM when
-   *         executing any Dart file inside the source directory. Files in any directories that are
-   *         not overridden by this mapping have their package: URI's resolved using the normal
+   *         normal package: URI resolution mechanism. If a package root is a file, then the analyzer
+   *         will behave as though that file is a ".packages" file in the source directory. The
+   *         effect is the same as specifying the file as a "--packages" parameter to the Dart VM
+   *         when executing any Dart file inside the source directory. Files in any directories that
+   *         are not overridden by this mapping have their package: URI's resolved using the normal
    *         pubspec.yaml mechanism. If this field is absent, or the empty map is specified, that
    *         indicates that the normal pubspec.yaml mechanism should always be used.
    */
@@ -285,6 +320,107 @@ public interface AnalysisServer {
   public void analysis_updateOptions(AnalysisOptions options);
 
   /**
+   * {@code analytics.enable}
+   *
+   * Enable or disable the sending of analytics data. Note that there are other ways for users to
+   * change this setting, so clients cannot assume that they have complete control over this setting.
+   * In particular, there is no guarantee that the result returned by the isEnabled request will
+   * match the last value set via this request.
+   *
+   * @param value Enable or disable analytics.
+   */
+  public void analytics_enable(boolean value);
+
+  /**
+   * {@code analytics.isEnabled}
+   *
+   * Query whether analytics is enabled.
+   *
+   * This flag controls whether the analysis server sends any analytics data to the cloud. If
+   * disabled, the analysis server does not send any analytics data, and any data sent to it by
+   * clients (from sendEvent and sendTiming) will be ignored.
+   *
+   * The value of this flag can be changed by other tools outside of the analysis server's process.
+   * When you query the flag, you get the value of the flag at a given moment. Clients should not use
+   * the value returned to decide whether or not to send the sendEvent and sendTiming requests. Those
+   * requests should be used unconditionally and server will determine whether or not it is
+   * appropriate to forward the information to the cloud at the time each request is received.
+   */
+  public void analytics_isEnabled(IsEnabledConsumer consumer);
+
+  /**
+   * {@code analytics.sendEvent}
+   *
+   * Send information about client events.
+   *
+   * Ask the analysis server to include the fact that an action was performed in the client as part
+   * of the analytics data being sent. The data will only be included if the sending of analytics
+   * data is enabled at the time the request is processed. The action that was performed is indicated
+   * by the value of the action field.
+   *
+   * The value of the action field should not include the identity of the client. The analytics data
+   * sent by server will include the client id passed in using the --client-id command-line argument.
+   * The request will be ignored if the client id was not provided when server was started.
+   *
+   * @param action The value used to indicate which action was performed.
+   */
+  public void analytics_sendEvent(String action);
+
+  /**
+   * {@code analytics.sendTiming}
+   *
+   * Send timing information for client events (e.g. code completions).
+   *
+   * Ask the analysis server to include the fact that a timed event occurred as part of the analytics
+   * data being sent. The data will only be included if the sending of analytics data is enabled at
+   * the time the request is processed.
+   *
+   * The value of the event field should not include the identity of the client. The analytics data
+   * sent by server will include the client id passed in using the --client-id command-line argument.
+   * The request will be ignored if the client id was not provided when server was started.
+   *
+   * @param event The name of the event.
+   * @param millis The duration of the event in milliseconds.
+   */
+  public void analytics_sendTiming(String event, int millis);
+
+  /**
+   * {@code completion.getSuggestionDetails}
+   *
+   * Clients must make this request when the user has selected a completion suggestion from an
+   * AvailableSuggestionSet. Analysis server will respond with the text to insert as well as any
+   * SourceChange that needs to be applied in case the completion requires an additional import to be
+   * added. It is an error if the id is no longer valid, for instance if the library has been removed
+   * after the completion suggestion is accepted.
+   *
+   * @param file The path of the file into which this completion is being inserted.
+   * @param id The identifier of the AvailableSuggestionSet containing the selected label.
+   * @param label The label from the AvailableSuggestionSet with the `id` for which insertion
+   *         information is requested.
+   * @param offset The offset in the file where the completion will be inserted.
+   */
+  public void completion_getSuggestionDetails(String file, int id, String label, int offset, GetSuggestionDetailsConsumer consumer);
+
+  /**
+   * {@code completion.getSuggestionDetails2}
+   *
+   * Clients must make this request when the user has selected a completion suggestion with the
+   * isNotImported field set to true. The server will respond with the text to insert, as well as any
+   * SourceChange that needs to be applied in case the completion requires an additional import to be
+   * added. The text to insert might be different from the original suggestion to include an import
+   * prefix if the library will be imported with a prefix to avoid shadowing conflicts in the file.
+   *
+   * @param file The path of the file into which this completion is being inserted.
+   * @param offset The offset in the file where the completion will be inserted.
+   * @param completion The completion from the selected CompletionSuggestion. It could be a name of a
+   *         class, or a name of a constructor in form "typeName.constructorName()", or an
+   *         enumeration constant in form "enumName.constantName", etc.
+   * @param libraryUri The URI of the library to import, so that the element referenced in the
+   *         completion becomes accessible.
+   */
+  public void completion_getSuggestionDetails2(String file, int offset, String completion, String libraryUri, GetSuggestionDetails2Consumer consumer);
+
+  /**
    * {@code completion.getSuggestions}
    *
    * Request that completion suggestions for the given offset in the given file be returned.
@@ -293,6 +429,60 @@ public interface AnalysisServer {
    * @param offset The offset within the file at which suggestions are to be made.
    */
   public void completion_getSuggestions(String file, int offset, GetSuggestionsConsumer consumer);
+
+  /**
+   * {@code completion.getSuggestions2}
+   *
+   * Request that completion suggestions for the given offset in the given file be returned. The
+   * suggestions will be filtered using fuzzy matching with the already existing prefix.
+   *
+   * @param file The file containing the point at which suggestions are to be made.
+   * @param offset The offset within the file at which suggestions are to be made.
+   * @param maxResults The maximum number of suggestions to return. If the number of suggestions
+   *         after filtering is greater than the maxResults, then isIncomplete is set to true.
+   * @param completionCaseMatchingMode The mode of code completion being invoked. If no value is
+   *         provided, MATCH_FIRST_CHAR will be assumed.
+   * @param completionMode The mode of code completion being invoked. If no value is provided, BASIC
+   *         will be assumed. BASIC is also the only currently supported.
+   * @param invocationCount The number of times that the user has invoked code completion at the same
+   *         code location, counting from 1. If no value is provided, 1 will be assumed.
+   * @param timeout The approximate time in milliseconds that the server should spend. The server
+   *         will perform some steps anyway, even if it takes longer than the specified timeout. This
+   *         field is intended to be used for benchmarking, and usually should not be provided, so
+   *         that the default timeout is used.
+   */
+  public void completion_getSuggestions2(String file, int offset, int maxResults, String completionCaseMatchingMode, String completionMode, int invocationCount, int timeout, GetSuggestions2Consumer consumer);
+
+  /**
+   * {@code completion.registerLibraryPaths}
+   *
+   * The client can make this request to express interest in certain libraries to receive completion
+   * suggestions from based on the client path. If this request is received before the client has
+   * used 'completion.setSubscriptions' to subscribe to the AVAILABLE_SUGGESTION_SETS service, then
+   * an error of type NOT_SUBSCRIBED_TO_AVAILABLE_SUGGESTION_SETS will be generated. All previous
+   * paths are replaced by the given set of paths.
+   *
+   * @param paths A list of objects each containing a path and the additional libraries from which
+   *         the client is interested in receiving completion suggestions. If one configured path is
+   *         beneath another, the descendent will override the ancestors' configured libraries of
+   *         interest.
+   *
+   * @deprecated
+   */
+  public void completion_registerLibraryPaths(List<LibraryPathSet> paths);
+
+  /**
+   * {@code completion.setSubscriptions}
+   *
+   * Subscribe for completion services. All previous subscriptions are replaced by the given set of
+   * services.
+   *
+   * It is an error if any of the elements in the list are not valid services. If there is an error,
+   * then the current subscriptions will remain unchanged.
+   *
+   * @param subscriptions A list of the services being subscribed to.
+   */
+  public void completion_setSubscriptions(List<String> subscriptions);
 
   /**
    * {@code diagnostic.getDiagnostics}
@@ -309,6 +499,26 @@ public interface AnalysisServer {
    * DEBUG_PORT_COULD_NOT_BE_OPENED.
    */
   public void diagnostic_getServerPort(GetServerPortConsumer consumer);
+
+  /**
+   * {@code edit.bulkFixes}
+   *
+   * Analyze the specified sources for fixes that can be applied in bulk and return a set of
+   * suggested edits for those sources. These edits may include changes to sources outside the set of
+   * specified sources if a change in a specified source requires it.
+   *
+   * @param included A list of the files and directories for which edits should be suggested. If a
+   *         request is made with a path that is invalid, e.g. is not absolute and normalized, an
+   *         error of type INVALID_FILE_PATH_FORMAT will be generated. If a request is made for a
+   *         file which does not exist, or which is not currently subject to analysis (e.g. because
+   *         it is not associated with any analysis root specified to analysis.setAnalysisRoots), an
+   *         error of type FILE_NOT_ANALYZED will be generated.
+   * @param inTestMode A flag indicating whether the bulk fixes are being run in test mode. The only
+   *         difference is that in test mode the fix processor will look for a configuration file
+   *         that can modify the content of the data file used to compute the fixes when data-driven
+   *         fixes are being considered. If this field is omitted the flag defaults to false.
+   */
+  public void edit_bulkFixes(List<String> included, boolean inTestMode, BulkFixesConsumer consumer);
 
   /**
    * {@code edit.format}
@@ -361,10 +571,26 @@ public interface AnalysisServer {
    *
    * Return the set of fixes that are available for the errors at a given offset in a given file.
    *
+   * If a request is made for a file which does not exist, or which is not currently subject to
+   * analysis (e.g. because it is not associated with any analysis root specified to
+   * analysis.setAnalysisRoots), an error of type GET_FIXES_INVALID_FILE will be generated.
+   *
    * @param file The file containing the errors for which fixes are being requested.
    * @param offset The offset used to select the errors for which fixes will be returned.
    */
   public void edit_getFixes(String file, int offset, GetFixesConsumer consumer);
+
+  /**
+   * {@code edit.getPostfixCompletion}
+   *
+   * Get the changes required to convert the postfix template at the given location into the
+   * template's expanded form.
+   *
+   * @param file The file containing the postfix template to be expanded.
+   * @param key The unique name that identifies the template in use.
+   * @param offset The offset used to identify the code to which the template will be applied.
+   */
+  public void edit_getPostfixCompletion(String file, String key, int offset, GetPostfixCompletionConsumer consumer);
 
   /**
    * {@code edit.getRefactoring}
@@ -401,6 +627,44 @@ public interface AnalysisServer {
    * @param offset The offset used to identify the statement to be completed.
    */
   public void edit_getStatementCompletion(String file, int offset, GetStatementCompletionConsumer consumer);
+
+  /**
+   * {@code edit.importElements}
+   *
+   * Return a list of edits that would need to be applied in order to ensure that all of the elements
+   * in the specified list of imported elements are accessible within the library.
+   *
+   * If a request is made for a file that does not exist, or that is not currently subject to
+   * analysis (e.g. because it is not associated with any analysis root specified via
+   * analysis.setAnalysisRoots), an error of type IMPORT_ELEMENTS_INVALID_FILE will be generated.
+   *
+   * @param file The file in which the specified elements are to be made accessible.
+   * @param elements The elements to be made accessible in the specified file.
+   * @param offset The offset at which the specified elements need to be made accessible. If
+   *         provided, this is used to guard against adding imports for text that would be inserted
+   *         into a comment, string literal, or other location where the imports would not be
+   *         necessary.
+   */
+  public void edit_importElements(String file, List<ImportedElements> elements, int offset, ImportElementsConsumer consumer);
+
+  /**
+   * {@code edit.isPostfixCompletionApplicable}
+   *
+   * Determine if the request postfix completion template is applicable at the given location in the
+   * given file.
+   *
+   * @param file The file containing the postfix template to be expanded.
+   * @param key The unique name that identifies the template in use.
+   * @param offset The offset used to identify the code to which the template will be applied.
+   */
+  public void edit_isPostfixCompletionApplicable(String file, String key, int offset, IsPostfixCompletionApplicableConsumer consumer);
+
+  /**
+   * {@code edit.listPostfixCompletionTemplates}
+   *
+   * Return a list of all postfix templates currently available.
+   */
+  public void edit_listPostfixCompletionTemplates(ListPostfixCompletionTemplatesConsumer consumer);
 
   /**
    * {@code edit.organizeDirectives}
@@ -456,6 +720,38 @@ public interface AnalysisServer {
   public void execution_deleteContext(String id);
 
   /**
+   * {@code execution.getSuggestions}
+   *
+   * Request completion suggestions for the given runtime context.
+   *
+   * It might take one or two requests of this type to get completion suggestions. The first request
+   * should have only "code", "offset", and "variables", but not "expressions". If there are
+   * sub-expressions that can have different runtime types, and are considered to be safe to evaluate
+   * at runtime (e.g. getters), so using their actual runtime types can improve completion results,
+   * the server will not include the "suggestions" field in the response, and instead will return the
+   * "expressions" field. The client will use debug API to get current runtime types for these
+   * sub-expressions and send another request, this time with "expressions". If there are no
+   * interesting sub-expressions to get runtime types for, or when the "expressions" field is
+   * provided by the client, the server will return "suggestions" in the response.
+   *
+   * @param code The code to get suggestions in.
+   * @param offset The offset within the code to get suggestions at.
+   * @param contextFile The path of the context file, e.g. the file of the current debugger frame.
+   *         The combination of the context file and context offset can be used to ensure that all
+   *         variables of the context are available for completion (with their static types).
+   * @param contextOffset The offset in the context file, e.g. the line offset in the current
+   *         debugger frame.
+   * @param variables The runtime context variables that are potentially referenced in the code.
+   * @param expressions The list of sub-expressions in the code for which the client wants to provide
+   *         runtime types. It does not have to be the full list of expressions requested by the
+   *         server, for missing expressions their static types will be used. When this field is
+   *         omitted, the server will return completion suggestions only when there are no
+   *         interesting sub-expressions in the given code. The client may provide an empty list, in
+   *         this case the server will return completion suggestions.
+   */
+  public void execution_getSuggestions(String code, int offset, String contextFile, int contextOffset, List<RuntimeCompletionVariable> variables, List<RuntimeCompletionExpression> expressions, GetSuggestionsConsumer consumer);
+
+  /**
    * {@code execution.mapUri}
    *
    * Map a URI from the execution context to the file that it corresponds to, or map a file to the
@@ -499,9 +795,90 @@ public interface AnalysisServer {
   public void execution_setSubscriptions(List<String> subscriptions);
 
   /**
+   * {@code flutter.getWidgetDescription}
+   *
+   * Return the description of the widget instance at the given location.
+   *
+   * If the location does not have a support widget, an error of type
+   * FLUTTER_GET_WIDGET_DESCRIPTION_NO_WIDGET will be generated.
+   *
+   * If a change to a file happens while widget descriptions are computed, an error of type
+   * FLUTTER_GET_WIDGET_DESCRIPTION_CONTENT_MODIFIED will be generated.
+   *
+   * @param file The file where the widget instance is created.
+   * @param offset The offset in the file where the widget instance is created.
+   */
+  public void flutter_getWidgetDescription(String file, int offset, GetWidgetDescriptionConsumer consumer);
+
+  /**
+   * {@code flutter.setSubscriptions}
+   *
+   * Subscribe for services that are specific to individual files. All previous subscriptions are
+   * replaced by the current set of subscriptions. If a given service is not included as a key in the
+   * map then no files will be subscribed to the service, exactly as if the service had been included
+   * in the map with an explicit empty list of files.
+   *
+   * Note that this request determines the set of requested subscriptions. The actual set of
+   * subscriptions at any given time is the intersection of this set with the set of files currently
+   * subject to analysis. The files currently subject to analysis are the set of files contained
+   * within an actual analysis root but not excluded, plus all of the files transitively reachable
+   * from those files via import, export and part directives. (See analysis.setAnalysisRoots for an
+   * explanation of how the actual analysis roots are determined.) When the actual analysis roots
+   * change, the actual set of subscriptions is automatically updated, but the set of requested
+   * subscriptions is unchanged.
+   *
+   * If a requested subscription is a directory it is ignored, but remains in the set of requested
+   * subscriptions so that if it later becomes a file it can be included in the set of actual
+   * subscriptions.
+   *
+   * It is an error if any of the keys in the map are not valid services. If there is an error, then
+   * the existing subscriptions will remain unchanged.
+   *
+   * @param subscriptions A table mapping services to a list of the files being subscribed to the
+   *         service.
+   */
+  public void flutter_setSubscriptions(Map<String, List<String>> subscriptions);
+
+  /**
+   * {@code flutter.setWidgetPropertyValue}
+   *
+   * Set the value of a property, or remove it.
+   *
+   * The server will generate a change that the client should apply to the project to get the value
+   * of the property set to the new value. The complexity of the change might be from updating a
+   * single literal value in the code, to updating multiple files to get libraries imported, and new
+   * intermediate widgets instantiated.
+   *
+   * @param id The identifier of the property, previously returned as a part of a
+   *         FlutterWidgetProperty. An error of type FLUTTER_SET_WIDGET_PROPERTY_VALUE_INVALID_ID is
+   *         generated if the identifier is not valid.
+   * @param value The new value to set for the property. If absent, indicates that the property
+   *         should be removed. If the property corresponds to an optional parameter, the
+   *         corresponding named argument is removed. If the property isRequired is true,
+   *         FLUTTER_SET_WIDGET_PROPERTY_VALUE_IS_REQUIRED error is generated. If the expression is
+   *         not a syntactically valid Dart code, then
+   *         FLUTTER_SET_WIDGET_PROPERTY_VALUE_INVALID_EXPRESSION is reported.
+   */
+  public void flutter_setWidgetPropertyValue(int id, FlutterWidgetPropertyValue value, SetWidgetPropertyValueConsumer consumer);
+
+  /**
    * Return {@code true} if the socket is open.
    */
   public boolean isSocketOpen();
+
+  /**
+   * {@code kythe.getKytheEntries}
+   *
+   * Return the list of KytheEntry objects for some file, given the current state of the file system
+   * populated by "analysis.updateContent".
+   *
+   * If a request is made for a file that does not exist, or that is not currently subject to
+   * analysis (e.g. because it is not associated with any analysis root specified to
+   * analysis.setAnalysisRoots), an error of type GET_KYTHE_ENTRIES_INVALID_FILE will be generated.
+   *
+   * @param file The file containing the code for which the Kythe Entry objects are being requested.
+   */
+  public void kythe_getKytheEntries(String file, GetKytheEntriesConsumer consumer);
 
   /**
    * Remove the given listener from the list of listeners that will receive notification when new
@@ -510,6 +887,22 @@ public interface AnalysisServer {
    * @param listener the listener to be removed
    */
   public void removeAnalysisServerListener(AnalysisServerListener listener);
+
+  /**
+   * Remove the given listener from the list of listeners that will receive notification when
+     * requests are made by an analysis server client.
+   *
+   * @param listener the listener to be removed
+   */
+  public void removeRequestListener(RequestListener listener);
+
+  /**
+   * Remove the given listener from the list of listeners that will receive notification when
+     * responses are received by an analysis server client.
+   *
+   * @param listener the listener to be removed
+   */
+  public void removeResponseListener(ResponseListener listener);
 
   /**
    * {@code search.findElementReferences}
@@ -567,6 +960,20 @@ public interface AnalysisServer {
   public void search_findTopLevelDeclarations(String pattern, FindTopLevelDeclarationsConsumer consumer);
 
   /**
+   * {@code search.getElementDeclarations}
+   *
+   * Return top-level and class member declarations.
+   *
+   * @param file If this field is provided, return only declarations in this file. If this field is
+   *         missing, return declarations in all files.
+   * @param pattern The regular expression used to match the names of declarations. If this field is
+   *         missing, return all declarations.
+   * @param maxResults The maximum number of declarations to return. If this field is missing, return
+   *         all matching declarations.
+   */
+  public void search_getElementDeclarations(String file, String pattern, int maxResults, GetElementDeclarationsConsumer consumer);
+
+  /**
    * {@code search.getTypeHierarchy}
    *
    * Return the type hierarchy of the class declared or referenced at the given location.
@@ -577,6 +984,20 @@ public interface AnalysisServer {
    * @param superOnly True if the client is only requesting superclasses and interfaces hierarchy.
    */
   public void search_getTypeHierarchy(String file, int offset, boolean superOnly, GetTypeHierarchyConsumer consumer);
+
+  /**
+   * {@code server.cancelRequest}
+   *
+   * Requests cancellation of a request sent by the client by id. This is provided on a best-effort
+   * basis and there is no guarantee the server will be able to cancel any specific request. The
+   * server will still always produce a response to the request even in the case of cancellation, but
+   * clients should discard any results of any cancelled request because they may be incomplete or
+   * inaccurate. This request always completes without error regardless of whether the request is
+   * successfully cancelled.
+   *
+   * @param id The id of the request that should be cancelled.
+   */
+  public void server_cancelRequest(String id);
 
   /**
    * {@code server.getVersion}

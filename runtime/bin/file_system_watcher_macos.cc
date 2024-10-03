@@ -2,23 +2,22 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "platform/globals.h"
-#if defined(HOST_OS_MACOS)
+#if defined(DART_HOST_OS_MACOS)
 
 #include "bin/file_system_watcher.h"
 
-#if !HOST_OS_IOS
+#if !DART_HOST_OS_IOS
 
+#include <CoreServices/CoreServices.h>  // NOLINT
 #include <errno.h>                      // NOLINT
 #include <fcntl.h>                      // NOLINT
 #include <unistd.h>                     // NOLINT
-#include <CoreServices/CoreServices.h>  // NOLINT
 
 #include "bin/eventhandler.h"
 #include "bin/fdutils.h"
 #include "bin/file.h"
+#include "bin/namespace.h"
 #include "bin/socket.h"
 #include "bin/thread.h"
 #include "platform/signal_blocker.h"
@@ -52,7 +51,6 @@ union FSEvent {
   uint8_t bytes[PATH_MAX + 8];
 };
 
-
 class FSEventsWatcher {
  public:
   class Node {
@@ -63,7 +61,6 @@ class FSEventsWatcher {
          int write_fd,
          bool recursive)
         : watcher_(watcher),
-          ready_(false),
           base_path_length_(strlen(base_path)),
           path_ref_(CFStringCreateWithCString(NULL,
                                               base_path,
@@ -76,89 +73,48 @@ class FSEventsWatcher {
     }
 
     ~Node() {
-      Stop();
-      VOID_TEMP_FAILURE_RETRY(close(write_fd_));
+      // This is invoked outside of [Callback] execution because
+      // [context.release] callback is invoked when [FSEventStream] is
+      // deallocated, the same [FSEventStream] that [Callback] gets a reference
+      // to during its execution. [Callback] holding a reference prevents stream
+      // from deallocation.
+      close(write_fd_);
       CFRelease(path_ref_);
+      watcher_ = nullptr;  // this is to catch access-after-free in Callback
     }
 
     void set_ref(FSEventStreamRef ref) { ref_ = ref; }
 
     void Start() {
-      // Schedule StartCallback to be executed in the RunLoop.
-      CFRunLoopTimerContext context;
-      memset(&context, 0, sizeof(context));
-      context.info = this;
-      CFRunLoopTimerRef timer =
-          CFRunLoopTimerCreate(NULL, 0, 0, 0, 0, Node::StartCallback, &context);
-      CFRunLoopAddTimer(watcher_->run_loop_, timer, kCFRunLoopCommonModes);
-      CFRelease(timer);
-      watcher_->monitor_.Enter();
-      while (!ready_) {
-        watcher_->monitor_.Wait(Monitor::kNoTimeout);
-      }
-      watcher_->monitor_.Exit();
-    }
-
-    static void StartCallback(CFRunLoopTimerRef timer, void* info) {
-      Node* node = reinterpret_cast<Node*>(info);
-      ASSERT(Thread::Compare(node->watcher_->threadId_,
-                             Thread::GetCurrentThreadId()));
       FSEventStreamContext context;
       memset(&context, 0, sizeof(context));
-      context.info = reinterpret_cast<void*>(node);
+      context.info = reinterpret_cast<void*>(this);
+      context.release = [](const void* info) {
+        delete static_cast<const Node*>(info);
+      };
       CFArrayRef array = CFArrayCreate(
-          NULL, reinterpret_cast<const void**>(&node->path_ref_), 1, NULL);
+          NULL, reinterpret_cast<const void**>(&path_ref_), 1, NULL);
       FSEventStreamRef ref = FSEventStreamCreate(
           NULL, Callback, &context, array, kFSEventStreamEventIdSinceNow, 0.10,
           kFSEventStreamCreateFlagFileEvents);
       CFRelease(array);
 
-      node->set_ref(ref);
+      set_ref(ref);
 
-      FSEventStreamScheduleWithRunLoop(node->ref_, node->watcher_->run_loop_,
+      FSEventStreamScheduleWithRunLoop(ref_, watcher_->run_loop_,
                                        kCFRunLoopDefaultMode);
 
-      FSEventStreamStart(node->ref_);
-      FSEventStreamFlushSync(node->ref_);
-
-      node->watcher_->monitor_.Enter();
-      node->ready_ = true;
-      node->watcher_->monitor_.Notify();
-      node->watcher_->monitor_.Exit();
+      FSEventStreamStart(ref_);
+      FSEventStreamFlushSync(ref_);
     }
 
     void Stop() {
-      // Schedule StopCallback to be executed in the RunLoop.
-      ASSERT(ready_);
-      CFRunLoopTimerContext context;
-      memset(&context, 0, sizeof(context));
-      context.info = this;
-      CFRunLoopTimerRef timer =
-          CFRunLoopTimerCreate(NULL, 0, 0, 0, 0, StopCallback, &context);
-      CFRunLoopAddTimer(watcher_->run_loop_, timer, kCFRunLoopCommonModes);
-      CFRelease(timer);
-      watcher_->monitor_.Enter();
-      while (ready_) {
-        watcher_->monitor_.Wait(Monitor::kNoTimeout);
-      }
-      watcher_->monitor_.Exit();
-    }
-
-    static void StopCallback(CFRunLoopTimerRef timer, void* info) {
-      Node* node = reinterpret_cast<Node*>(info);
-      ASSERT(Thread::Compare(node->watcher_->threadId_,
-                             Thread::GetCurrentThreadId()));
-      FSEventStreamStop(node->ref_);
-      FSEventStreamInvalidate(node->ref_);
-      FSEventStreamRelease(node->ref_);
-      node->watcher_->monitor_.Enter();
-      node->ready_ = false;
-      node->watcher_->monitor_.Notify();
-      node->watcher_->monitor_.Exit();
+      FSEventStreamStop(ref_);
+      FSEventStreamInvalidate(ref_);
+      FSEventStreamRelease(ref_);
     }
 
     FSEventsWatcher* watcher() const { return watcher_; }
-    bool ready() const { return ready_; }
     intptr_t base_path_length() const { return base_path_length_; }
     int read_fd() const { return read_fd_; }
     int write_fd() const { return write_fd_; }
@@ -166,7 +122,6 @@ class FSEventsWatcher {
 
    private:
     FSEventsWatcher* watcher_;
-    bool ready_;
     intptr_t base_path_length_;
     CFStringRef path_ref_;
     int read_fd_;
@@ -177,11 +132,10 @@ class FSEventsWatcher {
     DISALLOW_COPY_AND_ASSIGN(Node);
   };
 
-
   FSEventsWatcher() : run_loop_(0) { Start(); }
 
   void Start() {
-    Thread::Start(Run, reinterpret_cast<uword>(this));
+    Thread::Start("dart:io FileWatcher", Run, reinterpret_cast<uword>(this));
     monitor_.Enter();
     while (run_loop_ == NULL) {
       monitor_.Wait(Monitor::kNoTimeout);
@@ -266,18 +220,20 @@ class FSEventsWatcher {
                        void* event_paths,
                        const FSEventStreamEventFlags event_flags[],
                        const FSEventStreamEventId event_ids[]) {
-    Node* node = reinterpret_cast<Node*>(client);
+    if (FileSystemWatcher::delayed_filewatch_callback()) {
+      // Used in tests to highlight race between callback invocation
+      // and unwatching the file path, Node destruction
+      TimerUtils::Sleep(1000 /* ms */);
+    }
+    Node* node = static_cast<Node*>(client);
+    RELEASE_ASSERT(node->watcher() != nullptr);
     ASSERT(Thread::Compare(node->watcher()->threadId_,
                            Thread::GetCurrentThreadId()));
-    // `ready` is set on same thread as this callback is invoked, so we don't
-    // need to lock here.
-    if (!node->ready()) {
-      return;
-    }
     for (size_t i = 0; i < num_events; i++) {
       char* path = reinterpret_cast<char**>(event_paths)[i];
       FSEvent event;
-      event.data.exists = File::GetType(path, false) != File::kDoesNotExist;
+      event.data.exists =
+          File::GetType(NULL, path, false) != File::kDoesNotExist;
       path += node->base_path_length();
       // If path is longer the base, skip next character ('/').
       if (path[0] != '\0') {
@@ -299,24 +255,21 @@ class FSEventsWatcher {
   DISALLOW_COPY_AND_ASSIGN(FSEventsWatcher);
 };
 
-
 #define kCFCoreFoundationVersionNumber10_7 635.00
 bool FileSystemWatcher::IsSupported() {
   return kCFCoreFoundationVersionNumber >= kCFCoreFoundationVersionNumber10_7;
 }
 
-
 intptr_t FileSystemWatcher::Init() {
   return reinterpret_cast<intptr_t>(new FSEventsWatcher());
 }
-
 
 void FileSystemWatcher::Close(intptr_t id) {
   delete reinterpret_cast<FSEventsWatcher*>(id);
 }
 
-
 intptr_t FileSystemWatcher::WatchPath(intptr_t id,
+                                      Namespace* namespc,
                                       const char* path,
                                       int events,
                                       bool recursive) {
@@ -324,17 +277,14 @@ intptr_t FileSystemWatcher::WatchPath(intptr_t id,
   return reinterpret_cast<intptr_t>(watcher->AddPath(path, events, recursive));
 }
 
-
 void FileSystemWatcher::UnwatchPath(intptr_t id, intptr_t path_id) {
   USE(id);
-  delete reinterpret_cast<FSEventsWatcher::Node*>(path_id);
+  reinterpret_cast<FSEventsWatcher::Node*>(path_id)->Stop();
 }
-
 
 intptr_t FileSystemWatcher::GetSocketId(intptr_t id, intptr_t path_id) {
   return reinterpret_cast<FSEventsWatcher::Node*>(path_id)->read_fd();
 }
-
 
 Dart_Handle FileSystemWatcher::ReadEvents(intptr_t id, intptr_t path_id) {
   intptr_t fd = GetSocketId(id, path_id);
@@ -366,7 +316,7 @@ Dart_Handle FileSystemWatcher::ReadEvents(intptr_t id, intptr_t path_id) {
       mask |= kModifyContent;
     }
     if ((flags & kFSEventStreamEventFlagItemXattrMod) != 0) {
-      mask |= kModefyAttribute;
+      mask |= kModifyAttribute;
     }
     if ((flags & kFSEventStreamEventFlagItemCreated) != 0) {
       mask |= kCreate;
@@ -384,9 +334,12 @@ Dart_Handle FileSystemWatcher::ReadEvents(intptr_t id, intptr_t path_id) {
     }
     Dart_ListSetAt(event, 0, Dart_NewInteger(mask));
     Dart_ListSetAt(event, 1, Dart_NewInteger(1));
-    Dart_ListSetAt(event, 2,
-                   Dart_NewStringFromUTF8(
-                       reinterpret_cast<uint8_t*>(e.data.path), path_len));
+    Dart_Handle name = Dart_NewStringFromUTF8(
+        reinterpret_cast<uint8_t*>(e.data.path), path_len);
+    if (Dart_IsError(name)) {
+      return name;
+    }
+    Dart_ListSetAt(event, 2, name);
     Dart_ListSetAt(event, 3, Dart_NewBoolean(true));
     Dart_ListSetAt(event, 4, Dart_NewInteger(path_id));
     Dart_ListSetAt(events, i, event);
@@ -397,7 +350,7 @@ Dart_Handle FileSystemWatcher::ReadEvents(intptr_t id, intptr_t path_id) {
 }  // namespace bin
 }  // namespace dart
 
-#else  // !HOST_OS_IOS
+#else  // !DART_HOST_OS_IOS
 
 namespace dart {
 namespace bin {
@@ -407,29 +360,24 @@ Dart_Handle FileSystemWatcher::ReadEvents(intptr_t id, intptr_t path_id) {
   return DartUtils::NewDartOSError();
 }
 
-
 intptr_t FileSystemWatcher::GetSocketId(intptr_t id, intptr_t path_id) {
   return -1;
 }
-
 
 bool FileSystemWatcher::IsSupported() {
   return false;
 }
 
-
 void FileSystemWatcher::UnwatchPath(intptr_t id, intptr_t path_id) {}
-
 
 intptr_t FileSystemWatcher::Init() {
   return -1;
 }
 
-
 void FileSystemWatcher::Close(intptr_t id) {}
 
-
 intptr_t FileSystemWatcher::WatchPath(intptr_t id,
+                                      Namespace* namespc,
                                       const char* path,
                                       int events,
                                       bool recursive) {
@@ -439,7 +387,5 @@ intptr_t FileSystemWatcher::WatchPath(intptr_t id,
 }  // namespace bin
 }  // namespace dart
 
-#endif  // !HOST_OS_IOS
-#endif  // defined(HOST_OS_MACOS)
-
-#endif  // !defined(DART_IO_DISABLED)
+#endif  // !DART_HOST_OS_IOS
+#endif  // defined(DART_HOST_OS_MACOS)

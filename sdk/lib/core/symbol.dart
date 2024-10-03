@@ -6,48 +6,69 @@ part of dart.core;
 
 /// Opaque name used by mirrors, invocations and [Function.apply].
 abstract class Symbol {
-  /**
-   * Constructs a new Symbol.
-   *
-   * The name must be a valid public Dart member name,
-   * public constructor name, or library name, optionally qualified.
-   *
-   * A qualified name is a valid name preceded by a public identifier name
-   * and a '`.`', e.g., `foo.bar.baz=` is a qualified version of `baz=`.
-   * That means that the content of the [name] String must be either
-   *
-   * * a valid public Dart identifier
-   *   (that is, an identifier not starting with "`_`"),
-   * * such an identifier followed by "=" (a setter name),
-   * * the name of a declarable operator
-   *   (one of "`+`", "`-`", "`*`", "`/`", "`%`", "`~/`", "`&`", "`|`",
-   *   "`^`", "`~`", "`<<`", "`>>`", "`<`", "`<=`", "`>`", "`>=`", "`==`",
-   *   "`[]`", "`[]=`", or "`unary-`"),
-   * * any of the above preceded by any number of qualifiers,
-   *   where a qualifier is a non-private identifier followed by '`.`',
-   * * or the empty string (the default name of a library with no library
-   *   name declaration).
-   *
-   * The following text is non-normative:
-   *
-   * Creating non-const Symbol instances may result in larger output.  If
-   * possible, use `MirrorsUsed` from "dart:mirrors" to specify which names
-   * might be passed to this constructor.
-   */
+  /// The symbol corresponding to the name of the unary minus operator.
+  static const Symbol unaryMinus = Symbol("unary-");
+
+  /// The empty symbol.
+  ///
+  /// The empty symbol is the name of libraries with no library declaration,
+  /// and the base-name of the unnamed constructor.
+  static const Symbol empty = Symbol("");
+
+  /// Constructs a new [Symbol] representing the provided name.
+  ///
+  /// Symbols created from equal [name] strings are themselves equal.
+  /// If the symbols are created using `const`, symbols with the
+  /// same [name] strings are canonicalized and identical.
+  ///
+  /// Some [name] strings create symbols which can also be created using
+  /// a symbol literal, or be implicitly created while running Dart programs,
+  /// for example through [Object.noSuchMethod].
+  ///
+  /// If [name] is a single Dart identifier
+  /// that does not start with an underscore,
+  /// or it is a qualified identifier (multiple identifiers separated by `.`s),
+  /// or it is the name of a user definable operator different from `unary-`
+  /// (one of "`+`", "`-`", "`*`", "`/`", "`%`", "`~/`", "`&`", "`|`",
+  ///   "`^`", "`~`", "`<<`", "`>>`", "`>>>`", "`<`", "`<=`", "`>`", "`>=`",
+  ///   "`==`", "`[]`", or "`[]=`"),
+  /// then the result of `Symbol(name)` is equal to the symbol literal
+  /// created by prefixing `#` to the contents of [name],
+  /// and `const Symbol(name)` is identical to that symbol literal.
+  /// That is `#foo == Symbol("foo")` and
+  /// `identical(#foo, const Symbol("foo"))`.
+  ///
+  /// If [name] is a single identifier that does not start with an underscore
+  /// followed by a `=`, then the symbol is a setter name, and can be equal
+  /// to the [Invocation.memberName] in an [Object.noSuchMethod] invocation.
+  ///
+  /// Private symbol literals, like `#_foo`, cannot be created using the
+  /// symbol constructor.
+  /// A symbol like `const Symbol("_foo")` is not equal to any symbol literal,
+  /// or to any source name symbol introduced by `noSuchMethod`.
+  ///
+  /// ```dart
+  /// assert(Symbol("foo") == Symbol("foo"));
+  /// assert(Symbol("foo") == #foo);
+  /// assert(identical(const Symbol("foo"), const Symbol("foo")));
+  /// assert(identical(const Symbol("foo"), #foo));
+  /// assert(Symbol("[]=") == #[]=]);
+  /// assert(identical(const Symbol("[]="), #[]=));
+  /// assert(Symbol("foo.bar") == #foo.bar);
+  /// assert(identical(const Symbol("foo.bar"), #foo.bar));
+  /// ```
+  ///
+  /// The created instance overrides [Object.==].
   const factory Symbol(String name) = internal.Symbol;
 
-  /**
-   * Returns a hash code compatible with [operator==].
-   *
-   * Equal symbols have the same hash code.
-   */
+  /// Returns a hash code compatible with [operator==].
+  ///
+  /// Equal symbols have the same hash code.
   int get hashCode;
 
-  /**
-   * Symbols are equal to other symbols that correspond to the same member name.
-   *
-   * Qualified member names, like `#foo.bar` are equal only if they have the
-   * same identifiers before the same final member name.
-   */
-  bool operator ==(other);
+  /// Symbols are equal to other symbols with an equal (`==`) name string.
+  ///
+  /// Symbols representing library private names also need to represent
+  /// names from the same library.
+  bool operator ==(Object other);
 }

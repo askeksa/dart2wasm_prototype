@@ -4,46 +4,19 @@
 
 library fasta.codes;
 
-import 'package:front_end/src/scanner/token.dart' show Token;
+import 'package:_fe_analyzer_shared/src/messages/codes.dart'
+    hide demangleMixinApplicationName;
 
-part 'fasta_codes_generated.dart';
+import 'package:_fe_analyzer_shared/src/messages/severity.dart';
 
-class FastaCode<T> {
-  final String name;
+import 'package:kernel/ast.dart'
+    show Constant, DartType, demangleMixinApplicationName;
 
-  final String template;
+import 'kernel/type_labeler.dart';
 
-  final String tip;
+export 'package:_fe_analyzer_shared/src/messages/codes.dart'
+    hide demangleMixinApplicationName;
 
-  final String analyzerCode;
+export 'package:_fe_analyzer_shared/src/messages/severity.dart';
 
-  final String dart2jsCode;
-
-  final T format;
-
-  const FastaCode(this.name,
-      {this.template,
-      this.tip,
-      this.analyzerCode,
-      this.dart2jsCode,
-      this.format});
-
-  String toString() => name;
-}
-
-class FastaMessage {
-  final Uri uri;
-
-  final int charOffset;
-
-  final String message;
-
-  final String tip;
-
-  final FastaCode code;
-
-  final Map<String, dynamic> arguments;
-
-  const FastaMessage(this.uri, this.charOffset, this.code,
-      {this.message, this.tip, this.arguments});
-}
+part 'fasta_codes_cfe_generated.dart';

@@ -14,12 +14,11 @@ The compiler will operate in these general phases:
 
   1. **load kernel**: Load all the code as kernel
       * Collect dart sources transtively
-      * Convert to kernel AST  
-  
-  (this is will handled by invoking the front-end package)
-  
-  Alternatively, the compiler can start compilation directly from a kernel
-  file(s).
+      * Convert to kernel AST
+
+  (this will be handled by invoking the front-end package)
+
+  Alternatively, the compiler can start compilation directly from kernel files.
 
   2. **model**: Create a Dart model of the program
      * The kernel ASTs could be used as a model, so this might be a no-op or just
@@ -206,7 +205,7 @@ are some of the legacy terminology we have:
       Dart programs, like "libraries", "classes", "methods", etc.
 
     * **entity model**: also describes elements seen in Dart programs, but it is
-      meant to be minimalistic and a super-hierarcy above the *element models*.
+      meant to be minimalistic and a super-hierarchy above the *element models*.
       This is a newer addition, is an added abstraction to make it possible to
       refactor our code from our old frontend to the kernel frontend.
 
@@ -228,7 +227,7 @@ are some of the legacy terminology we have:
 
 ### Code layout
 
-Here are some details of our current code layout and what's on each file. This
+Here are some details of our current code layout and what's in each file. This
 list also includes some action items (labeled AI below), which are mainly
 cleanup tasks that we have been discussing for a while:
 
@@ -242,62 +241,31 @@ revisited
   AI: change how we build the SDK to launch dart2js from here, most logic might
   remain inside `lib/src/dart2js.dart` for testing purposes.
 
-* `bin/resolver.dart`: an experiemntal binary we used to run the resolver and
-  serializer. As we are moving to work on top of kernel this is deprecated and
-  should be deleted.
-
-  AI: delete this file.
-
 **lib folder**: API to use dart2js as a library. This is used by our
 command-line tool to launch dart2js, but also by pub to invoke dart2js as a
 library during `pub-build` and `pub-serve`.
 
-* `lib/compiler_new.dart`: the current API. This API is used by our command-line
+* `lib/compiler.dart`: the compiler API. This API is used by our command-line
   tool to spawn the dart2js compiler. This API (and everything that is
   transitively created from it) has no dependencies on `dart:io` so that the
   compiler can be used in contexts where `dart:io` is not available (e.g.
   running in a browser worker) or where `dart:io` is not used explicitly (e.g.
   running as a pub transformer).
 
-  AI: rename to `compiler.dart`.
-
-* `lib/compiler.dart`: a legacy API that now is implemented by adapting calls to
-  the new API in `compiler_new.dart`.
-
-  AI: migrate users to the new API (pub is one of those users, possibly dart-pad
-  is another), and delete the legacy API.
-
 **lib/src folder**: most of the compiler lives here, as very little of its
-funtionality is publicly exposed.
+functionality is publicly exposed.
 
 
 * `lib/src/dart2js.dart`: the command-line script that runs dart2js. When
   building the SDK, the dart2js snapshot is built using the main method on this
   script.  This file creates the parameters needed to invoke the API defined in
-  `lib/compiler_new.dart`. All dependencies on `dart:io` come from here. This is
+  `lib/compiler.dart`. All dependencies on `dart:io` come from here. This is
   also where we process options (although some of the logic is done in
   `options.dart`).
 
 * `lib/src/compiler.dart`: defines the core `Compiler` object, which contains
   all the logic about what the compiler pipeline does and how data is organized
-  and communicated between different phases. For a long time, `Compiler` was
-  also used throughout the system as a global dependency-injection object.
-  We've been slowly disentangling those dependencies, but there are still many
-  references to `compiler` still in use.
-
-* `lib/src/apiimpl.dart`: defines `CompilerImpl` a subclass of `Compiler` that
-  adds support for loading scripts, resolving package URIs and patch files. The
-  separation here is a bit historical and we should be able to remove it. It was
-  added to make it easier to create a `MockCompiler` implementation for unit
-  testing. The `MockCompiler` has been replaced in most unit tests by a regular
-  `CompilerImpl` that uses a mock of the file-system (see
-  `tests/compiler/dart2js/memory_compiler.dart`).
-
-  AI: Once all tests are migrated to this memory compiler, we should merge
-  `Compiler` and `CompilerImpl` and remove this file.
-
-* `lib/src/old_to_new_api.dart`: helper library used to adapt the public API in
-  `lib/compiler.dart` to `lib/compiler_new.dart`.
+  and communicated between different phases.
 
 * `lib/src/closure.dart`: closures are compiled as classes, this file has the
   logic to do this kind of conversion in the Dart element model. This includes
@@ -334,59 +302,20 @@ funtionality is publicly exposed.
   AI: consider deleting this file.
 
 
-* Constants: the compiler has a constant system that delays evaluation of
-  constants and provides different semantics depending on the embedder, this
-  abstraction was especially necessary when dart2js was used as a front-end for
-  non-JS systems like dart2dart and dartino.
-
-  * `lib/src/constants/expressions.dart`: this is how constants are represented
-    after they are parsed but before they are evaluated. It is a target
-    agnostic representation, all expressions are kept as they appear in the
-    source, and it doesn't replace _environemnt_ values that are provided on the
-    command line. In particular, the constant `1 == 1.0` is represented as an
-    expression that includes the `==` binary expression, and `const
-    String.fromEnvironment("FOO")` is not expanded.
+* Constants: the compiler has a constant system that evaluates constant
+  expressions based on JS semantics.
 
   * `lib/src/constants/value.dart`: this is the represented value of a constant
-    after it has been evaluated. The resulting value is specific to the target
-    of the compiler and will no longer have environment placeholders. For
-    example, when the target is Dart (dart2dart) `1 == 1.0` is evaluated to
-    `false`, and when the target is JavaScript it is evaluated to `true`. This
-    specific example is a result of the way dart2js compiles numbers as
-    JavaScript Numbers.
+    after it has been evaluated.
 
-  * `lib/src/constants/evaluation.dart`: defines the algorithm to turn an
-    expression into a value.
-
-  * `lib/src/constants/constant_system.dart`: an abstraction that defines how
-    expressions may be folded. Different implementations of the constant system
-    are used to target Dart or JavaScript.
-
-  * `lib/src/compile_time_constants.dart`: defines how constant expresions are
-    created from a parsed AST.
-
-  * `lib/src/constant_system_dart.dart`: defines an implementation of a constant
-    system with the Dart semantics (where `1 == 1.0` is true).
-
-  * `lib/src/js_backend/constant_system_javascript.dart`: defines an
-    implementation of a constant system with the JavaScript semantics (where
-    `1 == 1.0` is false).
-
-  * `lib/src/constants/constructors.dart` and
-    `lib/src/constants/constant_constructors.dart`: used to define expressions
-    containing constant constructors. They depend on the resolver to figure out
-    what is the meaning of an initializer or a field on a constructed constant
-    created this way.
-
-  AI: consider deleting `constant_system_dart.dart` now that it is no longer
-  used, or move under testing, if it might be used for unittests of the constant
-  expressions.
+  * `lib/src/constants/constant_system.dart`: implements evaluating constant
+    Dart expressions and produces values.
 
 * Common elements: the compiler often refers to certain elements during
   compilation either because they are first-class in the language or because
   they are implicitly used to implement some features. These include:
 
-  * `lib/src/common_elements.dart`: provides an interface to lookup basic
+  * `lib/src/common/elements.dart`: provides an interface to lookup basic
     elements like the class of `Object`, `int`, `List`, and their corresponding
     interface types, constructors for symbols, annotations such as
     `@MirrorsUsed`, the `identical` function, etc. These are normally restricted
@@ -397,16 +326,11 @@ funtionality is publicly exposed.
     representation of JSInt31, JSArray, and other implementation-specific
     elements.
 
-* `lib/src/dart2js_resolver.dart`: a script to run the compiler up to resolution
-  and to generate a serialized json representation of the element model.
-
-  AI: delete.
-
-* `lib/src/deferred_load.dart`: general analysis for deferred loading. This is
-  where we compute how to split the code in different JS chunks or fragments.
-  This is run after resolution, but at a time when no code is generated yet, so
-  the decisions made here are used later on by the emitter to dump code into
-  different files.
+* `lib/src/deferred_load/deferred_load.dart`: general analysis for deferred
+  loading. This is where we compute how to split the code in different JS chunks
+  or fragments.  This is run after resolution, but at a time when no code is
+  generated yet, so the decisions made here are used later on by the emitter to
+  dump code into different files.
 
 * `lib/src/dump_info.dart`: a special phase used to create a .info.json file.
   This file contains lots of information computed by dart2js including decisions
@@ -455,10 +379,10 @@ funtionality is publicly exposed.
 * Input/output: the compiler is designed to avoid all dependencies on dart:io.
   Most data is consumed and emitted via provider APIs.
 
-  * `lib/src/compiler_new.dart`: defines the interface of these providers (see
+  * `lib/src/compiler.dart`: defines the interface of these providers (see
     `CompilerInput` and `CompilerOutput`).
 
-  * `lib/src/null_compiler_output.dart`: an `CompilerOutput` that discards all
+  * `lib/src/null_compiler_output.dart`: a `CompilerOutput` that discards all
     data written to it (name derives from /dev/null).
 
   * `lib/src/source_file_provider.dart`: _TODO: add details_.
@@ -498,9 +422,6 @@ funtionality is publicly exposed.
 
   * sdk patch files are hardcoded in the codebase in
     `lib/src/js_backend/backend.dart` (see `_patchLocations`).
-
-  * package resolution is specified with a `.packages` file, which is parsed
-    using the `package_config` package.
 
   * `lib/src/resolved_uri_translator.dart`: has the logic to translate all these
     URIs when they are encountered by the library loader.
@@ -563,7 +484,7 @@ funtionality is publicly exposed.
 * `tool`: some helper scripts, some of these could be deleted
 
   * `tool/perf.dart`: used by our benchmark runners to measure performance of
-    some frontend pieces of dart2js. We shuld be able to delete it in the near
+    some frontend pieces of dart2js. We should be able to delete it in the near
     future once the front end code is moved into `fasta`.
 
   * `tool/perf_test.dart`: small test to ensure we don't break `perf.dart`.
@@ -615,11 +536,6 @@ funtionality is publicly exposed.
    * `lib/src/inferrer/map_tracer.dart`
    * `lib/src/inferrer/builder.dart`
 
-* Serialization (`lib/src/serialization/*`: the compiler had support to emit a
-  serialized form of the element model. This is likely going to be deleted in
-  the near future (it was created before we had the intent to use kernel as a
-  serialization format).
-
 ---------
 
 _TODO: complete the documentation for the following files_.
@@ -668,9 +584,6 @@ _TODO: complete the documentation for the following files_.
 `lib/src/js_emitter/type_test_registry.dart`
 `lib/src/js_emitter/js_emitter.dart.rej`
 `lib/src/js_emitter/class_stub_generator.dart`
-`lib/src/js_emitter/lazy_emitter`
-`lib/src/js_emitter/lazy_emitter/model_emitter.dart`
-`lib/src/js_emitter/lazy_emitter/emitter.dart`
 `lib/src/js_emitter/startup_emitter`
 `lib/src/js_emitter/startup_emitter/deferred_fragment_hash.dart`
 `lib/src/js_emitter/startup_emitter/model_emitter.dart`
@@ -693,8 +606,6 @@ _TODO: complete the documentation for the following files_.
 
 `lib/src/diagnostics`
 `lib/src/diagnostics/invariant.dart`
-`lib/src/diagnostics/generated`
-`lib/src/diagnostics/generated/shared_messages.dart`
 `lib/src/diagnostics/messages.dart`
 `lib/src/diagnostics/source_span.dart`
 `lib/src/diagnostics/code_location.dart`
@@ -743,15 +654,6 @@ _TODO: complete the documentation for the following files_.
 `lib/src/scanner`
 `lib/src/scanner/scanner_task.dart`
 
-`lib/src/helpers`
-`lib/src/helpers/trace.dart`
-`lib/src/helpers/debug_collection.dart`
-`lib/src/helpers/expensive_map.dart`
-`lib/src/helpers/helpers.dart`
-`lib/src/helpers/track_map.dart`
-`lib/src/helpers/expensive_set.dart`
-`lib/src/helpers/stats.dart`
-
 `lib/src/js`
 `lib/src/js/js.dart`
 `lib/src/js/placeholder_safety.dart`
@@ -787,13 +689,11 @@ _TODO: complete the documentation for the following files_.
 `lib/src/js_backend/js_interop_analysis.dart`
 `lib/src/js_backend/backend_impact.dart`
 `lib/src/js_backend/constant_emitter.dart`
-`lib/src/js_backend/lookup_map_analysis.dart`
 `lib/src/js_backend/namer_names.dart`
 `lib/src/js_backend/runtime_types.dart`
 `lib/src/js_backend/no_such_method_registry.dart`
 `lib/src/js_backend/constant_system_javascript.dart`
 `lib/src/js_backend/backend.dart`
-`lib/src/js_backend/backend_serialization.dart`
 `lib/src/js_backend/checked_mode_helpers.dart`
 `lib/src/js_backend/constant_handler_javascript.dart`
 

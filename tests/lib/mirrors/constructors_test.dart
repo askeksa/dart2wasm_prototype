@@ -4,7 +4,6 @@
 
 library test.constructors_test;
 
-@MirrorsUsed(targets: "test.constructors_test")
 import 'dart:mirrors';
 
 import 'package:expect/expect.dart';
@@ -12,7 +11,7 @@ import 'package:expect/expect.dart';
 import 'stringify.dart';
 
 constructorsOf(ClassMirror cm) {
-  var result = new Map();
+  var result = new Map<Symbol, MethodMirror>();
   cm.declarations.forEach((k, v) {
     if (v is MethodMirror && v.isConstructor) result[k] = v;
   });

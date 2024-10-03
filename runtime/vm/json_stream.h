@@ -6,11 +6,12 @@
 #define RUNTIME_VM_JSON_STREAM_H_
 
 #include "include/dart_api.h"  // for Dart_Port
+#include "platform/allocation.h"
 #include "platform/text_buffer.h"
-#include "vm/allocation.h"
+#include "vm/json_writer.h"
+#include "vm/os.h"
 #include "vm/service.h"
 #include "vm/token_position.h"
-
 
 namespace dart {
 
@@ -34,11 +35,11 @@ class Thread;
 class ThreadRegistry;
 class Zone;
 
-
 // Keep this enum in sync with:
 //
 //  - runtime/vm/service/vmservice.dart
 //  - runtime/observatory/lib/src/service/object.dart
+//  - pkg/dds/lib/src/rpc_error_codes.dart
 //
 enum JSONRpcErrorCode {
   kParseError = -32700,
@@ -58,6 +59,11 @@ enum JSONRpcErrorCode {
   kCannotResume = 107,
   kIsolateIsReloading = 108,
   kIsolateReloadBarred = 109,
+  kIsolateMustHaveReloaded = 110,
+  kServiceAlreadyRegistered = 111,
+  kServiceDisappeared = 112,
+  kExpressionCompilationError = 113,
+  kInvalidTimelineRequest = 114,
 
   // Experimental (used in private rpcs).
   kFileSystemAlreadyExists = 1001,
@@ -65,17 +71,11 @@ enum JSONRpcErrorCode {
   kFileDoesNotExist = 1003,
 };
 
-// Expected that user_data is a JSONStream*.
-void AppendJSONStreamConsumer(Dart_StreamConsumer_State state,
-                              const char* stream_name,
-                              const uint8_t* buffer,
-                              intptr_t buffer_length,
-                              void* user_data);
-
+// Builds on JSONWriter to provide support for serializing various objects
+// used in the VM service protocol.
 class JSONStream : ValueObject {
  public:
   explicit JSONStream(intptr_t buf_size = 256);
-  ~JSONStream();
 
   void Setup(Zone* zone,
              Dart_Port reply_port,
@@ -86,19 +86,34 @@ class JSONStream : ValueObject {
              bool parameters_are_dart_objects = false);
   void SetupError();
 
-  void PrintError(intptr_t code, const char* details_format, ...);
+  void PrintError(intptr_t code, const char* details_format, ...)
+      PRINTF_ATTRIBUTE(3, 4);
 
   void PostReply();
 
   void set_id_zone(ServiceIdZone* id_zone) { id_zone_ = id_zone; }
   ServiceIdZone* id_zone() { return id_zone_; }
 
-  TextBuffer* buffer() { return &buffer_; }
-  const char* ToCString() { return buffer_.buf(); }
+  TextBuffer* buffer() { return writer_.buffer(); }
+  const char* ToCString() { return writer_.ToCString(); }
 
-  void Steal(char** buffer, intptr_t* buffer_length);
+  void Steal(char** buffer, intptr_t* buffer_length) {
+    writer_.Steal(buffer, buffer_length);
+  }
 
   void set_reply_port(Dart_Port port);
+
+  bool include_private_members() const { return include_private_members_; }
+  void set_include_private_members(bool include_private_members) {
+    include_private_members_ = include_private_members;
+  }
+
+  bool IsAllowableKey(const char* key) {
+    if (include_private_members_) {
+      return true;
+    }
+    return *key != '_';
+  }
 
   void SetParams(const char** param_keys,
                  const char** param_values,
@@ -107,9 +122,9 @@ class JSONStream : ValueObject {
   Dart_Port reply_port() const { return reply_port_; }
 
   intptr_t NumObjectParameters() const;
-  RawObject* GetObjectParameterKey(intptr_t i) const;
-  RawObject* GetObjectParameterValue(intptr_t i) const;
-  RawObject* LookupObjectParam(const char* key) const;
+  ObjectPtr GetObjectParameterKey(intptr_t i) const;
+  ObjectPtr GetObjectParameterValue(intptr_t i) const;
+  ObjectPtr LookupObjectParam(const char* key) const;
 
   intptr_t num_params() const { return num_params_; }
   const char* GetParamKey(intptr_t i) const { return param_keys_[i]; }
@@ -142,39 +157,85 @@ class JSONStream : ValueObject {
                              intptr_t* count);
 
   // Append |serialized_object| to the stream.
-  void AppendSerializedObject(const char* serialized_object);
-
-  void PrintCommaIfNeeded();
+  void AppendSerializedObject(const char* serialized_object) {
+    writer_.AppendSerializedObject(serialized_object);
+  }
 
   // Append |buffer| to the stream.
-  void AppendSerializedObject(const uint8_t* buffer, intptr_t buffer_length);
+  void AppendSerializedObject(const uint8_t* buffer, intptr_t buffer_length) {
+    writer_.AppendSerializedObject(buffer, buffer_length);
+  }
 
   // Append |serialized_object| to the stream with |property_name|.
   void AppendSerializedObject(const char* property_name,
-                              const char* serialized_object);
+                              const char* serialized_object) {
+    writer_.AppendSerializedObject(property_name, serialized_object);
+  }
+
+  void PrintCommaIfNeeded() { writer_.PrintCommaIfNeeded(); }
 
  private:
-  void Clear();
+  void Clear() { writer_.Clear(); }
+
   void PostNullReply(Dart_Port port);
 
-  void OpenObject(const char* property_name = NULL);
-  void CloseObject();
+  void OpenObject(const char* property_name = NULL) {
+    if (ignore_object_depth_ > 0 ||
+        (property_name != nullptr && !IsAllowableKey(property_name))) {
+      ignore_object_depth_++;
+      return;
+    }
+    writer_.OpenObject(property_name);
+  }
+  void CloseObject() {
+    if (ignore_object_depth_ > 0) {
+      ignore_object_depth_--;
+      return;
+    }
+    writer_.CloseObject();
+  }
+  void UncloseObject() {
+    // This should be updated to handle unclosing a private object if we need
+    // to handle that case, which we don't currently.
+    writer_.UncloseObject();
+  }
 
-  void OpenArray(const char* property_name = NULL);
-  void CloseArray();
+  void OpenArray(const char* property_name = NULL) {
+    if (ignore_object_depth_ > 0 ||
+        (property_name != nullptr && !IsAllowableKey(property_name))) {
+      ignore_object_depth_++;
+      return;
+    }
+    writer_.OpenArray(property_name);
+  }
+  void CloseArray() {
+    if (ignore_object_depth_ > 0) {
+      ignore_object_depth_--;
+      return;
+    }
+    writer_.CloseArray();
+  }
 
-  void PrintValueNull();
-  void PrintValueBool(bool b);
-  void PrintValue(intptr_t i);
-  void PrintValue64(int64_t i);
-  void PrintValueTimeMillis(int64_t millis);
-  void PrintValueTimeMicros(int64_t micros);
-  void PrintValue(double d);
-  void PrintValueBase64(const uint8_t* bytes, intptr_t length);
-  void PrintValue(const char* s);
-  void PrintValue(const char* s, intptr_t len);
-  void PrintValueNoEscape(const char* s);
+  void PrintValueNull() { writer_.PrintValueNull(); }
+  void PrintValueBool(bool b) { writer_.PrintValueBool(b); }
+  void PrintValue(intptr_t i) { writer_.PrintValue(i); }
+  void PrintValue64(int64_t i) { writer_.PrintValue64(i); }
+  void PrintValueTimeMillis(int64_t millis) { writer_.PrintValue64(millis); }
+  void PrintValueTimeMicros(int64_t micros) { writer_.PrintValue64(micros); }
+  void PrintValue(double d) { writer_.PrintValue(d); }
+  void PrintValueBase64(const uint8_t* bytes, intptr_t length) {
+    writer_.PrintValueBase64(bytes, length);
+  }
+  void PrintValue(const char* s) { writer_.PrintValue(s); }
+  void PrintValueNoEscape(const char* s) { writer_.PrintValueNoEscape(s); }
+  bool PrintValueStr(const String& s, intptr_t offset, intptr_t count) {
+    return writer_.PrintValueStr(s, offset, count);
+  }
   void PrintfValue(const char* format, ...) PRINTF_ATTRIBUTE(2, 3);
+  void VPrintfValue(const char* format, va_list args) {
+    writer_.VPrintfValue(format, args);
+  }
+
   void PrintValue(const Object& o, bool ref = true);
   void PrintValue(Breakpoint* bpt);
   void PrintValue(TokenPosition tp);
@@ -182,31 +243,74 @@ class JSONStream : ValueObject {
   void PrintValue(Metric* metric);
   void PrintValue(MessageQueue* queue);
   void PrintValue(Isolate* isolate, bool ref = true);
-  void PrintValue(ThreadRegistry* reg);
-  void PrintValue(Thread* thread);
-  bool PrintValueStr(const String& s, intptr_t offset, intptr_t count);
+  void PrintValue(IsolateGroup* isolate, bool ref = true);
   void PrintValue(const TimelineEvent* timeline_event);
   void PrintValue(const TimelineEventBlock* timeline_event_block);
   void PrintValueVM(bool ref = true);
 
   void PrintServiceId(const Object& o);
-  void PrintPropertyBool(const char* name, bool b);
-  void PrintProperty(const char* name, intptr_t i);
-  void PrintProperty64(const char* name, int64_t i);
-  void PrintPropertyTimeMillis(const char* name, int64_t millis);
-  void PrintPropertyTimeMicros(const char* name, int64_t micros);
-  void PrintProperty(const char* name, double d);
+
+#define PRIVATE_NAME_CHECK()                                                   \
+  if (!IsAllowableKey(name) || ignore_object_depth_ > 0) {                     \
+    return;                                                                    \
+  }
+
+  void PrintPropertyBool(const char* name, bool b) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintPropertyBool(name, b);
+  }
+  void PrintProperty(const char* name, intptr_t i) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintProperty(name, i);
+  }
+  void PrintProperty64(const char* name, int64_t i) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintProperty64(name, i);
+  }
+  void PrintPropertyTimeMillis(const char* name, int64_t millis) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintProperty64(name, millis);
+  }
+  void PrintPropertyTimeMicros(const char* name, int64_t micros) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintProperty64(name, micros);
+  }
+  void PrintProperty(const char* name, double d) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintProperty(name, d);
+  }
   void PrintPropertyBase64(const char* name,
                            const uint8_t* bytes,
-                           intptr_t length);
-  void PrintProperty(const char* name, const char* s);
+                           intptr_t length) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintPropertyBase64(name, bytes, length);
+  }
+  void PrintProperty(const char* name, const char* s) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintProperty(name, s);
+  }
   bool PrintPropertyStr(const char* name,
                         const String& s,
                         intptr_t offset,
-                        intptr_t count);
-  void PrintPropertyNoEscape(const char* name, const char* s);
+                        intptr_t count) {
+    if (!IsAllowableKey(name)) {
+      return false;
+    }
+    return writer_.PrintPropertyStr(name, s, offset, count);
+  }
+  void PrintPropertyNoEscape(const char* name, const char* s) {
+    PRIVATE_NAME_CHECK();
+    writer_.PrintPropertyNoEscape(name, s);
+  }
   void PrintfProperty(const char* name, const char* format, ...)
       PRINTF_ATTRIBUTE(3, 4);
+  void VPrintfProperty(const char* name, const char* format, va_list args) {
+    PRIVATE_NAME_CHECK();
+    writer_.VPrintfProperty(name, format, args);
+  }
+
+#undef PRIVATE_NAME_CHECK
+
   void PrintProperty(const char* name, const Object& o, bool ref = true);
 
   void PrintProperty(const char* name, const ServiceEvent* event);
@@ -215,27 +319,18 @@ class JSONStream : ValueObject {
   void PrintProperty(const char* name, Metric* metric);
   void PrintProperty(const char* name, MessageQueue* queue);
   void PrintProperty(const char* name, Isolate* isolate);
-  void PrintProperty(const char* name, ThreadRegistry* reg);
-  void PrintProperty(const char* name, Thread* thread);
   void PrintProperty(const char* name, Zone* zone);
   void PrintProperty(const char* name, const TimelineEvent* timeline_event);
   void PrintProperty(const char* name,
                      const TimelineEventBlock* timeline_event_block);
   void PrintPropertyVM(const char* name, bool ref = true);
-  void PrintPropertyName(const char* name);
-  bool NeedComma();
+  void PrintPropertyName(const char* name) { writer_.PrintPropertyName(name); }
 
-  bool AddDartString(const String& s, intptr_t offset, intptr_t count);
-  void AddEscapedUTF8String(const char* s);
-  void AddEscapedUTF8String(const char* s, intptr_t len);
+  void AddEscapedUTF8String(const char* s, intptr_t len) {
+    writer_.AddEscapedUTF8String(s, len);
+  }
 
-  intptr_t nesting_level() const { return open_objects_; }
-
-  // Debug only fatal assertion.
-  static void EnsureIntegerIsRepresentableInJavaScript(int64_t i);
-
-  intptr_t open_objects_;
-  TextBuffer buffer_;
+  JSONWriter writer_;
   // Default service id zone.
   RingServiceIdZone default_id_zone_;
   ServiceIdZone* id_zone_;
@@ -250,11 +345,12 @@ class JSONStream : ValueObject {
   intptr_t offset_;
   intptr_t count_;
   int64_t setup_time_micros_;
-
+  bool include_private_members_;
+  intptr_t ignore_object_depth_;
   friend class JSONObject;
   friend class JSONArray;
+  friend class TimelineEvent;
 };
-
 
 class JSONObject : public ValueObject {
  public:
@@ -271,6 +367,7 @@ class JSONObject : public ValueObject {
   void AddServiceId(const Object& o) const { stream_->PrintServiceId(o); }
 
   void AddFixedServiceId(const char* format, ...) const PRINTF_ATTRIBUTE(2, 3);
+  void AddServiceId(const char* format, ...) const PRINTF_ATTRIBUTE(2, 3);
 
   void AddLocation(
       const Script& script,
@@ -337,12 +434,6 @@ class JSONObject : public ValueObject {
   void AddProperty(const char* name, Isolate* isolate) const {
     stream_->PrintProperty(name, isolate);
   }
-  void AddProperty(const char* name, ThreadRegistry* reg) const {
-    stream_->PrintProperty(name, reg);
-  }
-  void AddProperty(const char* name, Thread* thread) const {
-    stream_->PrintProperty(name, thread);
-  }
   void AddProperty(const char* name, Zone* zone) const {
     stream_->PrintProperty(name, zone);
   }
@@ -368,7 +459,6 @@ class JSONObject : public ValueObject {
   DISALLOW_ALLOCATION();
   DISALLOW_COPY_AND_ASSIGN(JSONObject);
 };
-
 
 class JSONArray : public ValueObject {
  public:
@@ -401,8 +491,9 @@ class JSONArray : public ValueObject {
   void AddValue(Isolate* isolate, bool ref = true) const {
     stream_->PrintValue(isolate, ref);
   }
-  void AddValue(ThreadRegistry* reg) const { stream_->PrintValue(reg); }
-  void AddValue(Thread* thread) const { stream_->PrintValue(thread); }
+  void AddValue(IsolateGroup* isolate_group, bool ref = true) const {
+    stream_->PrintValue(isolate_group, ref);
+  }
   void AddValue(Breakpoint* bpt) const { stream_->PrintValue(bpt); }
   void AddValue(TokenPosition tp) const { stream_->PrintValue(tp); }
   void AddValue(const ServiceEvent* event) const { stream_->PrintValue(event); }

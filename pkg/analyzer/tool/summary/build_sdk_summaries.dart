@@ -1,13 +1,17 @@
+// Copyright (c) 2015, the Dart project authors. Please see the AUTHORS file
+// for details. All rights reserved. Use of this source code is governed by a
+// BSD-style license that can be found in the LICENSE file.
+
 import 'dart:io';
 
+import 'package:analyzer/dart/sdk/build_sdk_summary.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
-import 'package:analyzer/src/dart/sdk/sdk.dart';
-import 'package:analyzer/src/summary/summary_file_builder.dart';
+import 'package:analyzer/src/util/sdk.dart';
 
-main(List<String> args) {
+void main(List<String> args) {
   String command;
   String outFilePath;
-  String sdkPath;
+  String? sdkPath;
   if (args.length == 2) {
     command = args[0];
     outFilePath = args[1];
@@ -24,9 +28,7 @@ main(List<String> args) {
   //
   // Validate the SDK path.
   //
-  sdkPath ??= FolderBasedDartSdk
-      .defaultSdkDirectory(PhysicalResourceProvider.INSTANCE)
-      .path;
+  sdkPath ??= getSdkPath();
   if (!FileSystemEntity.isDirectorySync('$sdkPath/lib')) {
     print("'$sdkPath/lib' does not exist.");
     _printUsage();
@@ -36,38 +38,32 @@ main(List<String> args) {
   //
   // Handle commands.
   //
-  if (command == 'build-spec') {
-    _buildSummary(sdkPath, outFilePath, false);
-  } else if (command == 'build-strong') {
-    _buildSummary(sdkPath, outFilePath, true);
+  if (command == 'build' || command == 'build-strong') {
+    _buildSummary(sdkPath, outFilePath);
   } else {
     _printUsage();
     return;
   }
 }
 
-/**
- * The name of the SDK summaries builder application.
- */
+/// The name of the SDK summaries builder application.
 const BINARY_NAME = "build_sdk_summaries";
 
-void _buildSummary(String sdkPath, String outPath, bool strong) {
-  String modeName = strong ? 'strong' : 'spec';
-  print('Generating $modeName mode summary.');
-  Stopwatch sw = new Stopwatch()..start();
-  List<int> bytes = new SummaryBuilder.forSdk(sdkPath, strong).build();
-  new File(outPath).writeAsBytesSync(bytes, mode: FileMode.WRITE_ONLY);
+void _buildSummary(String sdkPath, String outPath) {
+  print('Generating summary.');
+  Stopwatch sw = Stopwatch()..start();
+  List<int> bytes = buildSdkSummary(
+    resourceProvider: PhysicalResourceProvider.INSTANCE,
+    sdkPath: sdkPath,
+  );
+  File(outPath).writeAsBytesSync(bytes, mode: FileMode.writeOnly);
   print('\tDone in ${sw.elapsedMilliseconds} ms.');
 }
 
-/**
- * Print information about how to use the SDK summaries builder.
- */
+/// Print information about how to use the SDK summaries builder.
 void _printUsage() {
   print('Usage: $BINARY_NAME command arguments');
   print('Where command can be one of the following:');
-  print('  build-spec output_file [sdk_path]');
-  print('    Generate spec mode summary file.');
-  print('  build-strong output_file [sdk_path]');
-  print('    Generate strong mode summary file.');
+  print('  build output_file [sdk_path]');
+  print('    Generate summary file.');
 }

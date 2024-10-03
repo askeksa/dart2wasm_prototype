@@ -16,33 +16,364 @@ class ObjectPointerVisitor;
 // A list of the bootstrap libraries including CamelName and name.
 //
 // These are listed in the order that they are compiled (see vm/bootstrap.cc).
-#define FOR_EACH_PRODUCT_LIBRARY(M)                                            \
+#define FOR_EACH_BOOTSTRAP_LIBRARY(M)                                          \
   M(Core, core)                                                                \
   M(Async, async)                                                              \
   M(Collection, collection)                                                    \
   M(Convert, convert)                                                          \
   M(Developer, developer)                                                      \
+  M(Ffi, ffi)                                                                  \
   M(Internal, _internal)                                                       \
   M(Isolate, isolate)                                                          \
   M(Math, math)                                                                \
-  M(Profiler, profiler)                                                        \
+  M(Mirrors, mirrors)                                                          \
   M(TypedData, typed_data)                                                     \
   M(VMService, _vmservice)
 
-#ifdef PRODUCT
-#define FOR_EACH_BOOTSTRAP_LIBRARY(M) FOR_EACH_PRODUCT_LIBRARY(M)
+// TODO(liama): Once NNBD is enabled, *_type will be deleted and all uses will
+// be replaced with *_type_non_nullable. Later, once we drop support for opted
+// out code, *_type_legacy will be deleted.
+//
+// R_ - needs getter only
+// RW - needs getter and setter
+// ARW_RELAXED - needs getter and setter with relaxed atomic access
+// ARW_AR - needs getter and setter with acq/rel atomic access
+// LAZY_CORE - needs lazy init getter for a "dart:core" member
+// LAZY_ASYNC - needs lazy init getter for a "dart:async" member
+// LAZY_ISOLATE - needs lazy init getter for a "dart:isolate" member
+// LAZY_INTERNAL - needs lazy init getter for a "dart:_internal" member
+#define OBJECT_STORE_FIELD_LIST(R_, RW, ARW_RELAXED, ARW_AR, LAZY_CORE,        \
+                                LAZY_ASYNC, LAZY_ISOLATE, LAZY_INTERNAL)       \
+  LAZY_CORE(Class, list_class)                                                 \
+  LAZY_CORE(Type, non_nullable_list_rare_type)                                 \
+  LAZY_CORE(Type, non_nullable_map_rare_type)                                  \
+  LAZY_CORE(Field, enum_index_field)                                           \
+  LAZY_CORE(Field, enum_name_field)                                            \
+  LAZY_CORE(Function, _object_equals_function)                                 \
+  LAZY_CORE(Function, _object_hash_code_function)                              \
+  LAZY_CORE(Function, _object_to_string_function)                              \
+  LAZY_INTERNAL(Class, symbol_class)                                           \
+  LAZY_INTERNAL(Field, symbol_name_field)                                      \
+  LAZY_ASYNC(Type, non_nullable_future_rare_type)                              \
+  LAZY_ASYNC(Type, non_nullable_future_never_type)                             \
+  LAZY_ASYNC(Type, nullable_future_null_type)                                  \
+  LAZY_ISOLATE(Function, lookup_port_handler)                                  \
+  LAZY_ISOLATE(Function, lookup_open_ports)                                    \
+  LAZY_ISOLATE(Function, handle_message_function)                              \
+  RW(Class, object_class)                                                      \
+  RW(Type, object_type)                                                        \
+  RW(Type, legacy_object_type)                                                 \
+  RW(Type, non_nullable_object_type)                                           \
+  RW(Type, nullable_object_type)                                               \
+  RW(Class, null_class)                                                        \
+  RW(Type, null_type)                                                          \
+  RW(Class, never_class)                                                       \
+  RW(Type, never_type)                                                         \
+  RW(Type, function_type)                                                      \
+  RW(Type, type_type)                                                          \
+  RW(Class, closure_class)                                                     \
+  RW(Type, number_type)                                                        \
+  RW(Type, int_type)                                                           \
+  RW(Type, legacy_int_type)                                                    \
+  RW(Type, non_nullable_int_type)                                              \
+  RW(Type, nullable_int_type)                                                  \
+  RW(Class, integer_implementation_class)                                      \
+  RW(Type, int64_type)                                                         \
+  RW(Class, smi_class)                                                         \
+  RW(Type, smi_type)                                                           \
+  RW(Class, mint_class)                                                        \
+  RW(Type, mint_type)                                                          \
+  RW(Class, double_class)                                                      \
+  RW(Type, double_type)                                                        \
+  RW(Type, nullable_double_type)                                               \
+  RW(Type, float32x4_type)                                                     \
+  RW(Type, int32x4_type)                                                       \
+  RW(Type, float64x2_type)                                                     \
+  RW(Type, string_type)                                                        \
+  RW(Type, legacy_string_type)                                                 \
+  RW(TypeArguments, type_argument_int)                                         \
+  RW(TypeArguments, type_argument_legacy_int)                                  \
+  RW(TypeArguments, type_argument_double)                                      \
+  RW(TypeArguments, type_argument_string)                                      \
+  RW(TypeArguments, type_argument_legacy_string)                               \
+  RW(TypeArguments, type_argument_string_dynamic)                              \
+  RW(TypeArguments, type_argument_string_string)                               \
+  RW(Class, compiletime_error_class)                                           \
+  RW(Class, pragma_class)                                                      \
+  RW(Field, pragma_name)                                                       \
+  RW(Field, pragma_options)                                                    \
+  RW(Class, future_class)                                                      \
+  RW(Class, completer_class)                                                   \
+  RW(Class, one_byte_string_class)                                             \
+  RW(Class, two_byte_string_class)                                             \
+  RW(Class, external_one_byte_string_class)                                    \
+  RW(Class, external_two_byte_string_class)                                    \
+  RW(Type, bool_type)                                                          \
+  RW(Class, bool_class)                                                        \
+  RW(Class, array_class)                                                       \
+  RW(Type, array_type)                                                         \
+  RW(Class, immutable_array_class)                                             \
+  RW(Class, growable_object_array_class)                                       \
+  RW(Class, linked_hash_map_class)                                             \
+  RW(Class, immutable_linked_hash_map_class)                                   \
+  RW(Class, linked_hash_set_class)                                             \
+  RW(Class, immutable_linked_hash_set_class)                                   \
+  RW(Class, float32x4_class)                                                   \
+  RW(Class, int32x4_class)                                                     \
+  RW(Class, float64x2_class)                                                   \
+  RW(Class, error_class)                                                       \
+  RW(Class, expando_class)                                                     \
+  RW(Class, weak_property_class)                                               \
+  RW(Class, weak_reference_class)                                              \
+  ARW_AR(Array, symbol_table)                                                  \
+  RW(Array, canonical_types)                                                   \
+  RW(Array, canonical_function_types)                                          \
+  RW(Array, canonical_type_parameters)                                         \
+  RW(Array, canonical_type_arguments)                                          \
+  RW(Library, async_library)                                                   \
+  RW(Library, core_library)                                                    \
+  RW(Library, collection_library)                                              \
+  RW(Library, convert_library)                                                 \
+  RW(Library, developer_library)                                               \
+  RW(Library, ffi_library)                                                     \
+  RW(Library, _internal_library)                                               \
+  RW(Library, isolate_library)                                                 \
+  RW(Library, math_library)                                                    \
+  RW(Library, mirrors_library)                                                 \
+  RW(Library, native_wrappers_library)                                         \
+  RW(Library, root_library)                                                    \
+  RW(Library, typed_data_library)                                              \
+  RW(Library, _vmservice_library)                                              \
+  RW(GrowableObjectArray, libraries)                                           \
+  RW(Array, libraries_map)                                                     \
+  RW(Array, uri_to_resolved_uri_map)                                           \
+  RW(Array, resolved_uri_to_uri_map)                                           \
+  RW(Smi, last_libraries_count)                                                \
+  RW(Array, loading_units)                                                     \
+  RW(GrowableObjectArray, closure_functions)                                   \
+  RW(GrowableObjectArray, pending_classes)                                     \
+  RW(Instance, stack_overflow)                                                 \
+  RW(Instance, out_of_memory)                                                  \
+  RW(Function, growable_list_factory)                                          \
+  RW(Function, simple_instance_of_function)                                    \
+  RW(Function, simple_instance_of_true_function)                               \
+  RW(Function, simple_instance_of_false_function)                              \
+  RW(Function, async_star_move_next_helper)                                    \
+  RW(Function, complete_on_async_return)                                       \
+  RW(Function, complete_with_no_future_on_async_return)                        \
+  RW(Function, complete_on_async_error)                                        \
+  RW(Class, async_star_stream_controller)                                      \
+  ARW_RELAXED(Smi, future_timeout_future_index)                                \
+  ARW_RELAXED(Smi, future_wait_future_index)                                   \
+  RW(CompressedStackMaps, canonicalized_stack_map_entries)                     \
+  RW(ObjectPool, global_object_pool)                                           \
+  RW(Array, unique_dynamic_targets)                                            \
+  RW(GrowableObjectArray, megamorphic_cache_table)                             \
+  RW(Code, build_generic_method_extractor_code)                                \
+  RW(Code, build_nongeneric_method_extractor_code)                             \
+  RW(Code, dispatch_table_null_error_stub)                                     \
+  RW(Code, late_initialization_error_stub_with_fpu_regs_stub)                  \
+  RW(Code, late_initialization_error_stub_without_fpu_regs_stub)               \
+  RW(Code, null_error_stub_with_fpu_regs_stub)                                 \
+  RW(Code, null_error_stub_without_fpu_regs_stub)                              \
+  RW(Code, null_arg_error_stub_with_fpu_regs_stub)                             \
+  RW(Code, null_arg_error_stub_without_fpu_regs_stub)                          \
+  RW(Code, null_cast_error_stub_with_fpu_regs_stub)                            \
+  RW(Code, null_cast_error_stub_without_fpu_regs_stub)                         \
+  RW(Code, range_error_stub_with_fpu_regs_stub)                                \
+  RW(Code, range_error_stub_without_fpu_regs_stub)                             \
+  RW(Code, allocate_mint_with_fpu_regs_stub)                                   \
+  RW(Code, allocate_mint_without_fpu_regs_stub)                                \
+  RW(Code, stack_overflow_stub_with_fpu_regs_stub)                             \
+  RW(Code, stack_overflow_stub_without_fpu_regs_stub)                          \
+  RW(Code, allocate_array_stub)                                                \
+  RW(Code, allocate_mint_stub)                                                 \
+  RW(Code, allocate_double_stub)                                               \
+  RW(Code, allocate_float32x4_stub)                                            \
+  RW(Code, allocate_float64x2_stub)                                            \
+  RW(Code, allocate_int32x4_stub)                                              \
+  RW(Code, allocate_int8_array_stub)                                           \
+  RW(Code, allocate_uint8_array_stub)                                          \
+  RW(Code, allocate_uint8_clamped_array_stub)                                  \
+  RW(Code, allocate_int16_array_stub)                                          \
+  RW(Code, allocate_uint16_array_stub)                                         \
+  RW(Code, allocate_int32_array_stub)                                          \
+  RW(Code, allocate_uint32_array_stub)                                         \
+  RW(Code, allocate_int64_array_stub)                                          \
+  RW(Code, allocate_uint64_array_stub)                                         \
+  RW(Code, allocate_float32_array_stub)                                        \
+  RW(Code, allocate_float64_array_stub)                                        \
+  RW(Code, allocate_float32x4_array_stub)                                      \
+  RW(Code, allocate_int32x4_array_stub)                                        \
+  RW(Code, allocate_float64x2_array_stub)                                      \
+  RW(Code, allocate_closure_stub)                                              \
+  RW(Code, allocate_context_stub)                                              \
+  RW(Code, allocate_object_stub)                                               \
+  RW(Code, allocate_object_parametrized_stub)                                  \
+  RW(Code, allocate_unhandled_exception_stub)                                  \
+  RW(Code, clone_context_stub)                                                 \
+  RW(Code, write_barrier_wrappers_stub)                                        \
+  RW(Code, array_write_barrier_stub)                                           \
+  RW(Code, throw_stub)                                                         \
+  RW(Code, re_throw_stub)                                                      \
+  RW(Code, assert_boolean_stub)                                                \
+  RW(Code, instance_of_stub)                                                   \
+  RW(Code, init_static_field_stub)                                             \
+  RW(Code, init_late_static_field_stub)                                        \
+  RW(Code, init_late_final_static_field_stub)                                  \
+  RW(Code, init_instance_field_stub)                                           \
+  RW(Code, init_late_instance_field_stub)                                      \
+  RW(Code, init_late_final_instance_field_stub)                                \
+  RW(Code, call_closure_no_such_method_stub)                                   \
+  RW(Code, default_tts_stub)                                                   \
+  RW(Code, default_nullable_tts_stub)                                          \
+  RW(Code, top_type_tts_stub)                                                  \
+  RW(Code, nullable_type_parameter_tts_stub)                                   \
+  RW(Code, type_parameter_tts_stub)                                            \
+  RW(Code, unreachable_tts_stub)                                               \
+  RW(Code, slow_tts_stub)                                                      \
+  RW(Array, dispatch_table_code_entries)                                       \
+  RW(GrowableObjectArray, instructions_tables)                                 \
+  RW(Array, obfuscation_map)                                                   \
+  RW(GrowableObjectArray, ffi_callback_functions)                              \
+  RW(Class, ffi_pointer_class)                                                 \
+  RW(Class, ffi_native_type_class)                                             \
+  RW(Object, ffi_as_function_internal)                                         \
+  // Please remember the last entry must be referred in the 'to' function below.
 
-#else
-#define FOR_EACH_BOOTSTRAP_LIBRARY(M)                                          \
-  FOR_EACH_PRODUCT_LIBRARY(M)                                                  \
-  M(Mirrors, mirrors)
+#define OBJECT_STORE_STUB_CODE_LIST(DO)                                        \
+  DO(dispatch_table_null_error_stub, DispatchTableNullError)                   \
+  DO(late_initialization_error_stub_with_fpu_regs_stub,                        \
+     LateInitializationErrorSharedWithFPURegs)                                 \
+  DO(late_initialization_error_stub_without_fpu_regs_stub,                     \
+     LateInitializationErrorSharedWithoutFPURegs)                              \
+  DO(null_error_stub_with_fpu_regs_stub, NullErrorSharedWithFPURegs)           \
+  DO(null_error_stub_without_fpu_regs_stub, NullErrorSharedWithoutFPURegs)     \
+  DO(null_arg_error_stub_with_fpu_regs_stub, NullArgErrorSharedWithFPURegs)    \
+  DO(null_arg_error_stub_without_fpu_regs_stub,                                \
+     NullArgErrorSharedWithoutFPURegs)                                         \
+  DO(null_cast_error_stub_with_fpu_regs_stub, NullCastErrorSharedWithFPURegs)  \
+  DO(null_cast_error_stub_without_fpu_regs_stub,                               \
+     NullCastErrorSharedWithoutFPURegs)                                        \
+  DO(range_error_stub_with_fpu_regs_stub, RangeErrorSharedWithFPURegs)         \
+  DO(range_error_stub_without_fpu_regs_stub, RangeErrorSharedWithoutFPURegs)   \
+  DO(allocate_mint_with_fpu_regs_stub, AllocateMintSharedWithFPURegs)          \
+  DO(allocate_mint_without_fpu_regs_stub, AllocateMintSharedWithoutFPURegs)    \
+  DO(stack_overflow_stub_with_fpu_regs_stub, StackOverflowSharedWithFPURegs)   \
+  DO(stack_overflow_stub_without_fpu_regs_stub,                                \
+     StackOverflowSharedWithoutFPURegs)                                        \
+  DO(allocate_array_stub, AllocateArray)                                       \
+  DO(allocate_mint_stub, AllocateMint)                                         \
+  DO(allocate_double_stub, AllocateDouble)                                     \
+  DO(allocate_float32x4_stub, AllocateFloat32x4)                               \
+  DO(allocate_float64x2_stub, AllocateFloat64x2)                               \
+  DO(allocate_int32x4_stub, AllocateInt32x4)                                   \
+  DO(allocate_int8_array_stub, AllocateInt8Array)                              \
+  DO(allocate_uint8_array_stub, AllocateUint8Array)                            \
+  DO(allocate_uint8_clamped_array_stub, AllocateUint8ClampedArray)             \
+  DO(allocate_int16_array_stub, AllocateInt16Array)                            \
+  DO(allocate_uint16_array_stub, AllocateUint16Array)                          \
+  DO(allocate_int32_array_stub, AllocateInt32Array)                            \
+  DO(allocate_uint32_array_stub, AllocateUint32Array)                          \
+  DO(allocate_int64_array_stub, AllocateInt64Array)                            \
+  DO(allocate_uint64_array_stub, AllocateUint64Array)                          \
+  DO(allocate_float32_array_stub, AllocateFloat32Array)                        \
+  DO(allocate_float64_array_stub, AllocateFloat64Array)                        \
+  DO(allocate_float32x4_array_stub, AllocateFloat32x4Array)                    \
+  DO(allocate_int32x4_array_stub, AllocateInt32x4Array)                        \
+  DO(allocate_float64x2_array_stub, AllocateFloat64x2Array)                    \
+  DO(allocate_closure_stub, AllocateClosure)                                   \
+  DO(allocate_context_stub, AllocateContext)                                   \
+  DO(allocate_object_stub, AllocateObject)                                     \
+  DO(allocate_object_parametrized_stub, AllocateObjectParameterized)           \
+  DO(allocate_unhandled_exception_stub, AllocateUnhandledException)            \
+  DO(clone_context_stub, CloneContext)                                         \
+  DO(call_closure_no_such_method_stub, CallClosureNoSuchMethod)                \
+  DO(default_tts_stub, DefaultTypeTest)                                        \
+  DO(default_nullable_tts_stub, DefaultNullableTypeTest)                       \
+  DO(top_type_tts_stub, TopTypeTypeTest)                                       \
+  DO(nullable_type_parameter_tts_stub, NullableTypeParameterTypeTest)          \
+  DO(type_parameter_tts_stub, TypeParameterTypeTest)                           \
+  DO(unreachable_tts_stub, UnreachableTypeTest)                                \
+  DO(slow_tts_stub, SlowTypeTest)                                              \
+  DO(write_barrier_wrappers_stub, WriteBarrierWrappers)                        \
+  DO(array_write_barrier_stub, ArrayWriteBarrier)                              \
+  DO(throw_stub, Throw)                                                        \
+  DO(re_throw_stub, ReThrow)                                                   \
+  DO(assert_boolean_stub, AssertBoolean)                                       \
+  DO(init_static_field_stub, InitStaticField)                                  \
+  DO(init_late_static_field_stub, InitLateStaticField)                         \
+  DO(init_late_final_static_field_stub, InitLateFinalStaticField)              \
+  DO(init_instance_field_stub, InitInstanceField)                              \
+  DO(init_late_instance_field_stub, InitLateInstanceField)                     \
+  DO(init_late_final_instance_field_stub, InitLateFinalInstanceField)          \
+  DO(instance_of_stub, InstanceOf)
 
+#define ISOLATE_OBJECT_STORE_FIELD_LIST(R_, RW)                                \
+  RW(UnhandledException, preallocated_unhandled_exception)                     \
+  RW(StackTrace, preallocated_stack_trace)                                     \
+  RW(UnwindError, preallocated_unwind_error)                                   \
+  RW(Array, dart_args_1)                                                       \
+  RW(Array, dart_args_2)                                                       \
+  R_(GrowableObjectArray, resume_capabilities)                                 \
+  R_(GrowableObjectArray, exit_listeners)                                      \
+  R_(GrowableObjectArray, error_listeners)
+// Please remember the last entry must be referred in the 'to' function below.
+
+class IsolateObjectStore {
+ public:
+  IsolateObjectStore() {}
+  ~IsolateObjectStore() {}
+
+#define DECLARE_GETTER(Type, name)                                             \
+  Type##Ptr name() const { return name##_; }                                   \
+  static intptr_t name##_offset() {                                            \
+    return OFFSET_OF(IsolateObjectStore, name##_);                             \
+  }
+
+#define DECLARE_GETTER_AND_SETTER(Type, name)                                  \
+  DECLARE_GETTER(Type, name)                                                   \
+  void set_##name(const Type& value) { name##_ = value.ptr(); }
+  ISOLATE_OBJECT_STORE_FIELD_LIST(DECLARE_GETTER, DECLARE_GETTER_AND_SETTER)
+#undef DECLARE_GETTER
+#undef DECLARE_GETTER_AND_SETTER
+
+  // Visit all object pointers.
+  void VisitObjectPointers(ObjectPointerVisitor* visitor);
+
+  // Called to initialize objects required by the vm but which invoke
+  // dart code.  If an error occurs the error object is returned otherwise
+  // a null object is returned.
+  ErrorPtr PreallocateObjects(const Object& out_of_memory);
+
+  void Init();
+  void PostLoad();
+
+#ifndef PRODUCT
+  void PrintToJSONObject(JSONObject* jsobj);
 #endif
 
-// The object store is a per isolate instance which stores references to
-// objects used by the VM.
-// TODO(iposva): Move the actual store into the object heap for quick handling
-// by snapshots eventually.
+ private:
+  // Finds a core library private method in Object.
+  FunctionPtr PrivateObjectLookup(const String& name);
+
+  ObjectPtr* from() {
+    return reinterpret_cast<ObjectPtr*>(&preallocated_unhandled_exception_);
+  }
+#define DECLARE_OBJECT_STORE_FIELD(type, name) type##Ptr name##_;
+  ISOLATE_OBJECT_STORE_FIELD_LIST(DECLARE_OBJECT_STORE_FIELD,
+                                  DECLARE_OBJECT_STORE_FIELD)
+#undef DECLARE_OBJECT_STORE_FIELD
+  ObjectPtr* to() { return reinterpret_cast<ObjectPtr*>(&error_listeners_); }
+
+  friend class Serializer;
+  friend class Deserializer;
+
+  DISALLOW_COPY_AND_ASSIGN(IsolateObjectStore);
+};
+
+// The object store is a per isolate group instance which stores references to
+// objects used by the VM shared by all isolates in a group.
 class ObjectStore {
  public:
   enum BootstrapLibraryId {
@@ -52,219 +383,67 @@ class ObjectStore {
 #undef MAKE_ID
   };
 
+  ObjectStore();
   ~ObjectStore();
 
-  RawClass* object_class() const {
-    ASSERT(object_class_ != Object::null());
-    return object_class_;
-  }
-  void set_object_class(const Class& value) { object_class_ = value.raw(); }
-  static intptr_t object_class_offset() {
-    return OFFSET_OF(ObjectStore, object_class_);
-  }
+#define DECLARE_OFFSET(name)                                                   \
+  static intptr_t name##_offset() { return OFFSET_OF(ObjectStore, name##_); }
+#define DECLARE_GETTER(Type, name)                                             \
+  Type##Ptr name() const { return name##_; }                                   \
+  DECLARE_OFFSET(name)
+#define DECLARE_GETTER_AND_SETTER(Type, name)                                  \
+  DECLARE_GETTER(Type, name)                                                   \
+  void set_##name(const Type& value) { name##_ = value.ptr(); }
+#define DECLARE_RELAXED_ATOMIC_GETTER_AND_SETTER(Type, name)                   \
+  template <std::memory_order order = std::memory_order_relaxed>               \
+  Type##Ptr name() const {                                                     \
+    return name##_.load(order);                                                \
+  }                                                                            \
+  template <std::memory_order order = std::memory_order_relaxed>               \
+  void set_##name(const Type& value) {                                         \
+    name##_.store(value.ptr(), order);                                         \
+  }                                                                            \
+  DECLARE_OFFSET(name)
+#define DECLARE_ACQREL_ATOMIC_GETTER_AND_SETTER(Type, name)                    \
+  Type##Ptr name() const { return name##_.load(); }                            \
+  void set_##name(const Type& value) { name##_.store(value.ptr()); }           \
+  DECLARE_OFFSET(name)
+#define DECLARE_LAZY_INIT_GETTER(Type, name, init)                             \
+  Type##Ptr name() {                                                           \
+    if (name##_.load() == Type::null()) {                                      \
+      init();                                                                  \
+    }                                                                          \
+    return name##_.load();                                                     \
+  }                                                                            \
+  DECLARE_OFFSET(name)
+#define DECLARE_LAZY_INIT_CORE_GETTER(Type, name)                              \
+  DECLARE_LAZY_INIT_GETTER(Type, name, LazyInitCoreMembers)
+#define DECLARE_LAZY_INIT_ASYNC_GETTER(Type, name)                             \
+  DECLARE_LAZY_INIT_GETTER(Type, name, LazyInitAsyncMembers)
+#define DECLARE_LAZY_INIT_ISOLATE_GETTER(Type, name)                           \
+  DECLARE_LAZY_INIT_GETTER(Type, name, LazyInitIsolateMembers)
+#define DECLARE_LAZY_INIT_INTERNAL_GETTER(Type, name)                          \
+  DECLARE_LAZY_INIT_GETTER(Type, name, LazyInitInternalMembers)
+  OBJECT_STORE_FIELD_LIST(DECLARE_GETTER,
+                          DECLARE_GETTER_AND_SETTER,
+                          DECLARE_RELAXED_ATOMIC_GETTER_AND_SETTER,
+                          DECLARE_ACQREL_ATOMIC_GETTER_AND_SETTER,
+                          DECLARE_LAZY_INIT_CORE_GETTER,
+                          DECLARE_LAZY_INIT_ASYNC_GETTER,
+                          DECLARE_LAZY_INIT_ISOLATE_GETTER,
+                          DECLARE_LAZY_INIT_INTERNAL_GETTER)
+#undef DECLARE_OFFSET
+#undef DECLARE_GETTER
+#undef DECLARE_GETTER_AND_SETTER
+#undef DECLARE_RELAXED_ATOMIC_GETTER_AND_SETTER
+#undef DECLARE_ACQREL_ATOMIC_GETTER_AND_SETTER
+#undef DECLARE_LAZY_INIT_GETTER
+#undef DECLARE_LAZY_INIT_CORE_GETTER
+#undef DECLARE_LAZY_INIT_ASYNC_GETTER
+#undef DECLARE_LAZY_INIT_ISOLATE_GETTER
+#undef DECLARE_LAZY_INIT_INTERNAL_GETTER
 
-  RawType* object_type() const { return object_type_; }
-  void set_object_type(const Type& value) { object_type_ = value.raw(); }
-
-  RawClass* null_class() const {
-    ASSERT(null_class_ != Object::null());
-    return null_class_;
-  }
-  void set_null_class(const Class& value) { null_class_ = value.raw(); }
-
-  RawType* null_type() const { return null_type_; }
-  void set_null_type(const Type& value) { null_type_ = value.raw(); }
-
-  RawType* function_type() const { return function_type_; }
-  void set_function_type(const Type& value) { function_type_ = value.raw(); }
-
-  RawClass* closure_class() const { return closure_class_; }
-  void set_closure_class(const Class& value) { closure_class_ = value.raw(); }
-
-  RawType* number_type() const { return number_type_; }
-  void set_number_type(const Type& value) { number_type_ = value.raw(); }
-
-  RawType* int_type() const { return int_type_; }
-  void set_int_type(const Type& value) { int_type_ = value.raw(); }
-  static intptr_t int_type_offset() {
-    return OFFSET_OF(ObjectStore, int_type_);
-  }
-
-  RawType* int64_type() const { return int64_type_; }
-  void set_int64_type(const Type& value) { int64_type_ = value.raw(); }
-
-  RawClass* integer_implementation_class() const {
-    return integer_implementation_class_;
-  }
-  void set_integer_implementation_class(const Class& value) {
-    integer_implementation_class_ = value.raw();
-  }
-
-  RawClass* smi_class() const { return smi_class_; }
-  void set_smi_class(const Class& value) { smi_class_ = value.raw(); }
-
-  RawType* smi_type() const { return smi_type_; }
-  void set_smi_type(const Type& value) { smi_type_ = value.raw(); }
-
-  RawClass* double_class() const { return double_class_; }
-  void set_double_class(const Class& value) { double_class_ = value.raw(); }
-
-  RawType* double_type() const { return double_type_; }
-  void set_double_type(const Type& value) { double_type_ = value.raw(); }
-  static intptr_t double_type_offset() {
-    return OFFSET_OF(ObjectStore, double_type_);
-  }
-
-  RawClass* mint_class() const { return mint_class_; }
-  void set_mint_class(const Class& value) { mint_class_ = value.raw(); }
-
-  RawType* mint_type() const { return mint_type_; }
-  void set_mint_type(const Type& value) { mint_type_ = value.raw(); }
-
-  RawClass* bigint_class() const { return bigint_class_; }
-  void set_bigint_class(const Class& value) { bigint_class_ = value.raw(); }
-
-  RawType* string_type() const { return string_type_; }
-  void set_string_type(const Type& value) { string_type_ = value.raw(); }
-  static intptr_t string_type_offset() {
-    return OFFSET_OF(ObjectStore, string_type_);
-  }
-
-  RawClass* compiletime_error_class() const { return compiletime_error_class_; }
-  void set_compiletime_error_class(const Class& value) {
-    compiletime_error_class_ = value.raw();
-  }
-
-  RawClass* future_class() const { return future_class_; }
-  void set_future_class(const Class& value) { future_class_ = value.raw(); }
-
-  RawClass* completer_class() const { return completer_class_; }
-  void set_completer_class(const Class& value) {
-    completer_class_ = value.raw();
-  }
-
-  RawClass* stream_iterator_class() const { return stream_iterator_class_; }
-  void set_stream_iterator_class(const Class& value) {
-    stream_iterator_class_ = value.raw();
-  }
-
-  RawClass* symbol_class() { return symbol_class_; }
-  void set_symbol_class(const Class& value) { symbol_class_ = value.raw(); }
-
-  RawClass* one_byte_string_class() const { return one_byte_string_class_; }
-  void set_one_byte_string_class(const Class& value) {
-    one_byte_string_class_ = value.raw();
-  }
-
-  RawClass* two_byte_string_class() const { return two_byte_string_class_; }
-  void set_two_byte_string_class(const Class& value) {
-    two_byte_string_class_ = value.raw();
-  }
-
-  RawClass* external_one_byte_string_class() const {
-    return external_one_byte_string_class_;
-  }
-  void set_external_one_byte_string_class(const Class& value) {
-    external_one_byte_string_class_ = value.raw();
-  }
-
-  RawClass* external_two_byte_string_class() const {
-    return external_two_byte_string_class_;
-  }
-  void set_external_two_byte_string_class(const Class& value) {
-    external_two_byte_string_class_ = value.raw();
-  }
-
-  RawType* bool_type() const { return bool_type_; }
-  void set_bool_type(const Type& value) { bool_type_ = value.raw(); }
-
-  RawClass* bool_class() const { return bool_class_; }
-  void set_bool_class(const Class& value) { bool_class_ = value.raw(); }
-
-  RawClass* array_class() const { return array_class_; }
-  void set_array_class(const Class& value) { array_class_ = value.raw(); }
-  static intptr_t array_class_offset() {
-    return OFFSET_OF(ObjectStore, array_class_);
-  }
-
-  RawType* array_type() const { return array_type_; }
-  void set_array_type(const Type& value) { array_type_ = value.raw(); }
-
-  RawClass* immutable_array_class() const { return immutable_array_class_; }
-  void set_immutable_array_class(const Class& value) {
-    immutable_array_class_ = value.raw();
-  }
-
-  RawClass* growable_object_array_class() const {
-    return growable_object_array_class_;
-  }
-  void set_growable_object_array_class(const Class& value) {
-    growable_object_array_class_ = value.raw();
-  }
-  static intptr_t growable_object_array_class_offset() {
-    return OFFSET_OF(ObjectStore, growable_object_array_class_);
-  }
-
-  RawClass* linked_hash_map_class() const { return linked_hash_map_class_; }
-  void set_linked_hash_map_class(const Class& value) {
-    linked_hash_map_class_ = value.raw();
-  }
-
-  RawClass* float32x4_class() const { return float32x4_class_; }
-  void set_float32x4_class(const Class& value) {
-    float32x4_class_ = value.raw();
-  }
-
-  RawType* float32x4_type() const { return float32x4_type_; }
-  void set_float32x4_type(const Type& value) { float32x4_type_ = value.raw(); }
-
-  RawClass* int32x4_class() const { return int32x4_class_; }
-  void set_int32x4_class(const Class& value) { int32x4_class_ = value.raw(); }
-
-  RawType* int32x4_type() const { return int32x4_type_; }
-  void set_int32x4_type(const Type& value) { int32x4_type_ = value.raw(); }
-
-  RawClass* float64x2_class() const { return float64x2_class_; }
-  void set_float64x2_class(const Class& value) {
-    float64x2_class_ = value.raw();
-  }
-
-  RawType* float64x2_type() const { return float64x2_type_; }
-  void set_float64x2_type(const Type& value) { float64x2_type_ = value.raw(); }
-
-  RawClass* error_class() const { return error_class_; }
-  void set_error_class(const Class& value) { error_class_ = value.raw(); }
-  static intptr_t error_class_offset() {
-    return OFFSET_OF(ObjectStore, error_class_);
-  }
-
-  RawClass* weak_property_class() const { return weak_property_class_; }
-  void set_weak_property_class(const Class& value) {
-    weak_property_class_ = value.raw();
-  }
-
-  RawArray* symbol_table() const { return symbol_table_; }
-  void set_symbol_table(const Array& value) { symbol_table_ = value.raw(); }
-
-  RawArray* canonical_types() const { return canonical_types_; }
-  void set_canonical_types(const Array& value) {
-    canonical_types_ = value.raw();
-  }
-
-  RawArray* canonical_type_arguments() const {
-    return canonical_type_arguments_;
-  }
-  void set_canonical_type_arguments(const Array& value) {
-    canonical_type_arguments_ = value.raw();
-  }
-
-#define MAKE_GETTER(_, name)                                                   \
-  RawLibrary* name##_library() const { return name##_library_; }
-
-  FOR_EACH_BOOTSTRAP_LIBRARY(MAKE_GETTER)
-#undef MAKE_GETTER
-
-  RawLibrary* bootstrap_library(BootstrapLibraryId index) {
+  LibraryPtr bootstrap_library(BootstrapLibraryId index) {
     switch (index) {
 #define MAKE_CASE(CamelName, name)                                             \
   case k##CamelName:                                                           \
@@ -283,7 +462,7 @@ class ObjectStore {
     switch (index) {
 #define MAKE_CASE(CamelName, name)                                             \
   case k##CamelName:                                                           \
-    name##_library_ = value.raw();                                             \
+    name##_library_ = value.ptr();                                             \
     break;
 
       FOR_EACH_BOOTSTRAP_LIBRARY(MAKE_CASE)
@@ -293,324 +472,59 @@ class ObjectStore {
     }
   }
 
-  RawLibrary* builtin_library() const { return builtin_library_; }
-  void set_builtin_library(const Library& value) {
-    builtin_library_ = value.raw();
-  }
-
-  RawLibrary* native_wrappers_library() const {
-    return native_wrappers_library_;
-  }
-  void set_native_wrappers_library(const Library& value) {
-    native_wrappers_library_ = value.raw();
-  }
-
-  RawLibrary* root_library() const { return root_library_; }
-  void set_root_library(const Library& value) { root_library_ = value.raw(); }
-
-  RawGrowableObjectArray* libraries() const { return libraries_; }
-  void set_libraries(const GrowableObjectArray& value) {
-    libraries_ = value.raw();
-  }
-
-  RawArray* libraries_map() const { return libraries_map_; }
-  void set_libraries_map(const Array& value) { libraries_map_ = value.raw(); }
-
-  RawGrowableObjectArray* closure_functions() const {
-    return closure_functions_;
-  }
-  void set_closure_functions(const GrowableObjectArray& value) {
-    ASSERT(!value.IsNull());
-    closure_functions_ = value.raw();
-  }
-
-  RawGrowableObjectArray* pending_classes() const { return pending_classes_; }
-  void set_pending_classes(const GrowableObjectArray& value) {
-    ASSERT(!value.IsNull());
-    pending_classes_ = value.raw();
-  }
-
-  RawGrowableObjectArray* pending_deferred_loads() const {
-    return pending_deferred_loads_;
-  }
-  void clear_pending_deferred_loads() {
-    pending_deferred_loads_ = GrowableObjectArray::New();
-  }
-
-  RawGrowableObjectArray* resume_capabilities() const {
-    return resume_capabilities_;
-  }
-
-  RawGrowableObjectArray* exit_listeners() const { return exit_listeners_; }
-
-  RawGrowableObjectArray* error_listeners() const { return error_listeners_; }
-
-  RawInstance* stack_overflow() const { return stack_overflow_; }
-  void set_stack_overflow(const Instance& value) {
-    stack_overflow_ = value.raw();
-  }
-
-  RawInstance* out_of_memory() const { return out_of_memory_; }
-  void set_out_of_memory(const Instance& value) {
-    out_of_memory_ = value.raw();
-  }
-
-  RawUnhandledException* preallocated_unhandled_exception() const {
-    return preallocated_unhandled_exception_;
-  }
-  void set_preallocated_unhandled_exception(const UnhandledException& value) {
-    preallocated_unhandled_exception_ = value.raw();
-  }
-
-  RawStackTrace* preallocated_stack_trace() const {
-    return preallocated_stack_trace_;
-  }
-  void set_preallocated_stack_trace(const StackTrace& value) {
-    preallocated_stack_trace_ = value.raw();
-  }
-
-  RawFunction* lookup_port_handler() const { return lookup_port_handler_; }
-  void set_lookup_port_handler(const Function& function) {
-    lookup_port_handler_ = function.raw();
-  }
-
-  RawTypedData* empty_uint32_array() const { return empty_uint32_array_; }
-  void set_empty_uint32_array(const TypedData& array) {
-    // Only set once.
-    ASSERT(empty_uint32_array_ == TypedData::null());
-    ASSERT(!array.IsNull());
-    empty_uint32_array_ = array.raw();
-  }
-
-  RawFunction* handle_message_function() const {
-    return handle_message_function_;
-  }
-  void set_handle_message_function(const Function& function) {
-    handle_message_function_ = function.raw();
-  }
-
-  RawArray* library_load_error_table() const {
-    return library_load_error_table_;
-  }
-  void set_library_load_error_table(const Array& table) {
-    library_load_error_table_ = table.raw();
-  }
-  static intptr_t library_load_error_table_offset() {
-    return OFFSET_OF(ObjectStore, library_load_error_table_);
-  }
-
-  RawArray* unique_dynamic_targets() const { return unique_dynamic_targets_; }
-  void set_unique_dynamic_targets(const Array& value) {
-    unique_dynamic_targets_ = value.raw();
-  }
-
-  RawGrowableObjectArray* token_objects() const { return token_objects_; }
-  void set_token_objects(const GrowableObjectArray& value) {
-    token_objects_ = value.raw();
-  }
-
-  RawArray* token_objects_map() const { return token_objects_map_; }
-  void set_token_objects_map(const Array& value) {
-    token_objects_map_ = value.raw();
-  }
-
-  RawGrowableObjectArray* megamorphic_cache_table() const {
-    return megamorphic_cache_table_;
-  }
-  void set_megamorphic_cache_table(const GrowableObjectArray& value) {
-    megamorphic_cache_table_ = value.raw();
-  }
-  RawCode* megamorphic_miss_code() const { return megamorphic_miss_code_; }
-  RawFunction* megamorphic_miss_function() const {
-    return megamorphic_miss_function_;
-  }
-  void SetMegamorphicMissHandler(const Code& code, const Function& func) {
-    // Hold onto the code so it is traced and not detached from the function.
-    megamorphic_miss_code_ = code.raw();
-    megamorphic_miss_function_ = func.raw();
-  }
-
-  RawFunction* simple_instance_of_function() const {
-    return simple_instance_of_function_;
-  }
-  void set_simple_instance_of_function(const Function& value) {
-    simple_instance_of_function_ = value.raw();
-  }
-  RawFunction* simple_instance_of_true_function() const {
-    return simple_instance_of_true_function_;
-  }
-  void set_simple_instance_of_true_function(const Function& value) {
-    simple_instance_of_true_function_ = value.raw();
-  }
-  RawFunction* simple_instance_of_false_function() const {
-    return simple_instance_of_false_function_;
-  }
-  void set_simple_instance_of_false_function(const Function& value) {
-    simple_instance_of_false_function_ = value.raw();
-  }
-  RawFunction* async_clear_thread_stack_trace() const {
-    return async_clear_thread_stack_trace_;
-  }
-  void set_async_clear_thread_stack_trace(const Function& func) {
-    async_clear_thread_stack_trace_ = func.raw();
-    ASSERT(async_clear_thread_stack_trace_ != Object::null());
-  }
-  RawFunction* async_set_thread_stack_trace() const {
-    return async_set_thread_stack_trace_;
-  }
-  void set_async_set_thread_stack_trace(const Function& func) {
-    async_set_thread_stack_trace_ = func.raw();
-  }
-  RawFunction* async_star_move_next_helper() const {
-    return async_star_move_next_helper_;
-  }
-  void set_async_star_move_next_helper(const Function& func) {
-    async_star_move_next_helper_ = func.raw();
-  }
-  RawFunction* complete_on_async_return() const {
-    return complete_on_async_return_;
-  }
-  void set_complete_on_async_return(const Function& func) {
-    complete_on_async_return_ = func.raw();
-  }
-  RawClass* async_star_stream_controller() const {
-    return async_star_stream_controller_;
-  }
-  void set_async_star_stream_controller(const Class& cls) {
-    async_star_stream_controller_ = cls.raw();
-  }
-
   // Visit all object pointers.
   void VisitObjectPointers(ObjectPointerVisitor* visitor);
 
   // Called to initialize objects required by the vm but which invoke
   // dart code.  If an error occurs the error object is returned otherwise
   // a null object is returned.
-  RawError* PreallocateObjects();
+  ErrorPtr PreallocateObjects();
 
   void InitKnownObjects();
 
-  static void Init(Isolate* isolate);
+  void InitStubs();
 
 #ifndef PRODUCT
   void PrintToJSONObject(JSONObject* jsobj);
 #endif
 
  private:
-  ObjectStore();
+  void LazyInitCoreMembers();
+  void LazyInitAsyncMembers();
+  void LazyInitIsolateMembers();
+  void LazyInitInternalMembers();
 
   // Finds a core library private method in Object.
-  RawFunction* PrivateObjectLookup(const String& name);
+  FunctionPtr PrivateObjectLookup(const String& name);
 
-#define OBJECT_STORE_FIELD_LIST(V)                                             \
-  V(RawClass*, object_class_)                                                  \
-  V(RawType*, object_type_)                                                    \
-  V(RawClass*, null_class_)                                                    \
-  V(RawType*, null_type_)                                                      \
-  V(RawType*, function_type_)                                                  \
-  V(RawClass*, closure_class_)                                                 \
-  V(RawType*, number_type_)                                                    \
-  V(RawType*, int_type_)                                                       \
-  V(RawClass*, integer_implementation_class_)                                  \
-  V(RawType*, int64_type_)                                                     \
-  V(RawClass*, smi_class_)                                                     \
-  V(RawType*, smi_type_)                                                       \
-  V(RawClass*, mint_class_)                                                    \
-  V(RawType*, mint_type_)                                                      \
-  V(RawClass*, bigint_class_)                                                  \
-  V(RawClass*, double_class_)                                                  \
-  V(RawType*, double_type_)                                                    \
-  V(RawType*, float32x4_type_)                                                 \
-  V(RawType*, int32x4_type_)                                                   \
-  V(RawType*, float64x2_type_)                                                 \
-  V(RawType*, string_type_)                                                    \
-  V(RawClass*, compiletime_error_class_)                                       \
-  V(RawClass*, future_class_)                                                  \
-  V(RawClass*, completer_class_)                                               \
-  V(RawClass*, stream_iterator_class_)                                         \
-  V(RawClass*, symbol_class_)                                                  \
-  V(RawClass*, one_byte_string_class_)                                         \
-  V(RawClass*, two_byte_string_class_)                                         \
-  V(RawClass*, external_one_byte_string_class_)                                \
-  V(RawClass*, external_two_byte_string_class_)                                \
-  V(RawType*, bool_type_)                                                      \
-  V(RawClass*, bool_class_)                                                    \
-  V(RawClass*, array_class_)                                                   \
-  V(RawType*, array_type_)                                                     \
-  V(RawClass*, immutable_array_class_)                                         \
-  V(RawClass*, growable_object_array_class_)                                   \
-  V(RawClass*, linked_hash_map_class_)                                         \
-  V(RawClass*, float32x4_class_)                                               \
-  V(RawClass*, int32x4_class_)                                                 \
-  V(RawClass*, float64x2_class_)                                               \
-  V(RawClass*, error_class_)                                                   \
-  V(RawClass*, weak_property_class_)                                           \
-  V(RawArray*, symbol_table_)                                                  \
-  V(RawArray*, canonical_types_)                                               \
-  V(RawArray*, canonical_type_arguments_)                                      \
-  V(RawLibrary*, async_library_)                                               \
-  V(RawLibrary*, builtin_library_)                                             \
-  V(RawLibrary*, core_library_)                                                \
-  V(RawLibrary*, collection_library_)                                          \
-  V(RawLibrary*, convert_library_)                                             \
-  V(RawLibrary*, developer_library_)                                           \
-  V(RawLibrary*, _internal_library_)                                           \
-  V(RawLibrary*, isolate_library_)                                             \
-  V(RawLibrary*, math_library_)                                                \
-  V(RawLibrary*, mirrors_library_)                                             \
-  V(RawLibrary*, native_wrappers_library_)                                     \
-  V(RawLibrary*, profiler_library_)                                            \
-  V(RawLibrary*, root_library_)                                                \
-  V(RawLibrary*, typed_data_library_)                                          \
-  V(RawLibrary*, _vmservice_library_)                                          \
-  V(RawGrowableObjectArray*, libraries_)                                       \
-  V(RawArray*, libraries_map_)                                                 \
-  V(RawGrowableObjectArray*, closure_functions_)                               \
-  V(RawGrowableObjectArray*, pending_classes_)                                 \
-  V(RawGrowableObjectArray*, pending_deferred_loads_)                          \
-  V(RawGrowableObjectArray*, resume_capabilities_)                             \
-  V(RawGrowableObjectArray*, exit_listeners_)                                  \
-  V(RawGrowableObjectArray*, error_listeners_)                                 \
-  V(RawInstance*, stack_overflow_)                                             \
-  V(RawInstance*, out_of_memory_)                                              \
-  V(RawUnhandledException*, preallocated_unhandled_exception_)                 \
-  V(RawStackTrace*, preallocated_stack_trace_)                                 \
-  V(RawFunction*, lookup_port_handler_)                                        \
-  V(RawTypedData*, empty_uint32_array_)                                        \
-  V(RawFunction*, handle_message_function_)                                    \
-  V(RawFunction*, simple_instance_of_function_)                                \
-  V(RawFunction*, simple_instance_of_true_function_)                           \
-  V(RawFunction*, simple_instance_of_false_function_)                          \
-  V(RawFunction*, async_clear_thread_stack_trace_)                             \
-  V(RawFunction*, async_set_thread_stack_trace_)                               \
-  V(RawFunction*, async_star_move_next_helper_)                                \
-  V(RawFunction*, complete_on_async_return_)                                   \
-  V(RawClass*, async_star_stream_controller_)                                  \
-  V(RawArray*, library_load_error_table_)                                      \
-  V(RawArray*, unique_dynamic_targets_)                                        \
-  V(RawGrowableObjectArray*, token_objects_)                                   \
-  V(RawArray*, token_objects_map_)                                             \
-  V(RawGrowableObjectArray*, megamorphic_cache_table_)                         \
-  V(RawCode*, megamorphic_miss_code_)                                          \
-  V(RawFunction*, megamorphic_miss_function_)                                  \
-  // Please remember the last entry must be referred in the 'to' function below.
-
-  RawObject** from() { return reinterpret_cast<RawObject**>(&object_class_); }
-#define DECLARE_OBJECT_STORE_FIELD(type, name) type name;
-  OBJECT_STORE_FIELD_LIST(DECLARE_OBJECT_STORE_FIELD)
+  ObjectPtr* from() { return reinterpret_cast<ObjectPtr*>(&list_class_); }
+#define DECLARE_OBJECT_STORE_FIELD(type, name) type##Ptr name##_;
+#define DECLARE_ATOMIC_OBJECT_STORE_FIELD(type, name)                          \
+  std::atomic<type##Ptr> name##_;
+#define DECLARE_LAZY_OBJECT_STORE_FIELD(type, name)                            \
+  AcqRelAtomic<type##Ptr> name##_;
+  OBJECT_STORE_FIELD_LIST(DECLARE_OBJECT_STORE_FIELD,
+                          DECLARE_OBJECT_STORE_FIELD,
+                          DECLARE_ATOMIC_OBJECT_STORE_FIELD,
+                          DECLARE_LAZY_OBJECT_STORE_FIELD,
+                          DECLARE_LAZY_OBJECT_STORE_FIELD,
+                          DECLARE_LAZY_OBJECT_STORE_FIELD,
+                          DECLARE_LAZY_OBJECT_STORE_FIELD,
+                          DECLARE_LAZY_OBJECT_STORE_FIELD)
 #undef DECLARE_OBJECT_STORE_FIELD
-  RawObject** to() {
-    return reinterpret_cast<RawObject**>(&megamorphic_miss_function_);
+#undef DECLARE_ATOMIC_OBJECT_STORE_FIELD
+#undef DECLARE_LAZY_OBJECT_STORE_FIELD
+  ObjectPtr* to() {
+    return reinterpret_cast<ObjectPtr*>(&ffi_as_function_internal_);
   }
-  RawObject** to_snapshot(Snapshot::Kind kind) {
+  ObjectPtr* to_snapshot(Snapshot::Kind kind) {
     switch (kind) {
-      case Snapshot::kCore:
-        return reinterpret_cast<RawObject**>(&library_load_error_table_);
-      case Snapshot::kAppJIT:
-      case Snapshot::kAppAOT:
-        return to();
-      case Snapshot::kScript:
-      case Snapshot::kMessage:
+      case Snapshot::kFull:
+      case Snapshot::kFullCore:
+        return reinterpret_cast<ObjectPtr*>(&global_object_pool_);
+      case Snapshot::kFullJIT:
+      case Snapshot::kFullAOT:
+        return reinterpret_cast<ObjectPtr*>(&slow_tts_stub_);
       case Snapshot::kNone:
       case Snapshot::kInvalid:
         break;
@@ -618,9 +532,11 @@ class ObjectStore {
     UNREACHABLE();
     return NULL;
   }
+  uword unused_field_;
 
-  friend class Serializer;
-  friend class Deserializer;
+  friend class ProgramSerializationRoots;
+  friend class ProgramDeserializationRoots;
+  friend class ProgramVisitor;
 
   DISALLOW_COPY_AND_ASSIGN(ObjectStore);
 };

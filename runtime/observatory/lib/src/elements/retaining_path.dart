@@ -9,21 +9,18 @@ import 'package:observatory/src/elements/curly_block.dart';
 import 'package:observatory/src/elements/instance_ref.dart';
 import 'package:observatory/src/elements/helpers/any_ref.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 
-class RetainingPathElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<RetainingPathElement>('retaining-path',
-      dependencies: const [CurlyBlockElement.tag, InstanceRefElement.tag]);
-
-  RenderingScheduler<RetainingPathElement> _r;
+class RetainingPathElement extends CustomElement implements Renderable {
+  late RenderingScheduler<RetainingPathElement> _r;
 
   Stream<RenderedEvent<RetainingPathElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.ObjectRef _object;
-  M.RetainingPathRepository _retainingPaths;
-  M.ObjectRepository _objects;
-  M.RetainingPath _path;
+  late M.IsolateRef _isolate;
+  late M.ObjectRef _object;
+  late M.RetainingPathRepository _retainingPaths;
+  late M.ObjectRepository _objects;
+  M.RetainingPath? _path;
   bool _expanded = false;
 
   M.IsolateRef get isolate => _isolate;
@@ -31,13 +28,13 @@ class RetainingPathElement extends HtmlElement implements Renderable {
 
   factory RetainingPathElement(M.IsolateRef isolate, M.ObjectRef object,
       M.RetainingPathRepository retainingPaths, M.ObjectRepository objects,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(object != null);
     assert(retainingPaths != null);
     assert(objects != null);
-    RetainingPathElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    RetainingPathElement e = new RetainingPathElement.created();
+    e._r = new RenderingScheduler<RetainingPathElement>(e, queue: queue);
     e._isolate = isolate;
     e._object = object;
     e._retainingPaths = retainingPaths;
@@ -45,7 +42,7 @@ class RetainingPathElement extends HtmlElement implements Renderable {
     return e;
   }
 
-  RetainingPathElement.created() : super.created();
+  RetainingPathElement.created() : super.created('retaining-path');
 
   @override
   void attached() {
@@ -56,28 +53,29 @@ class RetainingPathElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [
-      new CurlyBlockElement(expanded: _expanded, queue: _r.queue)
-        ..content = _createContent()
-        ..onToggle.listen((e) async {
-          _expanded = e.control.expanded;
-          if (_expanded) {
-            e.control.disabled = true;
-            await _refresh();
-            e.control.disabled = false;
-          }
-        })
-    ];
+    final curlyBlock =
+        new CurlyBlockElement(expanded: _expanded, queue: _r.queue)
+          ..content = _createContent()
+          ..onToggle.listen((e) async {
+            _expanded = e.control.expanded;
+            if (_expanded) {
+              e.control.disabled = true;
+              await _refresh();
+              e.control.disabled = false;
+            }
+          });
+    children = <Element>[curlyBlock.element];
+    _r.waitFor([curlyBlock.onRendered.first]);
   }
 
   Future _refresh() async {
     _path = null;
-    _path = await _retainingPaths.get(_isolate, _object.id);
+    _path = await _retainingPaths.get(_isolate, _object.id!);
     _r.dirty();
   }
 
@@ -86,13 +84,13 @@ class RetainingPathElement extends HtmlElement implements Renderable {
       return [new SpanElement()..text = 'Loading'];
     }
 
-    var elements = new List();
+    var elements = <Element>[];
     bool first = true;
-    for (var item in _path.elements) {
+    for (var item in _path!.elements) {
       elements.add(_createItem(item, first));
       first = false;
     }
-    elements.add(_createGCRootItem());
+    elements.add(_createGCRootItem(_path!.gcRootType));
     return elements;
   }
 
@@ -102,12 +100,8 @@ class RetainingPathElement extends HtmlElement implements Renderable {
     if (first) {
       // No prefix.
     } else if (item.parentField != null) {
-      content.add(new SpanElement()
-        ..children = [
-          new SpanElement()..text = 'retained by ',
-          anyRef(_isolate, item.parentField, _objects, queue: _r.queue),
-          new SpanElement()..text = ' of ',
-        ]);
+      content
+          .add(new SpanElement()..text = 'retained by ${item.parentField} of ');
     } else if (item.parentListIndex != null) {
       content.add(new SpanElement()
         ..text = 'retained by [ ${item.parentListIndex} ] of ');
@@ -125,9 +119,9 @@ class RetainingPathElement extends HtmlElement implements Renderable {
       ..children = content;
   }
 
-  Element _createGCRootItem() {
+  Element _createGCRootItem(String gcRootType) {
     return new DivElement()
       ..classes = ['indent']
-      ..text = 'retained by a GC root';
+      ..text = 'retained by a GC root ($gcRootType)';
   }
 }

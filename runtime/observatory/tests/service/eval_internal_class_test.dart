@@ -3,33 +3,38 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'test_helper.dart';
 
-var tests = [
+var tests = <IsolateTest>[
   (Isolate isolate) async {
-    Library root = await isolate.rootLibrary.load();
+    Library root = await isolate.rootLibrary.load() as Library;
 
-    Class classLibrary = await root.clazz.load();
+    Class classLibrary = await root.clazz!.load() as Class;
     print(classLibrary);
-    var result = await classLibrary.evaluate('3 + 4');
-    print(result);
-    expect(result is DartError, isTrue);
-    expect(result.message, contains('Cannot evaluate'));
+    {
+      final DartError errorResult =
+          await classLibrary.evaluate('3 + 4') as DartError;
+      print(errorResult);
+      expect(errorResult.toString(), contains('can be evaluated only'));
+    }
 
-    Class classClass = await classLibrary.clazz.load();
+    Class classClass = await classLibrary.clazz!.load() as Class;
     print(classClass);
-    result = await classClass.evaluate('3 + 4');
-    print(result);
-    expect(result is DartError, isTrue);
-    expect(result.message, contains('Cannot evaluate'));
+    {
+      final DartError errorResult =
+          await classClass.evaluate('3 + 4') as DartError;
+      print(errorResult);
+      expect(errorResult.toString(), contains('can be evaluated only'));
+    }
 
-    var someArray = await root.evaluate("new List(2)");
+    Instance someArray =
+        await root.evaluate("new List<dynamic>.filled(2, null)") as Instance;
     print(someArray);
     expect(someArray is Instance, isTrue);
-    Class classArray = await someArray.clazz.load();
+    Class classArray = await someArray.clazz!.load() as Class;
     print(classArray);
-    result = await classArray.evaluate('3 + 4');
+    dynamic result = await classArray.evaluate('3 + 4');
     print(result);
     expect(result is Instance, isTrue);
     expect(result.valueAsString, equals('7'));

@@ -15,8 +15,7 @@ import "dart:io";
 import "package:path/path.dart";
 
 // Tool script relative to the path of this test.
-var toolScript = Uri
-    .parse(Platform.executable)
+var toolScript = Uri.parse(Platform.executable)
     .resolve("../../runtime/tools/verbose_gc_to_bmu.dart")
     .toFilePath();
 
@@ -43,12 +42,12 @@ void main() {
     process.stdin.write(gcLog);
     process.stdin.close();
     var stdoutStringStream =
-        process.stdout.transform(UTF8.decoder).transform(new LineSplitter());
+        process.stdout.transform(utf8.decoder).transform(new LineSplitter());
     var stderrStringStream =
-        process.stderr.transform(UTF8.decoder).transform(new LineSplitter());
+        process.stderr.transform(utf8.decoder).transform(new LineSplitter());
     // Wait for 3 future events: stdout and stderr streams closed, and
     // process terminated.
-    var futures = [];
+    var futures = <Future>[];
     var stdoutLines = [];
     var stderrLines = [];
     var subscription = stdoutStringStream.listen(stdoutLines.add);

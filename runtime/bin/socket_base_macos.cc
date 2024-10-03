@@ -2,10 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "platform/globals.h"
-#if defined(HOST_OS_MACOS)
+#if defined(DART_HOST_OS_MACOS)
 
 #include "bin/socket_base.h"
 
@@ -27,22 +25,29 @@
 namespace dart {
 namespace bin {
 
-SocketAddress::SocketAddress(struct sockaddr* sa) {
-  ASSERT(INET6_ADDRSTRLEN >= INET_ADDRSTRLEN);
-  if (!SocketBase::FormatNumericAddress(*reinterpret_cast<RawAddr*>(sa),
-                                        as_string_, INET6_ADDRSTRLEN)) {
+SocketAddress::SocketAddress(struct sockaddr* sa, bool unnamed_unix_socket) {
+  if (unnamed_unix_socket) {
+    // This is an unnamed unix domain socket.
     as_string_[0] = 0;
+  } else if (sa->sa_family == AF_UNIX) {
+    struct sockaddr_un* un = ((struct sockaddr_un*)sa);
+    memmove(as_string_, un->sun_path, sizeof(un->sun_path));
+  } else {
+    ASSERT(INET6_ADDRSTRLEN >= INET_ADDRSTRLEN);
+    if (!SocketBase::FormatNumericAddress(*reinterpret_cast<RawAddr*>(sa),
+                                          as_string_, INET6_ADDRSTRLEN)) {
+      as_string_[0] = 0;
+    }
   }
-  socklen_t salen = GetAddrLength(*reinterpret_cast<RawAddr*>(sa));
+  socklen_t salen =
+      GetAddrLength(*reinterpret_cast<RawAddr*>(sa), unnamed_unix_socket);
   memmove(reinterpret_cast<void*>(&addr_), sa, salen);
 }
-
 
 bool SocketBase::Initialize() {
   // Nothing to do on Mac OS.
   return true;
 }
-
 
 bool SocketBase::FormatNumericAddress(const RawAddr& addr,
                                       char* address,
@@ -52,17 +57,14 @@ bool SocketBase::FormatNumericAddress(const RawAddr& addr,
                                         0, NI_NUMERICHOST)) == 0);
 }
 
-
 bool SocketBase::IsBindError(intptr_t error_number) {
   return error_number == EADDRINUSE || error_number == EADDRNOTAVAIL ||
          error_number == EINVAL;
 }
 
-
 intptr_t SocketBase::Available(intptr_t fd) {
   return FDUtils::AvailableBytes(fd);
 }
-
 
 intptr_t SocketBase::Read(intptr_t fd,
                           void* buffer,
@@ -78,7 +80,6 @@ intptr_t SocketBase::Read(intptr_t fd,
   }
   return read_bytes;
 }
-
 
 intptr_t SocketBase::RecvFrom(intptr_t fd,
                               void* buffer,
@@ -97,6 +98,28 @@ intptr_t SocketBase::RecvFrom(intptr_t fd,
   return read_bytes;
 }
 
+bool SocketControlMessage::is_file_descriptors_control_message() {
+  return false;
+}
+
+intptr_t SocketBase::ReceiveMessage(intptr_t fd,
+                                    void* buffer,
+                                    int64_t* p_buffer_num_bytes,
+                                    SocketControlMessage** p_messages,
+                                    SocketOpKind sync,
+                                    OSError* p_oserror) {
+  errno = ENOSYS;
+  return -1;
+}
+
+bool SocketBase::AvailableDatagram(intptr_t fd,
+                                   void* buffer,
+                                   intptr_t num_bytes) {
+  ASSERT(fd >= 0);
+  ssize_t read_bytes =
+      TEMP_FAILURE_RETRY(recvfrom(fd, buffer, num_bytes, MSG_PEEK, NULL, NULL));
+  return read_bytes >= 0;
+}
 
 intptr_t SocketBase::Write(intptr_t fd,
                            const void* buffer,
@@ -112,7 +135,6 @@ intptr_t SocketBase::Write(intptr_t fd,
   }
   return written_bytes;
 }
-
 
 intptr_t SocketBase::SendTo(intptr_t fd,
                             const void* buffer,
@@ -132,6 +154,33 @@ intptr_t SocketBase::SendTo(intptr_t fd,
   return written_bytes;
 }
 
+intptr_t SocketBase::SendMessage(intptr_t fd,
+                                 void* buffer,
+                                 size_t num_bytes,
+                                 SocketControlMessage* messages,
+                                 intptr_t num_messages,
+                                 SocketOpKind sync,
+                                 OSError* p_oserror) {
+  errno = ENOSYS;
+  return -1;
+}
+
+bool SocketBase::GetSocketName(intptr_t fd, SocketAddress* p_sa) {
+  ASSERT(fd >= 0);
+  ASSERT(p_sa != nullptr);
+  RawAddr raw;
+  socklen_t size = sizeof(raw);
+  if (NO_RETRY_EXPECTED(getsockname(fd, &raw.addr, &size))) {
+    return false;
+  }
+
+  // sockaddr_un contains sa_family_t sun_family and char[] sun_path.
+  // If size is the size of sa_family_t, this is an unnamed socket and
+  // sun_path contains garbage.
+  new (p_sa) SocketAddress(&raw.addr,
+                           /*unnamed_unix_socket=*/size == sizeof(sa_family_t));
+  return true;
+}
 
 intptr_t SocketBase::GetPort(intptr_t fd) {
   ASSERT(fd >= 0);
@@ -143,7 +192,6 @@ intptr_t SocketBase::GetPort(intptr_t fd) {
   return SocketAddress::GetAddrPort(raw);
 }
 
-
 SocketAddress* SocketBase::GetRemotePeer(intptr_t fd, intptr_t* port) {
   ASSERT(fd >= 0);
   RawAddr raw;
@@ -151,10 +199,16 @@ SocketAddress* SocketBase::GetRemotePeer(intptr_t fd, intptr_t* port) {
   if (NO_RETRY_EXPECTED(getpeername(fd, &raw.addr, &size))) {
     return NULL;
   }
+  // sockaddr_un contains sa_family_t sun_familty and char[] sun_path.
+  // If size is the size of sa_familty_t, this is an unnamed socket and
+  // sun_path contains garbage.
+  if (size == sizeof(sa_family_t)) {
+    *port = 0;
+    return new SocketAddress(&raw.addr, true);
+  }
   *port = SocketAddress::GetAddrPort(raw);
   return new SocketAddress(&raw.addr);
 }
-
 
 void SocketBase::GetError(intptr_t fd, OSError* os_error) {
   int len = sizeof(errno);
@@ -162,7 +216,6 @@ void SocketBase::GetError(intptr_t fd, OSError* os_error) {
              reinterpret_cast<socklen_t*>(&len));
   os_error->SetCodeAndMessage(OSError::kSystem, errno);
 }
-
 
 int SocketBase::GetType(intptr_t fd) {
   struct stat buf;
@@ -182,11 +235,9 @@ int SocketBase::GetType(intptr_t fd) {
   return File::kOther;
 }
 
-
 intptr_t SocketBase::GetStdioHandle(intptr_t num) {
   return num;
 }
-
 
 AddressList<SocketAddress>* SocketBase::LookupAddress(const char* host,
                                                       int type,
@@ -224,7 +275,6 @@ AddressList<SocketAddress>* SocketBase::LookupAddress(const char* host,
   return addresses;
 }
 
-
 bool SocketBase::ReverseLookup(const RawAddr& addr,
                                char* host,
                                intptr_t host_len,
@@ -242,7 +292,6 @@ bool SocketBase::ReverseLookup(const RawAddr& addr,
   return true;
 }
 
-
 bool SocketBase::ParseAddress(int type, const char* address, RawAddr* addr) {
   int result;
   if (type == SocketAddress::TYPE_IPV4) {
@@ -254,6 +303,15 @@ bool SocketBase::ParseAddress(int type, const char* address, RawAddr* addr) {
   return (result == 1);
 }
 
+bool SocketBase::RawAddrToString(RawAddr* addr, char* str) {
+  if (addr->addr.sa_family == AF_INET) {
+    return inet_ntop(AF_INET, &addr->in.sin_addr, str, INET_ADDRSTRLEN) != NULL;
+  } else {
+    ASSERT(addr->addr.sa_family == AF_INET6);
+    return inet_ntop(AF_INET6, &addr->in6.sin6_addr, str, INET6_ADDRSTRLEN) !=
+           NULL;
+  }
+}
 
 static bool ShouldIncludeIfaAddrs(struct ifaddrs* ifa, int lookup_family) {
   if (ifa->ifa_addr == NULL) {
@@ -266,11 +324,9 @@ static bool ShouldIncludeIfaAddrs(struct ifaddrs* ifa, int lookup_family) {
            ((family == AF_INET) || (family == AF_INET6))));
 }
 
-
 bool SocketBase::ListInterfacesSupported() {
   return true;
 }
-
 
 AddressList<InterfaceSocketAddress>* SocketBase::ListInterfaces(
     int type,
@@ -310,12 +366,10 @@ AddressList<InterfaceSocketAddress>* SocketBase::ListInterfaces(
   return addresses;
 }
 
-
 void SocketBase::Close(intptr_t fd) {
   ASSERT(fd >= 0);
-  VOID_TEMP_FAILURE_RETRY(close(fd));
+  close(fd);
 }
-
 
 bool SocketBase::GetNoDelay(intptr_t fd, bool* enabled) {
   int on;
@@ -328,14 +382,12 @@ bool SocketBase::GetNoDelay(intptr_t fd, bool* enabled) {
   return (err == 0);
 }
 
-
 bool SocketBase::SetNoDelay(intptr_t fd, bool enabled) {
   int on = enabled ? 1 : 0;
   return NO_RETRY_EXPECTED(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
                                       reinterpret_cast<char*>(&on),
                                       sizeof(on))) == 0;
 }
-
 
 bool SocketBase::GetMulticastLoop(intptr_t fd,
                                   intptr_t protocol,
@@ -353,7 +405,6 @@ bool SocketBase::GetMulticastLoop(intptr_t fd,
   return false;
 }
 
-
 bool SocketBase::SetMulticastLoop(intptr_t fd,
                                   intptr_t protocol,
                                   bool enabled) {
@@ -365,7 +416,6 @@ bool SocketBase::SetMulticastLoop(intptr_t fd,
              fd, level, optname, reinterpret_cast<char*>(&on), sizeof(on))) ==
          0;
 }
-
 
 bool SocketBase::GetMulticastHops(intptr_t fd, intptr_t protocol, int* value) {
   uint8_t v;
@@ -381,7 +431,6 @@ bool SocketBase::GetMulticastHops(intptr_t fd, intptr_t protocol, int* value) {
   return false;
 }
 
-
 bool SocketBase::SetMulticastHops(intptr_t fd, intptr_t protocol, int value) {
   int v = value;
   int level = protocol == SocketAddress::TYPE_IPV4 ? IPPROTO_IP : IPPROTO_IPV6;
@@ -390,7 +439,6 @@ bool SocketBase::SetMulticastHops(intptr_t fd, intptr_t protocol, int value) {
   return NO_RETRY_EXPECTED(setsockopt(
              fd, level, optname, reinterpret_cast<char*>(&v), sizeof(v))) == 0;
 }
-
 
 bool SocketBase::GetBroadcast(intptr_t fd, bool* enabled) {
   int on;
@@ -403,7 +451,6 @@ bool SocketBase::GetBroadcast(intptr_t fd, bool* enabled) {
   return (err == 0);
 }
 
-
 bool SocketBase::SetBroadcast(intptr_t fd, bool enabled) {
   int on = enabled ? 1 : 0;
   return NO_RETRY_EXPECTED(setsockopt(fd, SOL_SOCKET, SO_BROADCAST,
@@ -411,6 +458,21 @@ bool SocketBase::SetBroadcast(intptr_t fd, bool enabled) {
                                       sizeof(on))) == 0;
 }
 
+bool SocketBase::SetOption(intptr_t fd,
+                           int level,
+                           int option,
+                           const char* data,
+                           int length) {
+  return NO_RETRY_EXPECTED(setsockopt(fd, level, option, data, length)) == 0;
+}
+
+bool SocketBase::GetOption(intptr_t fd,
+                           int level,
+                           int option,
+                           char* data,
+                           unsigned int* length) {
+  return NO_RETRY_EXPECTED(getsockopt(fd, level, option, data, length)) == 0;
+}
 
 static bool JoinOrLeaveMulticast(intptr_t fd,
                                  const RawAddr& addr,
@@ -454,7 +516,6 @@ bool SocketBase::JoinMulticast(intptr_t fd,
   return JoinOrLeaveMulticast(fd, addr, interface, interfaceIndex, true);
 }
 
-
 bool SocketBase::LeaveMulticast(intptr_t fd,
                                 const RawAddr& addr,
                                 const RawAddr& interface,
@@ -465,6 +526,4 @@ bool SocketBase::LeaveMulticast(intptr_t fd,
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_MACOS)
-
-#endif  // !defined(DART_IO_DISABLED)
+#endif  // defined(DART_HOST_OS_MACOS)

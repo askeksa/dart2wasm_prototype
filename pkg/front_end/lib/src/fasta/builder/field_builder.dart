@@ -4,18 +4,10 @@
 
 library fasta.field_builder;
 
-import 'builder.dart' show LibraryBuilder, MemberBuilder;
+import 'package:kernel/ast.dart';
 
-abstract class FieldBuilder<T> extends MemberBuilder {
-  final String name;
+import 'member_builder.dart';
 
-  final int modifiers;
-
-  FieldBuilder(
-      this.name, this.modifiers, LibraryBuilder compilationUnit, int charOffset)
-      : super(compilationUnit, charOffset);
-
-  void set initializer(T value);
-
-  bool get isField => true;
+abstract class FieldBuilder implements MemberBuilder {
+  Field get field;
 }

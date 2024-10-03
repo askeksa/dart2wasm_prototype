@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "platform/globals.h"
-#if defined(HOST_OS_LINUX)
+#if defined(DART_HOST_OS_LINUX)
 
 #include <errno.h>  // NOLINT
 
@@ -15,7 +15,8 @@
 
 namespace dart {
 
-DECLARE_FLAG(bool, thread_interrupter);
+#ifndef PRODUCT
+
 DECLARE_FLAG(bool, trace_thread_interrupter);
 
 class ThreadInterrupterLinux : public AllStatic {
@@ -28,6 +29,10 @@ class ThreadInterrupterLinux : public AllStatic {
     }
     Thread* thread = Thread::Current();
     if (thread == NULL) {
+      return;
+    }
+    ThreadInterrupter::SampleBufferWriterScope scope;
+    if (!scope.CanSample()) {
       return;
     }
     // Extract thread state.
@@ -43,12 +48,6 @@ class ThreadInterrupterLinux : public AllStatic {
   }
 };
 
-
-bool ThreadInterrupter::IsDebuggerAttached() {
-  return false;
-}
-
-
 void ThreadInterrupter::InterruptThread(OSThread* thread) {
   if (FLAG_trace_thread_interrupter) {
     OS::PrintErr("ThreadInterrupter interrupting %p\n",
@@ -58,18 +57,16 @@ void ThreadInterrupter::InterruptThread(OSThread* thread) {
   ASSERT((result == 0) || (result == ESRCH));
 }
 
-
 void ThreadInterrupter::InstallSignalHandler() {
-  SignalHandler::Install<
-      ThreadInterrupterLinux::ThreadInterruptSignalHandler>();
+  SignalHandler::Install(&ThreadInterrupterLinux::ThreadInterruptSignalHandler);
 }
-
 
 void ThreadInterrupter::RemoveSignalHandler() {
   SignalHandler::Remove();
 }
 
+#endif  // !PRODUCT
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_LINUX)
+#endif  // defined(DART_HOST_OS_LINUX)

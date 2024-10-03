@@ -13,7 +13,8 @@ test1(obj) {
   var res = 0;
   for (var i = 0; i < 2; i++) {
     obj._uniqueSelector();
-    res += obj.uniqueField; // This load must not be hoisted out of the loop.
+    // This load must not be hoisted out of the loop.
+    res += obj.uniqueField as int;
   }
   return res;
 }
@@ -24,8 +25,8 @@ test2(obj) {
   var res = 0;
   for (var i = 0; i < 2; i++) {
     obj._uniqueSelector();
-    res +=
-        objAlias.uniqueField; // This load must not be hoisted out of the loop.
+    // This load must not be hoisted out of the loop.
+    res += objAlias.uniqueField as int;
   }
   return res;
 }

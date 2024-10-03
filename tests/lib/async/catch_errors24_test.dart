@@ -12,8 +12,8 @@ main() {
   Completer done = new Completer();
 
   var events = [];
-  StreamController controller;
-  Stream stream;
+  late StreamController controller;
+  late Stream stream;
   // Test that the first listen on a `asBroadcastStream` determines the
   // zone the subscription lives in. In this case the outer listen happens first
   // and the error reaches `handleError`.

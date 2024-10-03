@@ -12,8 +12,8 @@ main() {
   Completer done = new Completer();
 
   var events = [];
-  StreamController controller;
-  Stream stream;
+  late StreamController controller;
+  late Stream stream;
   // Test that errors are not traversing zone boundaries.
   // Note that the first listener of `asBroadcastStream` determines in which
   // zone the subscription lives.

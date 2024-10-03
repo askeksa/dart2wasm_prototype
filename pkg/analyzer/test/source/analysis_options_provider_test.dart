@@ -1,40 +1,35 @@
-// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer.test.source.analysis_options_provider_test;
-
-import 'dart:core';
-
 import 'package:analyzer/file_system/file_system.dart';
-import 'package:analyzer/file_system/memory_file_system.dart';
-import 'package:analyzer/source/analysis_options_provider.dart';
-import 'package:analyzer/src/generated/engine.dart';
+import 'package:analyzer/src/analysis_options/analysis_options_provider.dart';
 import 'package:analyzer/src/generated/source.dart';
+import 'package:analyzer/src/test_utilities/resource_provider_mixin.dart';
+import 'package:analyzer/src/util/file_paths.dart' as file_paths;
+import 'package:analyzer/src/util/yaml.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 import 'package:yaml/yaml.dart';
 
-import '../resource_utils.dart';
+import '../src/util/yaml_test.dart';
 
 main() {
   defineReflectiveSuite(() {
-    defineReflectiveTests(AnalysisOptionsProviderOldTest);
-    defineReflectiveTests(AnalysisOptionsProviderNewTest);
+    defineReflectiveTests(AnalysisOptionsProviderTest);
   });
   group('AnalysisOptionsProvider', () {
     void expectMergesTo(String defaults, String overrides, String expected) {
-      var optionsProvider = new AnalysisOptionsProvider();
+      var optionsProvider = AnalysisOptionsProvider();
       var defaultOptions = optionsProvider.getOptionsFromString(defaults);
       var overrideOptions = optionsProvider.getOptionsFromString(overrides);
       var merged = optionsProvider.merge(defaultOptions, overrideOptions);
-      expect(merged, optionsProvider.getOptionsFromString(expected));
+      expectEquals(merged, optionsProvider.getOptionsFromString(expected));
     }
 
     group('merging', () {
       test('integration', () {
-        expectMergesTo(
-            '''
+        expectMergesTo('''
 analyzer:
   plugins:
     - p1
@@ -45,8 +40,7 @@ linter:
   rules:
     - camel_case_types
     - one_member_abstracts
-''',
-            '''
+''', '''
 analyzer:
   plugins:
     - p3
@@ -56,8 +50,7 @@ linter:
   rules:
     one_member_abstracts: false # promotes and disables
     always_specify_return_types: true
-''',
-            '''
+''', '''
 analyzer:
   plugins:
     - p1
@@ -82,9 +75,9 @@ linter:
 strong-mode: true
 ''';
 
-      var optionsProvider = new AnalysisOptionsProvider();
+      var optionsProvider = AnalysisOptionsProvider();
       expect(() => optionsProvider.getOptionsFromString(src),
-          throwsA(new isInstanceOf<OptionsFormatException>()));
+          throwsA(TypeMatcher<OptionsFormatException>()));
     });
 
     test('test_bad_yaml (2)', () {
@@ -93,7 +86,7 @@ analyzer:
   strong-mode:true # missing space (sdk/issues/24885)
 ''';
 
-      var optionsProvider = new AnalysisOptionsProvider();
+      var optionsProvider = AnalysisOptionsProvider();
       // Should not throw an exception.
       var options = optionsProvider.getOptionsFromString(src);
       // Should return a non-null options list.
@@ -103,156 +96,141 @@ analyzer:
 }
 
 @reflectiveTest
-class AnalysisOptionsProviderNewTest extends AnalysisOptionsProviderTest {
-  String get optionsFileName => AnalysisEngine.ANALYSIS_OPTIONS_YAML_FILE;
-}
-
-@reflectiveTest
-class AnalysisOptionsProviderOldTest extends AnalysisOptionsProviderTest {
-  String get optionsFileName => AnalysisEngine.ANALYSIS_OPTIONS_FILE;
-}
-
-abstract class AnalysisOptionsProviderTest {
-  TestPathTranslator pathTranslator;
-  ResourceProvider resourceProvider;
-
-  AnalysisOptionsProvider provider;
-
-  String get optionsFileName;
-
-  void setUp() {
-    var rawProvider = new MemoryResourceProvider();
-    resourceProvider = new TestResourceProvider(rawProvider);
-    pathTranslator = new TestPathTranslator(rawProvider);
-    provider = new AnalysisOptionsProvider(new SourceFactory([
-      new ResourceUriResolver(rawProvider),
-    ]));
-  }
+class AnalysisOptionsProviderTest with ResourceProviderMixin {
+  String get analysisOptionsYaml => file_paths.analysisOptionsYaml;
 
   void test_getOptions_crawlUp_hasInFolder() {
-    pathTranslator.newFolder('/foo/bar');
-    pathTranslator.newFile(
-        '/foo/$optionsFileName',
-        r'''
+    newFolder('/foo/bar');
+    newFile('/foo/$analysisOptionsYaml', content: r'''
 analyzer:
   ignore:
     - foo
 ''');
-    pathTranslator.newFile(
-        '/foo/bar/$optionsFileName',
-        r'''
+    newFile('/foo/bar/$analysisOptionsYaml', content: r'''
 analyzer:
   ignore:
     - bar
 ''');
-    Map<String, YamlNode> options = _getOptions('/foo/bar', crawlUp: true);
+    YamlMap options = _getOptions('/foo/bar');
     expect(options, hasLength(1));
     {
-      YamlMap analyzer = options['analyzer'];
+      var analyzer = options.valueAt('analyzer') as YamlMap;
       expect(analyzer, isNotNull);
-      expect(analyzer['ignore'], unorderedEquals(['bar']));
+      expect(analyzer.valueAt('ignore'), unorderedEquals(['bar']));
     }
   }
 
   void test_getOptions_crawlUp_hasInParent() {
-    pathTranslator.newFolder('/foo/bar/baz');
-    pathTranslator.newFile(
-        '/foo/$optionsFileName',
-        r'''
+    newFolder('/foo/bar/baz');
+    newFile('/foo/$analysisOptionsYaml', content: r'''
 analyzer:
   ignore:
     - foo
 ''');
-    pathTranslator.newFile(
-        '/foo/bar/$optionsFileName',
-        r'''
+    newFile('/foo/bar/$analysisOptionsYaml', content: r'''
 analyzer:
   ignore:
     - bar
 ''');
-    Map<String, YamlNode> options = _getOptions('/foo/bar/baz', crawlUp: true);
+    YamlMap options = _getOptions('/foo/bar/baz');
     expect(options, hasLength(1));
     {
-      YamlMap analyzer = options['analyzer'];
+      var analyzer = options.valueAt('analyzer') as YamlMap;
       expect(analyzer, isNotNull);
-      expect(analyzer['ignore'], unorderedEquals(['bar']));
+      expect(analyzer.valueAt('ignore'), unorderedEquals(['bar']));
     }
   }
 
   void test_getOptions_doesNotExist() {
-    pathTranslator.newFolder('/notFile');
-    Map<String, YamlNode> options = _getOptions('/notFile');
+    newFolder('/notFile');
+    YamlMap options = _getOptions('/notFile');
     expect(options, isEmpty);
   }
 
   void test_getOptions_empty() {
-    pathTranslator.newFile('/$optionsFileName', r'''#empty''');
-    Map<String, YamlNode> options = _getOptions('/');
+    newFile('/$analysisOptionsYaml', content: r'''#empty''');
+    YamlMap options = _getOptions('/');
     expect(options, isNotNull);
     expect(options, isEmpty);
   }
 
   void test_getOptions_include() {
-    pathTranslator.newFile(
-        '/foo.include',
-        r'''
+    newFile('/foo.include', content: r'''
 analyzer:
   ignore:
     - ignoreme.dart
     - 'sdk_ext/**'
 ''');
-    pathTranslator.newFile(
-        '/$optionsFileName',
-        r'''
+    newFile('/$analysisOptionsYaml', content: r'''
 include: foo.include
 ''');
-    Map<String, YamlNode> options = _getOptions('/');
-    expect(options, hasLength(1));
+    YamlMap options = _getOptions('/');
+    expect(options, hasLength(2));
     {
-      YamlMap analyzer = options['analyzer'];
+      var analyzer = options.valueAt('analyzer') as YamlMap;
       expect(analyzer, hasLength(1));
       {
-        YamlList ignore = analyzer['ignore'];
+        var ignore = analyzer.valueAt('ignore') as YamlList;
         expect(ignore, hasLength(2));
         expect(ignore[0], 'ignoreme.dart');
         expect(ignore[1], 'sdk_ext/**');
+      }
+    }
+  }
+
+  void test_getOptions_include_emptyLints() {
+    newFile('/foo.include', content: r'''
+linter:
+  rules:
+    - prefer_single_quotes
+''');
+    newFile('/$analysisOptionsYaml', content: r'''
+include: foo.include
+linter:
+  rules:
+    # avoid_print: false
+''');
+    YamlMap options = _getOptions('/');
+    expect(options, hasLength(2));
+    {
+      var linter = options.valueAt('linter') as YamlMap;
+      expect(linter, hasLength(1));
+      {
+        var rules = linter.valueAt('rules') as YamlList;
+        expect(rules, hasLength(1));
+        expect(rules[0], 'prefer_single_quotes');
       }
     }
   }
 
   void test_getOptions_include_missing() {
-    pathTranslator.newFile(
-        '/$optionsFileName',
-        r'''
+    newFile('/$analysisOptionsYaml', content: r'''
 include: /foo.include
 ''');
-    Map<String, YamlNode> options = _getOptions('/');
-    expect(options, hasLength(0));
+    YamlMap options = _getOptions('/');
+    expect(options, hasLength(1));
   }
 
   void test_getOptions_invalid() {
-    pathTranslator.newFile('/$optionsFileName', r''':''');
-    expect(() {
-      _getOptions('/');
-    }, throws);
+    newFile('/$analysisOptionsYaml', content: r''':''');
+    YamlMap options = _getOptions('/');
+    expect(options, hasLength(1));
   }
 
   void test_getOptions_simple() {
-    pathTranslator.newFile(
-        '/$optionsFileName',
-        r'''
+    newFile('/$analysisOptionsYaml', content: r'''
 analyzer:
   ignore:
     - ignoreme.dart
     - 'sdk_ext/**'
 ''');
-    Map<String, YamlNode> options = _getOptions('/');
+    YamlMap options = _getOptions('/');
     expect(options, hasLength(1));
     {
-      YamlMap analyzer = options['analyzer'];
+      var analyzer = options.valueAt('analyzer') as YamlMap;
       expect(analyzer, hasLength(1));
       {
-        YamlList ignore = analyzer['ignore'];
+        var ignore = analyzer.valueAt('ignore') as YamlList;
         expect(ignore, hasLength(2));
         expect(ignore[0], 'ignoreme.dart');
         expect(ignore[1], 'sdk_ext/**');
@@ -260,8 +238,11 @@ analyzer:
     }
   }
 
-  Map<String, YamlNode> _getOptions(String posixPath, {bool crawlUp: false}) {
-    Resource resource = pathTranslator.getResource(posixPath);
-    return provider.getOptions(resource, crawlUp: crawlUp);
+  YamlMap _getOptions(String posixPath) {
+    var folder = getFolder(posixPath);
+    var provider = AnalysisOptionsProvider(SourceFactory([
+      ResourceUriResolver(resourceProvider),
+    ]));
+    return provider.getOptions(folder);
   }
 }

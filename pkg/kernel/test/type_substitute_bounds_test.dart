@@ -1,6 +1,7 @@
 // Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
+
 library kernel.type_substitute_bounds_test;
 
 import 'package:kernel/kernel.dart';
@@ -30,6 +31,7 @@ final List<TestCase> testCases = <TestCase>[
       '(<F>(String) => int) => int'),
   testCase('<E>((T) => int) => int', {'T': bound('_', 'String')},
       '<E>((String) => int) => int'),
+  testCase('(T?) =>* String', {'T': bound('int', 'int')}, '(int?) =>* String'),
 ];
 
 class TestCase {
@@ -39,9 +41,10 @@ class TestCase {
 
   TestCase(this.type, this.bounds, this.expected);
 
+  @override
   String toString() {
     var substitution = bounds.keys.map((key) {
-      var bound = bounds[key];
+      var bound = bounds[key]!;
       return '${bound.lower} <: $key <: ${bound.upper}';
     }).join(',');
     return '$type [$substitution] <: $expected';
@@ -60,7 +63,7 @@ TestCase testCase(String type, Map<String, TypeBound> bounds, String expected) {
   return new TestCase(type, bounds, expected);
 }
 
-main() {
+void main() {
   for (var testCase in testCases) {
     test('$testCase', () {
       var environment = new LazyTypeEnvironment();
@@ -68,13 +71,13 @@ main() {
       var upperBounds = <TypeParameter, DartType>{};
       var lowerBounds = <TypeParameter, DartType>{};
       testCase.bounds.forEach((String name, TypeBound bounds) {
-        var parameter = environment.getTypeParameter(name);
+        var parameter = environment.getTypeParameter(name)!;
         upperBounds[parameter] = environment.parse(bounds.upper);
         lowerBounds[parameter] = environment.parse(bounds.lower);
       });
-      var substituted = Substitution
-          .fromUpperAndLowerBounds(upperBounds, lowerBounds)
-          .substituteType(type);
+      var substituted =
+          Substitution.fromUpperAndLowerBounds(upperBounds, lowerBounds)
+              .substituteType(type);
       var expected = environment.parse(testCase.expected);
       if (substituted != expected) {
         fail('Expected `$expected` but got `$substituted`');

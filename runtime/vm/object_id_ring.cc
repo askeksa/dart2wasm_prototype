@@ -2,33 +2,23 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+#include "vm/object_id_ring.h"
+
 #include "platform/assert.h"
 #include "vm/dart_api_state.h"
 #include "vm/json_stream.h"
-#include "vm/object_id_ring.h"
 
 namespace dart {
 
 #ifndef PRODUCT
 
-void ObjectIdRing::Init(Isolate* isolate, int32_t capacity) {
-  ObjectIdRing* ring = new ObjectIdRing(isolate, capacity);
-  isolate->set_object_id_ring(ring);
-}
-
-
 ObjectIdRing::~ObjectIdRing() {
   ASSERT(table_ != NULL);
   free(table_);
   table_ = NULL;
-  if (isolate_ != NULL) {
-    isolate_->set_object_id_ring(NULL);
-    isolate_ = NULL;
-  }
 }
 
-
-int32_t ObjectIdRing::GetIdForObject(RawObject* object, IdPolicy policy) {
+int32_t ObjectIdRing::GetIdForObject(ObjectPtr object, IdPolicy policy) {
   // We do not allow inserting null because null is how we detect as entry was
   // reclaimed by the GC.
   ASSERT(object != Object::null());
@@ -44,8 +34,7 @@ int32_t ObjectIdRing::GetIdForObject(RawObject* object, IdPolicy policy) {
   return AllocateNewId(object);
 }
 
-
-int32_t ObjectIdRing::FindExistingIdForObject(RawObject* raw_obj) {
+int32_t ObjectIdRing::FindExistingIdForObject(ObjectPtr raw_obj) {
   for (int32_t i = 0; i < capacity_; i++) {
     if (table_[i] == raw_obj) {
       return IdOfIndex(i);
@@ -54,8 +43,7 @@ int32_t ObjectIdRing::FindExistingIdForObject(RawObject* raw_obj) {
   return kInvalidId;
 }
 
-
-RawObject* ObjectIdRing::GetObjectForId(int32_t id, LookupResult* kind) {
+ObjectPtr ObjectIdRing::GetObjectForId(int32_t id, LookupResult* kind) {
   int32_t index = IndexOfId(id);
   if (index == kInvalidId) {
     *kind = kExpired;
@@ -72,12 +60,10 @@ RawObject* ObjectIdRing::GetObjectForId(int32_t id, LookupResult* kind) {
   return table_[index];
 }
 
-
 void ObjectIdRing::VisitPointers(ObjectPointerVisitor* visitor) {
   ASSERT(table_ != NULL);
   visitor->VisitPointers(table_, capacity_);
 }
-
 
 void ObjectIdRing::PrintJSON(JSONStream* js) {
   Thread* thread = Thread::Current();
@@ -100,25 +86,22 @@ void ObjectIdRing::PrintJSON(JSONStream* js) {
   }
 }
 
-
-ObjectIdRing::ObjectIdRing(Isolate* isolate, int32_t capacity) {
-  ASSERT(capacity > 0);
-  isolate_ = isolate;
+ObjectIdRing::ObjectIdRing() {
   serial_num_ = 0;
   wrapped_ = false;
   table_ = NULL;
-  SetCapacityAndMaxSerial(capacity, kMaxId);
+  SetCapacityAndMaxSerial(kDefaultCapacity, kMaxId);
 }
-
 
 void ObjectIdRing::SetCapacityAndMaxSerial(int32_t capacity,
                                            int32_t max_serial) {
+  ASSERT(capacity > 0);
   ASSERT(max_serial <= kMaxId);
   capacity_ = capacity;
   if (table_ != NULL) {
     free(table_);
   }
-  table_ = reinterpret_cast<RawObject**>(calloc(capacity_, kWordSize));
+  table_ = reinterpret_cast<ObjectPtr*>(calloc(capacity_, kWordSize));
   for (int32_t i = 0; i < capacity_; i++) {
     table_[i] = Object::null();
   }
@@ -126,7 +109,6 @@ void ObjectIdRing::SetCapacityAndMaxSerial(int32_t capacity,
   // the serial number wraps, the index into table_ wraps with it.
   max_serial_ = max_serial - (max_serial % capacity_);
 }
-
 
 int32_t ObjectIdRing::NextSerial() {
   int32_t r = serial_num_;
@@ -138,8 +120,7 @@ int32_t ObjectIdRing::NextSerial() {
   return r;
 }
 
-
-int32_t ObjectIdRing::AllocateNewId(RawObject* raw_obj) {
+int32_t ObjectIdRing::AllocateNewId(ObjectPtr raw_obj) {
   ASSERT(raw_obj->IsHeapObject());
   int32_t id = NextSerial();
   ASSERT(id != kInvalidId);
@@ -149,7 +130,6 @@ int32_t ObjectIdRing::AllocateNewId(RawObject* raw_obj) {
   return id;
 }
 
-
 int32_t ObjectIdRing::IndexOfId(int32_t id) {
   if (!IsValidId(id)) {
     return kInvalidId;
@@ -157,7 +137,6 @@ int32_t ObjectIdRing::IndexOfId(int32_t id) {
   ASSERT((id >= 0) && (id < max_serial_));
   return id % capacity_;
 }
-
 
 int32_t ObjectIdRing::IdOfIndex(int32_t index) {
   if (index < 0) {
@@ -200,7 +179,6 @@ int32_t ObjectIdRing::IdOfIndex(int32_t index) {
   return id;
 }
 
-
 bool ObjectIdRing::IsValidContiguous(int32_t id) {
   ASSERT(id != kInvalidId);
   ASSERT((id >= 0) && (id < max_serial_));
@@ -214,7 +192,6 @@ bool ObjectIdRing::IsValidContiguous(int32_t id) {
   }
   return id >= bottom;
 }
-
 
 bool ObjectIdRing::IsValidId(int32_t id) {
   if (id == kInvalidId) {

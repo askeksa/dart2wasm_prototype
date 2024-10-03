@@ -5,9 +5,6 @@
 // Ensure that reflection works on methods that would otherwise be
 // tree-shaken away.
 
-library lib;
-
-@MirrorsUsed(targets: "lib")
 import "dart:mirrors";
 
 class Foo {

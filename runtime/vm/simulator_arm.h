@@ -16,24 +16,21 @@
 #error Do not include simulator_arm.h directly; use simulator.h.
 #endif
 
-#include "vm/constants_arm.h"
+#include "vm/constants.h"
 
 namespace dart {
 
 class Isolate;
 class Mutex;
-class RawObject;
 class SimulatorSetjmpBuffer;
 class Thread;
 
-#if !defined(SIMD_VALUE_T_)
 typedef struct {
   union {
     uint32_t u;
     float f;
   } data_[4];
 } simd_value_t;
-#endif
 
 class Simulator {
  public:
@@ -50,13 +47,16 @@ class Simulator {
   // architecture specification and is off by 8 from the currently executing
   // instruction.
   void set_register(Register reg, int32_t value);
-  int32_t get_register(Register reg) const;
+  DART_FORCE_INLINE int32_t get_register(Register reg) const {
+    ASSERT((reg >= 0) && (reg < kNumberOfCpuRegisters));
+    return registers_[reg] + ((reg == PC) ? Instr::kPCReadOffset : 0);
+  }
 
   int32_t get_sp() const { return get_register(SPREG); }
 
   // Special case of set_register and get_register to access the raw PC value.
   void set_pc(int32_t value);
-  int32_t get_pc() const;
+  DART_FORCE_INLINE int32_t get_pc() const { return registers_[PC]; }
 
   // Accessors for VFP register state.
   void set_sregister(SRegister reg, float value);
@@ -74,21 +74,18 @@ class Simulator {
   void set_dregister_bits(DRegister reg, int64_t value);
   int64_t get_dregister_bits(DRegister reg) const;
 
-  // Accessors to the internal simulator stack base and top.
-  uword StackBase() const { return reinterpret_cast<uword>(stack_); }
-  uword StackTop() const;
+  // High address.
+  uword stack_base() const { return stack_base_; }
+  // Limit for StackOverflowError.
+  uword overflow_stack_limit() const { return overflow_stack_limit_; }
+  // Low address.
+  uword stack_limit() const { return stack_limit_; }
 
   // Accessor to the instruction counter.
   uint64_t get_icount() const { return icount_; }
 
-  // The thread's top_exit_frame_info refers to a Dart frame in the simulator
-  // stack. The simulator's top_exit_frame_info refers to a C++ frame in the
-  // native stack.
-  uword top_exit_frame_info() const { return top_exit_frame_info_; }
-  void set_top_exit_frame_info(uword value) { top_exit_frame_info_ = value; }
-
   // Call on program start.
-  static void InitOnce();
+  static void Init();
 
   // Dart generally calls into generated code with 4 parameters. This is a
   // convenience function, which sets up the simulator state and grabs the
@@ -104,22 +101,12 @@ class Simulator {
                bool fp_return = false,
                bool fp_args = false);
 
-  // Implementation of atomic compare and exchange in the same synchronization
-  // domain as other synchronization primitive instructions (e.g. ldrex, strex).
-  static uword CompareExchange(uword* address,
-                               uword compare_value,
-                               uword new_value);
-  static uint32_t CompareExchangeUint32(uint32_t* address,
-                                        uint32_t compare_value,
-                                        uint32_t new_value);
-
   // Runtime and native call support.
   enum CallKind {
     kRuntimeCall,
     kLeafRuntimeCall,
     kLeafFloatRuntimeCall,
-    kBootstrapNativeCall,
-    kNativeCall
+    kNativeCallWrapper
   };
   static uword RedirectExternalReference(uword function,
                                          CallKind call_kind,
@@ -159,11 +146,13 @@ class Simulator {
 
   // Simulator support.
   char* stack_;
+  uword stack_limit_;
+  uword overflow_stack_limit_;
+  uword stack_base_;
   bool pc_modified_;
   uint64_t icount_;
   static int32_t flag_stop_sim_at_;
   SimulatorSetjmpBuffer* last_setjmp_buffer_;
-  uword top_exit_frame_info_;
 
   // Registered breakpoints.
   Instr* break_pc_;
@@ -218,31 +207,13 @@ class Simulator {
   intptr_t ReadExclusiveW(uword addr, Instr* instr);
   intptr_t WriteExclusiveW(uword addr, intptr_t value, Instr* instr);
 
-  // We keep track of 16 exclusive access address tags across all threads.
-  // Since we cannot simulate a native context switch, which clears
-  // the exclusive access state of the local monitor (using the CLREX
-  // instruction), we associate the thread requesting exclusive access to the
-  // address tag. Multiple threads requesting exclusive access (using the LDREX
-  // instruction) to the same address will result in multiple address tags being
-  // created for the same address, one per thread.
-  // At any given time, each thread is associated to at most one address tag.
-  static Mutex* exclusive_access_lock_;
-  static const int kNumAddressTags = 16;
-  static struct AddressTag {
-    Thread* thread;
-    uword addr;
-  } exclusive_access_state_[kNumAddressTags];
-  static int next_address_tag_;
-
-  // Set access to given address to 'exclusive state' for current thread.
-  static void SetExclusiveAccess(uword addr);
-
-  // Returns true if the current thread has exclusive access to given address,
-  // returns false otherwise. In either case, set access to given address to
-  // 'open state' for all threads.
-  // If given addr is NULL, set access to 'open state' for current
-  // thread (CLREX).
-  static bool HasExclusiveAccessAndOpen(uword addr);
+  // Exclusive access reservation: address and value observed during
+  // load-exclusive. Store-exclusive verifies that address is the same and
+  // performs atomic compare-and-swap with remembered value to observe value
+  // changes. This implementation of ldrex/strex instructions does not detect
+  // ABA situation and our uses of ldrex/strex don't need this detection.
+  uword exclusive_access_addr_;
+  uword exclusive_access_value_;
 
   // Executing is handled based on the instruction type.
   void DecodeType01(Instr* instr);  // Both type 0 and type 1 rolled into one.
@@ -256,6 +227,7 @@ class Simulator {
 
   // Executes one instruction.
   void InstructionDecode(Instr* instr);
+  void InstructionDecodeImpl(Instr* instr);
 
   // Executes ARM instructions until the PC reaches kEndSimulatingPC.
   void Execute();

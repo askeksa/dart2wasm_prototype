@@ -2,22 +2,19 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async' show Future;
-
 import 'dart:io' show Directory, File, Platform;
 
 import 'package:async_helper/async_helper.dart' show asyncEnd, asyncStart;
 
-import 'package:front_end/src/fasta/testing/patched_sdk_location.dart'
-    show computePatchedSdk;
+import 'package:front_end/src/base/command_line_options.dart';
 
 import 'package:testing/testing.dart' show StdioProcess;
 
 import 'package:kernel/binary/ast_from_binary.dart' show BinaryBuilder;
 
-import 'package:kernel/ast.dart' show Program;
+import 'package:kernel/ast.dart' show Component;
 
-import 'package:kernel/text/ast_to_text.dart' show programToString;
+import 'package:kernel/text/ast_to_text.dart' show componentToString;
 
 Future main() async {
   asyncStart();
@@ -34,8 +31,8 @@ Future main() async {
     await compare(compiledOnceOutput, compiledTwiceOutput);
     await runCompiler(compiledTwiceOutput, outline, outlineOutput);
     try {
-      // Test that compare actually works by comparing the compile program to
-      // the outline program (which are different, but similar).
+      // Test that compare actually works by comparing the compiled component
+      // to the outline component (which are different, but similar).
       await compare(compiledOnceOutput, outlineOutput, silent: true);
       throw "Expected an error.";
     } on ComparisonFailed {
@@ -48,21 +45,20 @@ Future main() async {
 }
 
 Future runCompiler(Uri compiler, Uri input, Uri output) async {
-  Uri patchedSdk = await computePatchedSdk();
-  Uri dartVm = Uri.base.resolve(Platform.resolvedExecutable);
-  StdioProcess result = await StdioProcess.run(dartVm.toFilePath(), <String>[
-    "-c",
+  Uri dartVm = Uri.base.resolveUri(new Uri.file(Platform.resolvedExecutable));
+  String executable = dartVm.toFilePath();
+  List<String> arguments = <String>[
     compiler.toFilePath(),
-    "--compile-sdk=${patchedSdk.toFilePath()}",
-    "--output=${output.toFilePath()}",
-    "--verify",
+    "${Flags.compileSdk}=sdk/",
+    "${Flags.output}=${output.toFilePath()}",
+    Flags.verify,
     input.toFilePath(),
-  ]);
-  if (result.output.isNotEmpty) {
-    print(result.output);
-  }
+  ];
+  print('Running: $executable ${arguments.join(' ')}');
+  StdioProcess result =
+      await StdioProcess.run(executable, arguments, suppressOutput: false);
   if (result.exitCode != 0) {
-    throw "Compilation failed.";
+    throw "Compilation failed:\n${result.output}";
   }
 }
 
@@ -82,13 +78,13 @@ Future compare(Uri a, Uri b, {bool silent: false}) async {
   if (!silent) {
     print("$a is different from $b");
   }
-  Program programA = new Program();
-  Program programB = new Program();
-  new BinaryBuilder(bytesA, a.toFilePath()).readProgram(programA);
-  new BinaryBuilder(bytesB, b.toFilePath()).readProgram(programB);
+  Component componentA = new Component();
+  Component componentB = new Component();
+  new BinaryBuilder(bytesA, filename: a.toFilePath()).readComponent(componentA);
+  new BinaryBuilder(bytesB, filename: b.toFilePath()).readComponent(componentB);
   RegExp splitLines = new RegExp('^', multiLine: true);
-  List<String> linesA = programToString(programA).split(splitLines);
-  List<String> linesB = programToString(programB).split(splitLines);
+  List<String> linesA = componentToString(componentA).split(splitLines);
+  List<String> linesB = componentToString(componentB).split(splitLines);
   for (int i = 0; i < linesA.length && i < linesB.length; i++) {
     String lineA = linesA[i].trimRight();
     String lineB = linesB[i].trimRight();
@@ -108,5 +104,6 @@ class ComparisonFailed {
 
   ComparisonFailed(this.a, this.b);
 
-  toString() => "Error: $a is different from $b";
+  @override
+  String toString() => "Error: $a is different from $b";
 }

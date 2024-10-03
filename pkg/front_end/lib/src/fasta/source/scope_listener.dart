@@ -4,13 +4,16 @@
 
 library fasta.scope_listener;
 
-import '../../scanner/token.dart' show Token;
+import 'package:_fe_analyzer_shared/src/parser/block_kind.dart' show BlockKind;
 
-import 'unhandled_listener.dart' show NullValue, UnhandledListener;
+import 'package:_fe_analyzer_shared/src/parser/stack_listener.dart'
+    show NullValue;
+
+import 'package:_fe_analyzer_shared/src/scanner/token.dart' show Token;
 
 import '../scope.dart' show Scope;
-
-export 'unhandled_listener.dart' show NullValue, Unhandled;
+import 'stack_listener_impl.dart';
+import 'value_kinds.dart';
 
 enum JumpTargetKind {
   Break,
@@ -18,14 +21,14 @@ enum JumpTargetKind {
   Goto, // Continue label in switch.
 }
 
-abstract class ScopeListener<J> extends UnhandledListener {
+abstract class ScopeListener<J> extends StackListenerImpl {
   Scope scope;
 
-  J breakTarget;
+  J? breakTarget;
 
-  J continueTarget;
+  J? continueTarget;
 
-  ScopeListener(Scope scope) : scope = scope ?? new Scope.immutable();
+  ScopeListener(Scope? scope) : scope = scope ?? new Scope.immutable();
 
   J createJumpTarget(JumpTargetKind kind, int charOffset);
 
@@ -41,36 +44,43 @@ abstract class ScopeListener<J> extends UnhandledListener {
     return createJumpTarget(JumpTargetKind.Goto, charOffset);
   }
 
-  void enterLocalScope([Scope newScope]) {
+  void enterLocalScope(String debugName, [Scope? newScope]) {
     push(scope);
-    scope = newScope ?? scope.createNestedScope();
+    scope = newScope ?? scope.createNestedScope(debugName);
+    assert(checkState(null, [
+      ValueKinds.Scope,
+    ]));
   }
 
   @override
   void exitLocalScope() {
-    scope = pop();
+    assert(checkState(null, [
+      ValueKinds.Scope,
+    ]));
+    scope = pop() as Scope;
+    // ignore: unnecessary_null_comparison
     assert(scope != null);
   }
 
-  void enterBreakTarget(int charOffset, [J target]) {
+  void enterBreakTarget(int charOffset, [J? target]) {
     push(breakTarget ?? NullValue.BreakTarget);
     breakTarget = target ?? createBreakTarget(charOffset);
   }
 
-  void enterContinueTarget(int charOffset, [J target]) {
+  void enterContinueTarget(int charOffset, [J? target]) {
     push(continueTarget ?? NullValue.ContinueTarget);
     continueTarget = target ?? createContinueTarget(charOffset);
   }
 
-  J exitBreakTarget() {
-    J current = breakTarget;
-    breakTarget = pop();
+  J? exitBreakTarget() {
+    J? current = breakTarget;
+    breakTarget = pop() as J?;
     return current;
   }
 
-  J exitContinueTarget() {
-    J current = continueTarget;
-    continueTarget = pop();
+  J? exitContinueTarget() {
+    J? current = continueTarget;
+    continueTarget = pop() as J?;
     return current;
   }
 
@@ -82,26 +92,32 @@ abstract class ScopeListener<J> extends UnhandledListener {
   @override
   void beginBlockFunctionBody(Token begin) {
     debugEvent("beginBlockFunctionBody");
-    enterLocalScope();
+    enterLocalScope("block function body");
   }
 
   @override
   void beginForStatement(Token token) {
     debugEvent("beginForStatement");
     enterLoop(token.charOffset);
-    enterLocalScope();
+    enterLocalScope("for statement");
   }
 
   @override
-  void beginBlock(Token token) {
+  void beginForControlFlow(Token? awaitToken, Token forToken) {
+    debugEvent("beginForControlFlow");
+    enterLocalScope("for in a collection");
+  }
+
+  @override
+  void beginBlock(Token token, BlockKind blockKind) {
     debugEvent("beginBlock");
-    enterLocalScope();
+    enterLocalScope("block");
   }
 
   @override
   void beginSwitchBlock(Token token) {
     debugEvent("beginSwitchBlock");
-    enterLocalScope();
+    enterLocalScope("switch block");
     enterBreakTarget(token.charOffset);
   }
 
@@ -120,13 +136,13 @@ abstract class ScopeListener<J> extends UnhandledListener {
   @override
   void beginDoWhileStatementBody(Token token) {
     debugEvent("beginDoWhileStatementBody");
-    enterLocalScope();
+    enterLocalScope("do-while statement body");
   }
 
   @override
   void endDoWhileStatementBody(Token token) {
     debugEvent("endDoWhileStatementBody");
-    var body = pop();
+    Object? body = pop();
     exitLocalScope();
     push(body);
   }
@@ -134,13 +150,13 @@ abstract class ScopeListener<J> extends UnhandledListener {
   @override
   void beginWhileStatementBody(Token token) {
     debugEvent("beginWhileStatementBody");
-    enterLocalScope();
+    enterLocalScope("while statement body");
   }
 
   @override
   void endWhileStatementBody(Token token) {
     debugEvent("endWhileStatementBody");
-    var body = pop();
+    Object? body = pop();
     exitLocalScope();
     push(body);
   }
@@ -148,13 +164,13 @@ abstract class ScopeListener<J> extends UnhandledListener {
   @override
   void beginForStatementBody(Token token) {
     debugEvent("beginForStatementBody");
-    enterLocalScope();
+    enterLocalScope("for statement body");
   }
 
   @override
   void endForStatementBody(Token token) {
     debugEvent("endForStatementBody");
-    var body = pop();
+    Object? body = pop();
     exitLocalScope();
     push(body);
   }
@@ -162,13 +178,13 @@ abstract class ScopeListener<J> extends UnhandledListener {
   @override
   void beginForInBody(Token token) {
     debugEvent("beginForInBody");
-    enterLocalScope();
+    enterLocalScope("for-in body");
   }
 
   @override
   void endForInBody(Token token) {
     debugEvent("endForInBody");
-    var body = pop();
+    Object? body = pop();
     exitLocalScope();
     push(body);
   }
@@ -176,13 +192,13 @@ abstract class ScopeListener<J> extends UnhandledListener {
   @override
   void beginThenStatement(Token token) {
     debugEvent("beginThenStatement");
-    enterLocalScope();
+    enterLocalScope("then");
   }
 
   @override
   void endThenStatement(Token token) {
     debugEvent("endThenStatement");
-    var body = pop();
+    Object? body = pop();
     exitLocalScope();
     push(body);
   }
@@ -190,13 +206,13 @@ abstract class ScopeListener<J> extends UnhandledListener {
   @override
   void beginElseStatement(Token token) {
     debugEvent("beginElseStatement");
-    enterLocalScope();
+    enterLocalScope("else");
   }
 
   @override
   void endElseStatement(Token token) {
     debugEvent("endElseStatement");
-    var body = pop();
+    Object? body = pop();
     exitLocalScope();
     push(body);
   }

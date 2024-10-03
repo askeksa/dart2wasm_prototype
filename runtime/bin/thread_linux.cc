@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "platform/globals.h"
-#if defined(HOST_OS_LINUX)
+#if defined(DART_HOST_OS_LINUX)
 
 #include "bin/thread.h"
 #include "bin/thread_linux.h"
@@ -26,7 +26,6 @@ namespace bin {
            Utils::StrError(result, error_buf, kBufferSize));                   \
   }
 
-
 #ifdef DEBUG
 #define RETURN_ON_PTHREAD_FAILURE(result)                                      \
   if (result != 0) {                                                           \
@@ -43,7 +42,6 @@ namespace bin {
   }
 #endif
 
-
 static void ComputeTimeSpecMicros(struct timespec* ts, int64_t micros) {
   int64_t secs = micros / kMicrosecondsPerSecond;
   int64_t nanos =
@@ -58,22 +56,24 @@ static void ComputeTimeSpecMicros(struct timespec* ts, int64_t micros) {
   }
 }
 
-
 class ThreadStartData {
  public:
-  ThreadStartData(Thread::ThreadStartFunction function, uword parameter)
-      : function_(function), parameter_(parameter) {}
+  ThreadStartData(const char* name,
+                  Thread::ThreadStartFunction function,
+                  uword parameter)
+      : name_(name), function_(function), parameter_(parameter) {}
 
+  const char* name() const { return name_; }
   Thread::ThreadStartFunction function() const { return function_; }
   uword parameter() const { return parameter_; }
 
  private:
+  const char* name_;
   Thread::ThreadStartFunction function_;
   uword parameter_;
 
   DISALLOW_COPY_AND_ASSIGN(ThreadStartData);
 };
-
 
 // Dispatch to the thread start function provided by the caller. This trampoline
 // is used to ensure that the thread is properly destroyed if the thread just
@@ -81,9 +81,16 @@ class ThreadStartData {
 static void* ThreadStart(void* data_ptr) {
   ThreadStartData* data = reinterpret_cast<ThreadStartData*>(data_ptr);
 
+  const char* name = data->name();
   Thread::ThreadStartFunction function = data->function();
   uword parameter = data->parameter();
   delete data;
+
+  // Set the thread name. There is 16 bytes limit on the name (including \0).
+  // pthread_setname_np ignores names that are too long rather than truncating.
+  char truncated_name[16];
+  snprintf(truncated_name, sizeof(truncated_name), "%s", name);
+  pthread_setname_np(pthread_self(), truncated_name);
 
   // Call the supplied thread start function handing it its parameters.
   function(parameter);
@@ -91,8 +98,9 @@ static void* ThreadStart(void* data_ptr) {
   return NULL;
 }
 
-
-int Thread::Start(ThreadStartFunction function, uword parameter) {
+int Thread::Start(const char* name,
+                  ThreadStartFunction function,
+                  uword parameter) {
   pthread_attr_t attr;
   int result = pthread_attr_init(&attr);
   RETURN_ON_PTHREAD_FAILURE(result);
@@ -103,7 +111,7 @@ int Thread::Start(ThreadStartFunction function, uword parameter) {
   result = pthread_attr_setstacksize(&attr, Thread::GetMaxStackSize());
   RETURN_ON_PTHREAD_FAILURE(result);
 
-  ThreadStartData* data = new ThreadStartData(function, parameter);
+  ThreadStartData* data = new ThreadStartData(name, function, parameter);
 
   pthread_t tid;
   result = pthread_create(&tid, &attr, ThreadStart, data);
@@ -114,7 +122,6 @@ int Thread::Start(ThreadStartFunction function, uword parameter) {
 
   return 0;
 }
-
 
 const ThreadLocalKey Thread::kUnsetThreadLocalKey =
     static_cast<pthread_key_t>(-1);
@@ -128,13 +135,11 @@ ThreadLocalKey Thread::CreateThreadLocal() {
   return key;
 }
 
-
 void Thread::DeleteThreadLocal(ThreadLocalKey key) {
   ASSERT(key != kUnsetThreadLocalKey);
   int result = pthread_key_delete(key);
   VALIDATE_PTHREAD_RESULT(result);
 }
-
 
 void Thread::SetThreadLocal(ThreadLocalKey key, uword value) {
   ASSERT(key != kUnsetThreadLocalKey);
@@ -142,33 +147,23 @@ void Thread::SetThreadLocal(ThreadLocalKey key, uword value) {
   VALIDATE_PTHREAD_RESULT(result);
 }
 
-
 intptr_t Thread::GetMaxStackSize() {
   const int kStackSize = (128 * kWordSize * KB);
   return kStackSize;
 }
 
-
 ThreadId Thread::GetCurrentThreadId() {
   return pthread_self();
 }
-
 
 intptr_t Thread::ThreadIdToIntPtr(ThreadId id) {
   ASSERT(sizeof(id) == sizeof(intptr_t));
   return static_cast<intptr_t>(id);
 }
 
-
 bool Thread::Compare(ThreadId a, ThreadId b) {
   return (pthread_equal(a, b) != 0);
 }
-
-
-void Thread::InitOnce() {
-  // Nothing to be done.
-}
-
 
 Mutex::Mutex() {
   pthread_mutexattr_t attr;
@@ -188,13 +183,11 @@ Mutex::Mutex() {
   VALIDATE_PTHREAD_RESULT(result);
 }
 
-
 Mutex::~Mutex() {
   int result = pthread_mutex_destroy(data_.mutex());
   // Verify that the pthread_mutex was destroyed.
   VALIDATE_PTHREAD_RESULT(result);
 }
-
 
 void Mutex::Lock() {
   int result = pthread_mutex_lock(data_.mutex());
@@ -203,7 +196,6 @@ void Mutex::Lock() {
   ASSERT(result == 0);  // Verify no other errors.
   // TODO(iposva): Do we need to track lock owners?
 }
-
 
 bool Mutex::TryLock() {
   int result = pthread_mutex_trylock(data_.mutex());
@@ -216,7 +208,6 @@ bool Mutex::TryLock() {
   return true;
 }
 
-
 void Mutex::Unlock() {
   // TODO(iposva): Do we need to track lock owners?
   int result = pthread_mutex_unlock(data_.mutex());
@@ -224,7 +215,6 @@ void Mutex::Unlock() {
   ASSERT(result != EPERM);
   ASSERT(result == 0);  // Verify no other errors.
 }
-
 
 Monitor::Monitor() {
   pthread_mutexattr_t mutex_attr;
@@ -256,7 +246,6 @@ Monitor::Monitor() {
   VALIDATE_PTHREAD_RESULT(result);
 }
 
-
 Monitor::~Monitor() {
   int result = pthread_mutex_destroy(data_.mutex());
   VALIDATE_PTHREAD_RESULT(result);
@@ -265,13 +254,11 @@ Monitor::~Monitor() {
   VALIDATE_PTHREAD_RESULT(result);
 }
 
-
 void Monitor::Enter() {
   int result = pthread_mutex_lock(data_.mutex());
   VALIDATE_PTHREAD_RESULT(result);
   // TODO(iposva): Do we need to track lock owners?
 }
-
 
 void Monitor::Exit() {
   // TODO(iposva): Do we need to track lock owners?
@@ -279,11 +266,9 @@ void Monitor::Exit() {
   VALIDATE_PTHREAD_RESULT(result);
 }
 
-
 Monitor::WaitResult Monitor::Wait(int64_t millis) {
   return WaitMicros(millis * kMicrosecondsPerMillisecond);
 }
-
 
 Monitor::WaitResult Monitor::WaitMicros(int64_t micros) {
   // TODO(iposva): Do we need to track lock owners?
@@ -304,13 +289,11 @@ Monitor::WaitResult Monitor::WaitMicros(int64_t micros) {
   return retval;
 }
 
-
 void Monitor::Notify() {
   // TODO(iposva): Do we need to track lock owners?
   int result = pthread_cond_signal(data_.cond());
   VALIDATE_PTHREAD_RESULT(result);
 }
-
 
 void Monitor::NotifyAll() {
   // TODO(iposva): Do we need to track lock owners?
@@ -321,4 +304,4 @@ void Monitor::NotifyAll() {
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_LINUX)
+#endif  // defined(DART_HOST_OS_LINUX)

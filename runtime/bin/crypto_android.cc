@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "platform/globals.h"
-#if defined(HOST_OS_ANDROID)
+#if defined(DART_HOST_OS_ANDROID)
 
 #include <errno.h>  // NOLINT
 #include <fcntl.h>  // NOLINT
@@ -17,8 +17,8 @@ namespace bin {
 
 bool Crypto::GetRandomBytes(intptr_t count, uint8_t* buffer) {
   ThreadSignalBlocker signal_blocker(SIGPROF);
-  intptr_t fd =
-      TEMP_FAILURE_RETRY_NO_SIGNAL_BLOCKER(open("/dev/urandom", O_RDONLY));
+  intptr_t fd = TEMP_FAILURE_RETRY_NO_SIGNAL_BLOCKER(
+      open("/dev/urandom", O_RDONLY | O_CLOEXEC));
   if (fd < 0) {
     return false;
   }
@@ -28,17 +28,17 @@ bool Crypto::GetRandomBytes(intptr_t count, uint8_t* buffer) {
         read(fd, buffer + bytes_read, count - bytes_read));
     if (res < 0) {
       int err = errno;
-      VOID_TEMP_FAILURE_RETRY_NO_SIGNAL_BLOCKER(close(fd));
+      close(fd);
       errno = err;
       return false;
     }
     bytes_read += res;
   } while (bytes_read < count);
-  VOID_TEMP_FAILURE_RETRY_NO_SIGNAL_BLOCKER(close(fd));
+  close(fd);
   return true;
 }
 
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_ANDROID)
+#endif  // defined(DART_HOST_OS_ANDROID)

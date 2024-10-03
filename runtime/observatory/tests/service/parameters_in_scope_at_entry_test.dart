@@ -1,12 +1,12 @@
 // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override  --verbose_debug
+// VMOptions=--verbose_debug
 
 import 'package:observatory/service_io.dart';
 import 'test_helper.dart';
 import 'dart:developer';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 
 import 'service_test_common.dart';
 
@@ -34,7 +34,7 @@ testMain() {
   f("in-scope"); // Line B.
 }
 
-var tests = [
+var tests = <IsolateTest>[
   hasStoppedAtBreakpoint,
   stoppedAtLine(LINE_A),
   (isolate) => isolate.stepInto(),
@@ -43,7 +43,7 @@ var tests = [
     var stack = await isolate.getStack();
     Frame top = stack['frames'][0];
     print(top);
-    expect(top.function.name, equals("foo"));
+    expect(top.function!.name, equals("foo"));
     print(top.variables);
     expect(top.variables.length, equals(1));
     var param = top.variables[0];
@@ -59,7 +59,7 @@ var tests = [
     var stack = await isolate.getStack();
     Frame top = stack['frames'][0];
     print(top);
-    expect(top.function.name, equals("theClosureFunction"));
+    expect(top.function!.name, equals("theClosureFunction"));
     print(top.variables);
     expect(top.variables.length, equals(1));
     var param = top.variables[0];

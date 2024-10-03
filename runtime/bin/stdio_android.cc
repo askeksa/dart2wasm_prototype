@@ -2,10 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "platform/globals.h"
-#if defined(HOST_OS_ANDROID)
+#if defined(DART_HOST_OS_ANDROID)
 
 #include "bin/stdio.h"
 
@@ -19,19 +17,19 @@
 namespace dart {
 namespace bin {
 
-bool Stdin::ReadByte(int* byte) {
-  int c = NO_RETRY_EXPECTED(getchar());
-  if ((c == EOF) && (errno != 0)) {
+bool Stdin::ReadByte(intptr_t fd, int* byte) {
+  unsigned char b;
+  ssize_t s = TEMP_FAILURE_RETRY(read(fd, &b, 1));
+  if (s < 0) {
     return false;
   }
-  *byte = (c == EOF) ? -1 : c;
+  *byte = (s == 0) ? -1 : b;
   return true;
 }
 
-
-bool Stdin::GetEchoMode(bool* enabled) {
+bool Stdin::GetEchoMode(intptr_t fd, bool* enabled) {
   struct termios term;
-  int status = NO_RETRY_EXPECTED(tcgetattr(STDIN_FILENO, &term));
+  int status = NO_RETRY_EXPECTED(tcgetattr(fd, &term));
   if (status != 0) {
     return false;
   }
@@ -39,10 +37,9 @@ bool Stdin::GetEchoMode(bool* enabled) {
   return true;
 }
 
-
-bool Stdin::SetEchoMode(bool enabled) {
+bool Stdin::SetEchoMode(intptr_t fd, bool enabled) {
   struct termios term;
-  int status = NO_RETRY_EXPECTED(tcgetattr(STDIN_FILENO, &term));
+  int status = NO_RETRY_EXPECTED(tcgetattr(fd, &term));
   if (status != 0) {
     return false;
   }
@@ -51,14 +48,13 @@ bool Stdin::SetEchoMode(bool enabled) {
   } else {
     term.c_lflag &= ~(ECHO | ECHONL);
   }
-  status = NO_RETRY_EXPECTED(tcsetattr(STDIN_FILENO, TCSANOW, &term));
+  status = NO_RETRY_EXPECTED(tcsetattr(fd, TCSANOW, &term));
   return (status == 0);
 }
 
-
-bool Stdin::GetLineMode(bool* enabled) {
+bool Stdin::GetLineMode(intptr_t fd, bool* enabled) {
   struct termios term;
-  int status = NO_RETRY_EXPECTED(tcgetattr(STDIN_FILENO, &term));
+  int status = NO_RETRY_EXPECTED(tcgetattr(fd, &term));
   if (status != 0) {
     return false;
   }
@@ -66,10 +62,9 @@ bool Stdin::GetLineMode(bool* enabled) {
   return true;
 }
 
-
-bool Stdin::SetLineMode(bool enabled) {
+bool Stdin::SetLineMode(intptr_t fd, bool enabled) {
   struct termios term;
-  int status = NO_RETRY_EXPECTED(tcgetattr(STDIN_FILENO, &term));
+  int status = NO_RETRY_EXPECTED(tcgetattr(fd, &term));
   if (status != 0) {
     return false;
   }
@@ -78,25 +73,24 @@ bool Stdin::SetLineMode(bool enabled) {
   } else {
     term.c_lflag &= ~(ICANON);
   }
-  status = NO_RETRY_EXPECTED(tcsetattr(STDIN_FILENO, TCSANOW, &term));
+  status = NO_RETRY_EXPECTED(tcsetattr(fd, TCSANOW, &term));
   return (status == 0);
 }
 
-
-static bool TermHasXTerm() {
+static bool TermIsKnownToSupportAnsi() {
   const char* term = getenv("TERM");
   if (term == NULL) {
     return false;
   }
-  return strstr(term, "xterm") != NULL;
+
+  return strstr(term, "xterm") != NULL || strstr(term, "screen") != NULL ||
+         strstr(term, "rxvt") != NULL;
 }
 
-
-bool Stdin::AnsiSupported(bool* supported) {
-  *supported = isatty(STDIN_FILENO) && TermHasXTerm();
+bool Stdin::AnsiSupported(intptr_t fd, bool* supported) {
+  *supported = isatty(fd) && TermIsKnownToSupportAnsi();
   return true;
 }
-
 
 bool Stdout::GetTerminalSize(intptr_t fd, int size[2]) {
   struct winsize w;
@@ -109,15 +103,12 @@ bool Stdout::GetTerminalSize(intptr_t fd, int size[2]) {
   return false;
 }
 
-
 bool Stdout::AnsiSupported(intptr_t fd, bool* supported) {
-  *supported = isatty(fd) && TermHasXTerm();
+  *supported = isatty(fd) && TermIsKnownToSupportAnsi();
   return true;
 }
 
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_ANDROID)
-
-#endif  // !defined(DART_IO_DISABLED)
+#endif  // defined(DART_HOST_OS_ANDROID)

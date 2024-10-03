@@ -8,38 +8,35 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/nav_bar.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
 import 'package:observatory/src/elements/nav/notify.dart';
 import 'package:observatory/src/elements/nav/top_menu.dart';
 
-class GeneralErrorElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<GeneralErrorElement>('general-error',
-      dependencies: const [NavTopMenuElement.tag, NavNotifyElement.tag]);
-
-  RenderingScheduler _r;
+class GeneralErrorElement extends CustomElement implements Renderable {
+  late RenderingScheduler<GeneralErrorElement> _r;
 
   Stream<RenderedEvent<GeneralErrorElement>> get onRendered => _r.onRendered;
 
-  M.NotificationRepository _notifications;
-  String _message;
+  late M.NotificationRepository _notifications;
+  late String _message;
 
   String get message => _message;
 
   set message(String value) => _message = _r.checkAndReact(_message, value);
 
   factory GeneralErrorElement(M.NotificationRepository notifications,
-      {String message: '', RenderingQueue queue}) {
+      {String message: '', RenderingQueue? queue}) {
     assert(notifications != null);
     assert(message != null);
-    GeneralErrorElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    GeneralErrorElement e = new GeneralErrorElement.created();
+    e._r = new RenderingScheduler<GeneralErrorElement>(e, queue: queue);
     e._message = message;
     e._notifications = notifications;
     return e;
   }
 
-  GeneralErrorElement.created() : super.created();
+  GeneralErrorElement.created() : super.created('general-error');
 
   @override
   void attached() {
@@ -50,19 +47,19 @@ class GeneralErrorElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [
-      navBar([
-        new NavTopMenuElement(queue: _r.queue),
-        new NavNotifyElement(_notifications, queue: _r.queue)
+    children = <Element>[
+      navBar(<Element>[
+        new NavTopMenuElement(queue: _r.queue).element,
+        new NavNotifyElement(_notifications, queue: _r.queue).element
       ]),
       new DivElement()
         ..classes = ['content-centered']
-        ..children = [
+        ..children = <Element>[
           new HeadingElement.h1()..text = 'Error',
           new BRElement(),
           new DivElement()

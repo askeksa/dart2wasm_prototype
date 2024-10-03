@@ -2,14 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#include "platform/assert.h"
-#include "vm/ast.h"
 #include "vm/scopes.h"
+#include "platform/assert.h"
 #include "vm/unit_test.h"
 
 namespace dart {
 
-TEST_CASE(LocalScope) {
+ISOLATE_UNIT_TEST_CASE(LocalScope) {
   // Allocate a couple of local variables first.
   const Type& dynamic_type = Type::ZoneHandle(Type::DynamicType());
   const String& a = String::ZoneHandle(Symbols::New(thread, "a"));

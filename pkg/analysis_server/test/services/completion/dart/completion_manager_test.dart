@@ -1,22 +1,21 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:async';
 
 import 'package:analysis_server/src/provisional/completion/dart/completion_dart.dart';
-import 'package:analysis_server/src/services/completion/completion_core.dart';
-import 'package:analysis_server/src/services/completion/completion_performance.dart';
 import 'package:analysis_server/src/services/completion/dart/completion_manager.dart';
 import 'package:analysis_server/src/services/completion/dart/imported_reference_contributor.dart';
+import 'package:analysis_server/src/services/completion/dart/suggestion_builder.dart';
+import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/src/task/dart.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'completion_contributor_util.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(CompletionManagerTest);
   });
@@ -25,14 +24,15 @@ main() {
 @reflectiveTest
 class CompletionManagerTest extends DartCompletionContributorTest {
   @override
-  DartCompletionContributor createContributor() {
-    return new ImportedReferenceContributor();
+  DartCompletionContributor createContributor(
+    DartCompletionRequest request,
+    SuggestionBuilder builder,
+  ) {
+    return ImportedReferenceContributor(request, builder);
   }
 
-  test_resolveDirectives() async {
-    addSource(
-        '/libA.dart',
-        '''
+  Future<void> test_resolveDirectives() async {
+    newFile('$testPackageLibPath/a.dart', content: '''
 library libA;
 /// My class.
 /// Short description.
@@ -40,51 +40,47 @@ library libA;
 /// Longer description.
 class A {}
 ''');
-    addSource(
-        '/libB.dart',
-        '''
+    newFile('$testPackageLibPath/b.dart', content: '''
 library libB;
-import "/libA.dart" as foo;
-part '$testFile';
+import "a.dart" as foo;
+part 'test.dart';
 ''');
     addTestSource('part of libB; main() {^}');
 
+    await resolveFile('$testPackageLibPath/b.dart');
+
     // Build the request
-    CompletionRequestImpl baseRequest = new CompletionRequestImpl(
-        await driver.getResult(testFile),
-        provider,
-        testSource,
-        completionOffset,
-        new CompletionPerformance(),
-        null);
-    Completer<DartCompletionRequest> requestCompleter =
-        new Completer<DartCompletionRequest>();
-    DartCompletionRequestImpl
-        .from(baseRequest, resultDescriptor: RESOLVED_UNIT1)
-        .then((DartCompletionRequest request) {
-      requestCompleter.complete(request);
-    });
-    request = await performAnalysis(200, requestCompleter);
+    var resolvedUnit =
+        await session.getResolvedUnit(testFile) as ResolvedUnitResult;
+    request = DartCompletionRequest.forResolvedUnit(
+      resolvedUnit: resolvedUnit,
+      offset: completionOffset,
+    );
 
-    var directives = request.target.unit.directives;
+    var directives = resolvedUnit.unit.directives;
 
-    List<ImportElement> imports = request.libraryElement.imports;
+    var imports = request.libraryElement.imports;
     expect(imports, hasLength(directives.length + 1));
 
     ImportElement importNamed(String expectedUri) {
-      return imports.firstWhere((elem) => elem.uri == expectedUri, orElse: () {
-        var importedNames = imports.map((elem) => elem.uri);
-        fail('Failed to find $expectedUri in $importedNames');
-      });
+      var uriList = <String>[];
+      for (var importElement in imports) {
+        var uri = importElement.importedLibrary!.source.uri.toString();
+        uriList.add(uri);
+        if (uri.endsWith(expectedUri)) {
+          return importElement;
+        }
+      }
+      fail('Failed to find $expectedUri in $uriList');
     }
 
     void assertImportedLib(String expectedUri) {
-      ImportElement importElem = importNamed(expectedUri);
-      expect(importElem.importedLibrary.exportNamespace, isNotNull);
+      var importElem = importNamed(expectedUri);
+      expect(importElem.importedLibrary!.exportNamespace, isNotNull);
     }
 
     // Assert that the new imports each have an export namespace
-    assertImportedLib(null /* dart:core */);
-    assertImportedLib('/libA.dart');
+    assertImportedLib('dart:core');
+    assertImportedLib('a.dart');
   }
 }

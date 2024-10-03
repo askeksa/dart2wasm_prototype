@@ -2,9 +2,9 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+#include "platform/hashmap.h"
 #include "platform/assert.h"
 #include "platform/globals.h"
-#include "platform/hashmap.h"
 #include "vm/unit_test.h"
 
 namespace dart {
@@ -12,18 +12,17 @@ namespace dart {
 // Default initial size of hashmaps used in these tests.
 static intptr_t kInitialSize = 8;
 
-
 typedef uint32_t (*IntKeyHash)(uint32_t key);
-
 
 class IntSet {
  public:
   explicit IntSet(IntKeyHash hash)
-      : hash_(hash), map_(HashMap::SamePointerValue, kInitialSize) {}
+      : hash_(hash), map_(SimpleHashMap::SamePointerValue, kInitialSize) {}
 
   void Insert(int x) {
     EXPECT_NE(0, x);  // 0 corresponds to (void*)NULL - illegal key value
-    HashMap::Entry* p = map_.Lookup(reinterpret_cast<void*>(x), hash_(x), true);
+    SimpleHashMap::Entry* p =
+        map_.Lookup(reinterpret_cast<void*>(x), hash_(x), true);
     EXPECT(p != NULL);  // insert is set!
     EXPECT_EQ(reinterpret_cast<void*>(x), p->key);
     // We don't care about p->value.
@@ -35,7 +34,7 @@ class IntSet {
   }
 
   bool Present(int x) {
-    HashMap::Entry* p =
+    SimpleHashMap::Entry* p =
         map_.Lookup(reinterpret_cast<void*>(x), hash_(x), false);
     if (p != NULL) {
       EXPECT_EQ(reinterpret_cast<void*>(x), p->key);
@@ -47,7 +46,7 @@ class IntSet {
 
   uint32_t occupancy() const {
     uint32_t count = 0;
-    for (HashMap::Entry* p = map_.Start(); p != NULL; p = map_.Next(p)) {
+    for (SimpleHashMap::Entry* p = map_.Start(); p != NULL; p = map_.Next(p)) {
       count++;
     }
     EXPECT_EQ(map_.occupancy_, count);
@@ -56,9 +55,8 @@ class IntSet {
 
  private:
   IntKeyHash hash_;
-  HashMap map_;
+  SimpleHashMap map_;
 };
-
 
 static uint32_t WordHash(uint32_t key) {
   return dart::Utils::WordHash(key);
@@ -78,7 +76,6 @@ static uint32_t CollisionHash3(uint32_t key) {
 static uint32_t CollisionHash4(uint32_t key) {
   return kInitialSize - 2;
 }
-
 
 void TestSet(IntKeyHash hash, int size) {
   IntSet set(hash);
@@ -126,12 +123,12 @@ void TestSet(IntKeyHash hash, int size) {
   EXPECT_EQ(0u, set.occupancy());
 
   // Insert a long series of values.
-  const int start = 453;
-  const int factor = 13;
-  const int offset = 7;
+  const uint32_t start = 453;
+  const uint32_t factor = 13;
+  const uint32_t offset = 7;
   const uint32_t n = size;
 
-  int x = start;
+  uint32_t x = start;
   for (uint32_t i = 0; i < n; i++) {
     EXPECT_EQ(i, set.occupancy());
     set.Insert(x);
@@ -170,8 +167,7 @@ void TestSet(IntKeyHash hash, int size) {
   EXPECT_EQ(0u, set.occupancy());
 }
 
-
-VM_UNIT_TEST_CASE(HashMap_Basic) {
+VM_UNIT_TEST_CASE(SimpleHashMap_Basic) {
   TestSet(WordHash, 100);
   TestSet(Hash, 100);
   TestSet(CollisionHash1, 50);

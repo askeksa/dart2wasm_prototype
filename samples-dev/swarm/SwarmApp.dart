@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of swarmlib;
 
 /**
@@ -23,9 +25,7 @@ class Swarm extends App {
   /** Observable UI state. */
   SwarmState state;
 
-  Swarm({bool useCannedData: false})
-      : super(),
-        onLoadFired = false {
+  Swarm({bool useCannedData: false}) : onLoadFired = false {
     Sections.initializeFromUrl(useCannedData, (currSections) {
       sections = currSections;
       state = new SwarmState(sections);

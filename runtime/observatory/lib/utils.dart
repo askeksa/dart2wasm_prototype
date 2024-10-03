@@ -7,6 +7,15 @@ library utils;
 import 'dart:async';
 import 'dart:math';
 
+enum DurationComponent {
+  Days,
+  Hours,
+  Minutes,
+  Seconds,
+  Milliseconds,
+  Microseconds
+}
+
 class Utils {
   static String formatPercentNormalized(double x) {
     var percent = 100.0 * x;
@@ -20,7 +29,7 @@ class Utils {
   static String zeroPad(int value, int pad) {
     String prefix = "";
     while (pad > 1) {
-      int pow10 = pow(10, pad - 1);
+      int pow10 = pow(10, pad - 1) as int;
       if (value < pow10) {
         prefix = prefix + "0";
       }
@@ -73,38 +82,41 @@ class Utils {
     millis = millis % millisPerSecond;
 
     if (hours > 0) {
-      return ("${zeroPad(hours,2)}"
-          ":${zeroPad(minutes,2)}"
-          ":${zeroPad(seconds,2)}"
-          ".${zeroPad(millis,3)}");
+      return ("${zeroPad(hours, 2)}"
+          ":${zeroPad(minutes, 2)}"
+          ":${zeroPad(seconds, 2)}"
+          ".${zeroPad(millis, 3)}");
     } else if (minutes > 0) {
-      return ("${zeroPad(minutes,2)}"
-          ":${zeroPad(seconds,2)}"
-          ".${zeroPad(millis,3)}");
+      return ("${zeroPad(minutes, 2)}"
+          ":${zeroPad(seconds, 2)}"
+          ".${zeroPad(millis, 3)}");
     } else {
-      return ("${zeroPad(seconds,2)}"
-          ".${zeroPad(millis,3)}");
+      return ("${zeroPad(seconds, 2)}"
+          ".${zeroPad(millis, 3)}");
     }
   }
 
-  static String formatSize(int bytes) {
-    const int digits = 1;
+  static String formatSize(bytesDynamic) {
+    int bytes = bytesDynamic.toInt();
+
+    String finish(int scale, String prefix) {
+      double scaled = bytes / scale;
+      int digits = 1;
+      if (scaled < 10) digits = 2;
+      return "${scaled.toStringAsFixed(digits)}${prefix}B";
+    }
+
     const int bytesPerKB = 1024;
     const int bytesPerMB = 1024 * bytesPerKB;
     const int bytesPerGB = 1024 * bytesPerMB;
     const int bytesPerTB = 1024 * bytesPerGB;
 
-    if (bytes < bytesPerKB) {
-      return "${bytes}B";
-    } else if (bytes < bytesPerMB) {
-      return "${(bytes / bytesPerKB).toStringAsFixed(digits)}KB";
-    } else if (bytes < bytesPerGB) {
-      return "${(bytes / bytesPerMB).toStringAsFixed(digits)}MB";
-    } else if (bytes < bytesPerTB) {
-      return "${(bytes / bytesPerGB).toStringAsFixed(digits)}GB";
-    } else {
-      return "${(bytes / bytesPerTB).toStringAsFixed(digits)}TB";
-    }
+    int absBytes = bytes >= 0 ? bytes : -bytes;
+    if (absBytes < bytesPerKB) return "${bytes}B";
+    if (absBytes < bytesPerMB) return finish(bytesPerKB, "K");
+    if (absBytes < bytesPerGB) return finish(bytesPerMB, "M");
+    if (absBytes < bytesPerTB) return finish(bytesPerGB, "G");
+    return finish(bytesPerTB, "TB");
   }
 
   static String formatTime(double time) {
@@ -141,6 +153,88 @@ class Utils {
         '${now.second.toString().padLeft(2)}';
   }
 
+  static String formatDuration(Duration duration,
+      {DurationComponent precision = DurationComponent.Microseconds,
+      String future = '',
+      String past = 'ago'}) {
+    var value = duration.inMicroseconds.abs();
+    switch (precision) {
+      case DurationComponent.Days:
+        value = (value / Duration.microsecondsPerDay).round();
+        break;
+      case DurationComponent.Hours:
+        value = (value / Duration.microsecondsPerHour).round();
+        break;
+      case DurationComponent.Minutes:
+        value = (value / Duration.microsecondsPerMinute).round();
+        break;
+      case DurationComponent.Seconds:
+        value = (value / Duration.microsecondsPerSecond).round();
+        break;
+      case DurationComponent.Milliseconds:
+        value = (value / Duration.microsecondsPerMillisecond).round();
+        break;
+      case DurationComponent.Microseconds:
+        break;
+    }
+    final components = <String>[];
+    if (duration.isNegative) {
+      if (!past.isEmpty) {
+        components.add(past);
+      }
+    } else {
+      if (!future.isEmpty) {
+        components.add(future);
+      }
+    }
+    switch (precision) {
+      case DurationComponent.Microseconds:
+        components.add('${value % Duration.microsecondsPerMillisecond}μs');
+        value = (value / Duration.microsecondsPerMillisecond).floor();
+        if (value != 0) {
+          continue Milliseconds;
+        }
+        break;
+      Milliseconds:
+      case DurationComponent.Milliseconds:
+        components.add('${value % Duration.millisecondsPerSecond}ms');
+        value = (value / Duration.millisecondsPerSecond).floor();
+        if (value != 0) {
+          continue Seconds;
+        }
+        break;
+      Seconds:
+      case DurationComponent.Seconds:
+        components.add('${value % Duration.secondsPerMinute}s');
+        value = (value / Duration.secondsPerMinute).floor();
+        ;
+        if (value != 0) {
+          continue Minutes;
+        }
+        break;
+      Minutes:
+      case DurationComponent.Minutes:
+        components.add('${value % Duration.minutesPerHour}m');
+        value = (value / Duration.minutesPerHour).floor();
+        if (value != 0) {
+          continue Hours;
+        }
+        break;
+      Hours:
+      case DurationComponent.Hours:
+        components.add('${value % Duration.hoursPerDay}h');
+        value = (value / Duration.hoursPerDay).floor();
+        if (value != 0) {
+          continue Days;
+        }
+        break;
+      Days:
+      case DurationComponent.Days:
+        components.add('${value}d');
+    }
+    return components.reversed.join(' ');
+  }
+
   static String formatSeconds(double x) {
     return x.toStringAsFixed(2);
   }
@@ -150,15 +244,15 @@ class Utils {
   }
 
   static String formatDurationInSeconds(Duration x) =>
-      formatSeconds(x.inMicroseconds / Duration.MICROSECONDS_PER_SECOND);
+      formatSeconds(x.inMicroseconds / Duration.microsecondsPerSecond);
 
   static String formatDurationInMilliseconds(Duration x) =>
-      formatMillis(x.inMicroseconds / Duration.MICROSECONDS_PER_MILLISECOND);
+      formatMillis(x.inMicroseconds / Duration.microsecondsPerMillisecond);
 
   static bool runningInJavaScript() => identical(1.0, 1);
 
   static formatStringAsLiteral(String value, [bool wasTruncated = false]) {
-    var result = new List();
+    var result = <int>[];
     result.add("'".codeUnitAt(0));
     for (int codeUnit in value.codeUnits) {
       if (codeUnit == '\n'.codeUnitAt(0))
@@ -196,7 +290,7 @@ class Utils {
 
 /// A [Task] that can be scheduled on the Dart event queue.
 class Task {
-  Timer _timer;
+  Timer? _timer;
   final Function callback;
 
   Task(this.callback);
@@ -208,7 +302,7 @@ class Task {
       // Already scheduled.
       return;
     }
-    _timer = new Timer(Duration.ZERO, () {
+    _timer = new Timer(Duration.zero, () {
       _timer = null;
       callback();
     });

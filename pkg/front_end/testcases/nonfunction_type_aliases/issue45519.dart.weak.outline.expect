@@ -1,0 +1,16 @@
+library /*isNonNullableByDefault*/;
+import self as self;
+import "dart:core" as core;
+
+typedef G<invariant X extends core::Object? = dynamic> = (X%) → X%;
+typedef A<X extends (self::C<X>) → self::C<X> = (self::C<dynamic>) → self::C<dynamic>> = self::C<X>;
+class C<X extends core::Object? = dynamic> extends core::Object {
+  synthetic constructor •() → self::C<self::C::X%>
+    ;
+}
+static method test() → dynamic
+  ;
+static method main() → dynamic
+  ;
+static method _#A#new#tearOff<X extends (self::C<self::_#A#new#tearOff::X>) → self::C<self::_#A#new#tearOff::X> = (self::C<dynamic>) → self::C<dynamic>>() → self::C<self::_#A#new#tearOff::X>
+  return new self::C::•<self::_#A#new#tearOff::X>();

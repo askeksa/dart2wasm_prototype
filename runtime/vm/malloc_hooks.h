@@ -23,14 +23,16 @@ extern const intptr_t kSkipCount;
 
 class MallocHooks : public AllStatic {
  public:
-  static void InitOnce();
-  static void TearDown();
+  static void Init();
+  static void Cleanup();
   static bool ProfilingEnabled();
   static bool stack_trace_collection_enabled();
   static void set_stack_trace_collection_enabled(bool enabled);
   static void ResetStats();
   static bool Active();
-  static void PrintToJSONObject(JSONObject* jsobj);
+  static bool GetStats(intptr_t* used,
+                       intptr_t* capacity,
+                       const char** implementation);
   static Sample* GetSample(const void* ptr);
 
   static intptr_t allocation_count();

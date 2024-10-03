@@ -4,138 +4,136 @@
 
 part of dart.convert;
 
-/** The Unicode Replacement character `U+FFFD` (�). */
-const int UNICODE_REPLACEMENT_CHARACTER_RUNE = 0xFFFD;
+/// The Unicode Replacement character `U+FFFD` (�).
+const int unicodeReplacementCharacterRune = 0xFFFD;
 
-/** The Unicode Byte Order Marker (BOM) character `U+FEFF`. */
-const int UNICODE_BOM_CHARACTER_RUNE = 0xFEFF;
+/// The Unicode Byte Order Marker (BOM) character `U+FEFF`.
+const int unicodeBomCharacterRune = 0xFEFF;
 
-/**
- * An instance of the default implementation of the [Utf8Codec].
- *
- * This instance provides a convenient access to the most common UTF-8
- * use cases.
- *
- * Examples:
- *
- *     var encoded = UTF8.encode("Îñţérñåţîöñåļîžåţîờñ");
- *     var decoded = UTF8.decode([0x62, 0x6c, 0xc3, 0xa5, 0x62, 0xc3, 0xa6,
- *                                0x72, 0x67, 0x72, 0xc3, 0xb8, 0x64]);
- */
-const Utf8Codec UTF8 = const Utf8Codec();
+/// An instance of the default implementation of the [Utf8Codec].
+///
+/// This instance provides a convenient access to the most common UTF-8
+/// use cases.
+///
+/// Examples:
+/// ```dart
+/// var encoded = utf8.encode("Îñţérñåţîöñåļîžåţîờñ");
+/// var decoded = utf8.decode([0x62, 0x6c, 0xc3, 0xa5, 0x62, 0xc3, 0xa6,
+///                            0x72, 0x67, 0x72, 0xc3, 0xb8, 0x64]);
+/// ```
+const Utf8Codec utf8 = Utf8Codec();
 
-/**
- * A [Utf8Codec] encodes strings to utf-8 code units (bytes) and decodes
- * UTF-8 code units to strings.
- */
+/// A [Utf8Codec] encodes strings to utf-8 code units (bytes) and decodes
+/// UTF-8 code units to strings.
 class Utf8Codec extends Encoding {
   final bool _allowMalformed;
 
-  /**
-   * Instantiates a new [Utf8Codec].
-   *
-   * The optional [allowMalformed] argument defines how [decoder] (and [decode])
-   * deal with invalid or unterminated character sequences.
-   *
-   * If it is `true` (and not overridden at the method invocation) [decode] and
-   * the [decoder] replace invalid (or unterminated) octet
-   * sequences with the Unicode Replacement character `U+FFFD` (�). Otherwise
-   * they throw a [FormatException].
-   */
-  const Utf8Codec({bool allowMalformed: false})
+  /// Instantiates a new [Utf8Codec].
+  ///
+  /// The optional [allowMalformed] argument defines how [decoder] (and [decode])
+  /// deal with invalid or unterminated character sequences.
+  ///
+  /// If it is `true` (and not overridden at the method invocation) [decode] and
+  /// the [decoder] replace invalid (or unterminated) octet
+  /// sequences with the Unicode Replacement character `U+FFFD` (�). Otherwise
+  /// they throw a [FormatException].
+  const Utf8Codec({bool allowMalformed = false})
       : _allowMalformed = allowMalformed;
 
+  /// The name of this codec is "utf-8".
   String get name => "utf-8";
 
-  /**
-   * Decodes the UTF-8 [codeUnits] (a list of unsigned 8-bit integers) to the
-   * corresponding string.
-   *
-   * If the [codeUnits] start with the encoding of a
-   * [UNICODE_BOM_CHARACTER_RUNE], that character is discarded.
-   *
-   * If [allowMalformed] is `true` the decoder replaces invalid (or
-   * unterminated) character sequences with the Unicode Replacement character
-   * `U+FFFD` (�). Otherwise it throws a [FormatException].
-   *
-   * If [allowMalformed] is not given, it defaults to the `allowMalformed` that
-   * was used to instantiate `this`.
-   */
-  String decode(List<int> codeUnits, {bool allowMalformed}) {
-    if (allowMalformed == null) allowMalformed = _allowMalformed;
-    return new Utf8Decoder(allowMalformed: allowMalformed).convert(codeUnits);
+  /// Decodes the UTF-8 [codeUnits] (a list of unsigned 8-bit integers) to the
+  /// corresponding string.
+  ///
+  /// If the [codeUnits] start with the encoding of a
+  /// [unicodeBomCharacterRune], that character is discarded.
+  ///
+  /// If [allowMalformed] is `true`, the decoder replaces invalid (or
+  /// unterminated) character sequences with the Unicode Replacement character
+  /// `U+FFFD` (�). Otherwise it throws a [FormatException].
+  ///
+  /// If [allowMalformed] is not given, it defaults to the `allowMalformed` that
+  /// was used to instantiate `this`.
+  String decode(List<int> codeUnits, {bool? allowMalformed}) {
+    // Switch between const objects to avoid allocation.
+    Utf8Decoder decoder = allowMalformed ?? _allowMalformed
+        ? const Utf8Decoder(allowMalformed: true)
+        : const Utf8Decoder(allowMalformed: false);
+    return decoder.convert(codeUnits);
   }
 
   Utf8Encoder get encoder => const Utf8Encoder();
   Utf8Decoder get decoder {
-    return new Utf8Decoder(allowMalformed: _allowMalformed);
+    // Switch between const objects to avoid allocation.
+    return _allowMalformed
+        ? const Utf8Decoder(allowMalformed: true)
+        : const Utf8Decoder(allowMalformed: false);
   }
 }
 
-/**
- * This class converts strings to their UTF-8 code units (a list of
- * unsigned 8-bit integers).
- */
+/// This class converts strings to their UTF-8 code units (a list of
+/// unsigned 8-bit integers).
+///
+/// Example:
+/// ```dart
+/// final utf8Encoder = utf8.encoder;
+/// const sample = 'Îñţérñåţîöñåļîžåţîờñ';
+/// final encodedSample = utf8Encoder.convert(sample);
+/// print(encodedSample);
+/// ```
 class Utf8Encoder extends Converter<String, List<int>> {
   const Utf8Encoder();
 
-  /**
-   * Converts [string] to its UTF-8 code units (a list of
-   * unsigned 8-bit integers).
-   *
-   * If [start] and [end] are provided, only the substring
-   * `string.substring(start, end)` is converted.
-   */
-  List<int> convert(String string, [int start = 0, int end]) {
-    int stringLength = string.length;
-    RangeError.checkValidRange(start, end, stringLength);
-    if (end == null) end = stringLength;
-    int length = end - start;
-    if (length == 0) return new Uint8List(0);
+  /// Converts [string] to its UTF-8 code units (a list of
+  /// unsigned 8-bit integers).
+  ///
+  /// If [start] and [end] are provided, only the substring
+  /// `string.substring(start, end)` is converted.
+  ///
+  /// Any unpaired surrogate character (`U+D800`-`U+DFFF`) in the input string
+  /// is encoded as a Unicode Replacement character `U+FFFD` (�).
+  Uint8List convert(String string, [int start = 0, int? end]) {
+    var stringLength = string.length;
+    end = RangeError.checkValidRange(start, end, stringLength);
+    var length = end - start;
+    if (length == 0) return Uint8List(0);
     // Create a new encoder with a length that is guaranteed to be big enough.
     // A single code unit uses at most 3 bytes, a surrogate pair at most 4.
-    _Utf8Encoder encoder = new _Utf8Encoder.withBufferSize(length * 3);
-    int endPosition = encoder._fillBuffer(string, start, end);
+    var encoder = _Utf8Encoder.withBufferSize(length * 3);
+    var endPosition = encoder._fillBuffer(string, start, end);
     assert(endPosition >= end - 1);
     if (endPosition != end) {
       // Encoding skipped the last code unit.
       // That can only happen if the last code unit is a leadsurrogate.
       // Force encoding of the lead surrogate by itself.
-      int lastCodeUnit = string.codeUnitAt(end - 1);
+      var lastCodeUnit = string.codeUnitAt(end - 1);
       assert(_isLeadSurrogate(lastCodeUnit));
-      // We use a non-surrogate as `nextUnit` so that _writeSurrogate just
-      // writes the lead-surrogate.
-      bool wasCombined = encoder._writeSurrogate(lastCodeUnit, 0);
-      assert(!wasCombined);
+      // Write a replacement character to represent the unpaired surrogate.
+      encoder._writeReplacementCharacter();
     }
     return encoder._buffer.sublist(0, encoder._bufferIndex);
   }
 
-  /**
-   * Starts a chunked conversion.
-   *
-   * The converter works more efficiently if the given [sink] is a
-   * [ByteConversionSink].
-   */
+  /// Starts a chunked conversion.
+  ///
+  /// The converter works more efficiently if the given [sink] is a
+  /// [ByteConversionSink].
   StringConversionSink startChunkedConversion(Sink<List<int>> sink) {
-    if (sink is! ByteConversionSink) {
-      sink = new ByteConversionSink.from(sink);
-    }
-    return new _Utf8EncoderSink(sink);
+    return _Utf8EncoderSink(
+        sink is ByteConversionSink ? sink : ByteConversionSink.from(sink));
   }
 
   // Override the base-classes bind, to provide a better type.
   Stream<List<int>> bind(Stream<String> stream) => super.bind(stream);
 }
 
-/**
- * This class encodes Strings to UTF-8 code units (unsigned 8 bit integers).
- */
+/// This class encodes Strings to UTF-8 code units (unsigned 8 bit integers).
 // TODO(floitsch): make this class public.
 class _Utf8Encoder {
   int _carry = 0;
   int _bufferIndex = 0;
-  final List<int> _buffer;
+  final Uint8List _buffer;
 
   static const _DEFAULT_BYTE_BUFFER_SIZE = 1024;
 
@@ -144,25 +142,28 @@ class _Utf8Encoder {
   _Utf8Encoder.withBufferSize(int bufferSize)
       : _buffer = _createBuffer(bufferSize);
 
-  /**
-   * Allow an implementation to pick the most efficient way of storing bytes.
-   */
-  static List<int> _createBuffer(int size) => new Uint8List(size);
+  /// Allow an implementation to pick the most efficient way of storing bytes.
+  static Uint8List _createBuffer(int size) => Uint8List(size);
 
-  /**
-   * Tries to combine the given [leadingSurrogate] with the [nextCodeUnit] and
-   * writes it to [_buffer].
-   *
-   * Returns true if the [nextCodeUnit] was combined with the
-   * [leadingSurrogate]. If it wasn't then nextCodeUnit was not a trailing
-   * surrogate and has not been written yet.
-   *
-   * It is safe to pass 0 for [nextCodeUnit] in which case only the leading
-   * surrogate is written.
-   */
+  /// Write a replacement character (U+FFFD). Used for unpaired surrogates.
+  void _writeReplacementCharacter() {
+    _buffer[_bufferIndex++] = 0xEF;
+    _buffer[_bufferIndex++] = 0xBF;
+    _buffer[_bufferIndex++] = 0xBD;
+  }
+
+  /// Tries to combine the given [leadingSurrogate] with the [nextCodeUnit] and
+  /// writes it to [_buffer].
+  ///
+  /// Returns true if the [nextCodeUnit] was combined with the
+  /// [leadingSurrogate]. If it wasn't, then nextCodeUnit was not a trailing
+  /// surrogate and has not been written yet.
+  ///
+  /// It is safe to pass 0 for [nextCodeUnit], in which case a replacement
+  /// character is written to represent the unpaired lead surrogate.
   bool _writeSurrogate(int leadingSurrogate, int nextCodeUnit) {
     if (_isTailSurrogate(nextCodeUnit)) {
-      int rune = _combineSurrogatePair(leadingSurrogate, nextCodeUnit);
+      var rune = _combineSurrogatePair(leadingSurrogate, nextCodeUnit);
       // If the rune is encoded with 2 code-units then it must be encoded
       // with 4 bytes in UTF-8.
       assert(rune > _THREE_BYTE_LIMIT);
@@ -173,27 +174,19 @@ class _Utf8Encoder {
       _buffer[_bufferIndex++] = 0x80 | (rune & 0x3f);
       return true;
     } else {
-      // TODO(floitsch): allow to throw on malformed strings.
-      // Encode the half-surrogate directly into UTF-8. This yields
-      // invalid UTF-8, but we started out with invalid UTF-16.
-
-      // Surrogates are always encoded in 3 bytes in UTF-8.
-      _buffer[_bufferIndex++] = 0xE0 | (leadingSurrogate >> 12);
-      _buffer[_bufferIndex++] = 0x80 | ((leadingSurrogate >> 6) & 0x3f);
-      _buffer[_bufferIndex++] = 0x80 | (leadingSurrogate & 0x3f);
+      // Unpaired lead surrogate.
+      _writeReplacementCharacter();
       return false;
     }
   }
 
-  /**
-   * Fills the [_buffer] with as many characters as possible.
-   *
-   * Does not encode any trailing lead-surrogate. This must be done by the
-   * caller.
-   *
-   * Returns the position in the string. The returned index points to the
-   * first code unit that hasn't been encoded.
-   */
+  /// Fills the [_buffer] with as many characters as possible.
+  ///
+  /// Does not encode any trailing lead-surrogate. This must be done by the
+  /// caller.
+  ///
+  /// Returns the position in the string. The returned index points to the
+  /// first code unit that hasn't been encoded.
   int _fillBuffer(String str, int start, int end) {
     if (start != end && _isLeadSurrogate(str.codeUnitAt(end - 1))) {
       // Don't handle a trailing lead-surrogate in this loop. The caller has
@@ -202,20 +195,24 @@ class _Utf8Encoder {
     }
     int stringIndex;
     for (stringIndex = start; stringIndex < end; stringIndex++) {
-      int codeUnit = str.codeUnitAt(stringIndex);
+      var codeUnit = str.codeUnitAt(stringIndex);
       // ASCII has the same representation in UTF-8 and UTF-16.
       if (codeUnit <= _ONE_BYTE_LIMIT) {
         if (_bufferIndex >= _buffer.length) break;
         _buffer[_bufferIndex++] = codeUnit;
       } else if (_isLeadSurrogate(codeUnit)) {
-        if (_bufferIndex + 3 >= _buffer.length) break;
+        if (_bufferIndex + 4 > _buffer.length) break;
         // Note that it is safe to read the next code unit. We decremented
         // [end] above when the last valid code unit was a leading surrogate.
-        int nextCodeUnit = str.codeUnitAt(stringIndex + 1);
-        bool wasCombined = _writeSurrogate(codeUnit, nextCodeUnit);
+        var nextCodeUnit = str.codeUnitAt(stringIndex + 1);
+        var wasCombined = _writeSurrogate(codeUnit, nextCodeUnit);
         if (wasCombined) stringIndex++;
+      } else if (_isTailSurrogate(codeUnit)) {
+        if (_bufferIndex + 3 > _buffer.length) break;
+        // Unpaired tail surrogate.
+        _writeReplacementCharacter();
       } else {
-        int rune = codeUnit;
+        var rune = codeUnit;
         if (rune <= _TWO_BYTE_LIMIT) {
           if (_bufferIndex + 1 >= _buffer.length) break;
           _buffer[_bufferIndex++] = 0xC0 | (rune >> 6);
@@ -233,10 +230,8 @@ class _Utf8Encoder {
   }
 }
 
-/**
- * This class encodes chunked strings to UTF-8 code units (unsigned 8-bit
- * integers).
- */
+/// This class encodes chunked strings to UTF-8 code units (unsigned 8-bit
+/// integers).
 class _Utf8EncoderSink extends _Utf8Encoder with StringConversionSinkMixin {
   final ByteConversionSink _sink;
 
@@ -259,13 +254,13 @@ class _Utf8EncoderSink extends _Utf8Encoder with StringConversionSinkMixin {
     }
 
     if (_carry != 0) {
-      int nextCodeUnit = 0;
+      var nextCodeUnit = 0;
       if (start != end) {
         nextCodeUnit = str.codeUnitAt(start);
       } else {
         assert(isLast);
       }
-      bool wasCombined = _writeSurrogate(_carry, nextCodeUnit);
+      var wasCombined = _writeSurrogate(_carry, nextCodeUnit);
       // Either we got a non-empty string, or we must not have been combined.
       assert(!wasCombined || start != end);
       if (wasCombined) start++;
@@ -273,14 +268,12 @@ class _Utf8EncoderSink extends _Utf8Encoder with StringConversionSinkMixin {
     }
     do {
       start = _fillBuffer(str, start, end);
-      bool isLastSlice = isLast && (start == end);
+      var isLastSlice = isLast && (start == end);
       if (start == end - 1 && _isLeadSurrogate(str.codeUnitAt(start))) {
         if (isLast && _bufferIndex < _buffer.length - 3) {
-          // There is still space for the last incomplete surrogate.
-          // We use a non-surrogate as second argument. This way the
-          // function will just add the surrogate-half to the buffer.
-          bool hasBeenCombined = _writeSurrogate(str.codeUnitAt(start), 0);
-          assert(!hasBeenCombined);
+          // There is still space for the replacement character to represent
+          // the last incomplete surrogate.
+          _writeReplacementCharacter();
         } else {
           // Otherwise store it in the carry. If isLast is true, then
           // close will flush the last carry.
@@ -298,66 +291,76 @@ class _Utf8EncoderSink extends _Utf8Encoder with StringConversionSinkMixin {
   // needs to deal with malformed input.
 }
 
-/**
- * This class converts UTF-8 code units (lists of unsigned 8-bit integers)
- * to a string.
- */
+/// This class converts UTF-8 code units (lists of unsigned 8-bit integers)
+/// to a string.
+///
+/// Example:
+/// ```dart
+/// final utf8Decoder = utf8.decoder;
+/// const encodedBytes = [
+///   195, 142, 195, 177, 197, 163, 195, 169, 114, 195, 177, 195, 165, 197,
+///   163, 195, 174, 195, 182, 195, 177, 195, 165, 196, 188, 195, 174, 197,
+///   190, 195, 165, 197, 163, 195, 174, 225, 187, 157, 195, 177];
+///
+/// final decodedBytes = utf8Decoder.convert(encodedBytes);
+/// print(decodedBytes); // Îñţérñåţîöñåļîžåţîờñ
+/// ```
+/// Throws a [FormatException] if the encoded input contains
+/// invalid UTF-8 byte sequences and [allowMalformed] is `false` (the default).
+///
+/// If [allowMalformed] is `true`, invalid byte sequences are converted into
+/// one or more Unicode replacement characters, U+FFFD ('�').
+///
+/// Example with `allowMalformed` set to true:
+/// ```dart
+/// const utf8Decoder = Utf8Decoder(allowMalformed: true);
+/// const encodedBytes = [0xFF];
+/// final decodedBytes = utf8Decoder.convert(encodedBytes);
+/// print(decodedBytes); // �
+/// ```
 class Utf8Decoder extends Converter<List<int>, String> {
   final bool _allowMalformed;
 
-  /**
-   * Instantiates a new [Utf8Decoder].
-   *
-   * The optional [allowMalformed] argument defines how [convert] deals
-   * with invalid or unterminated character sequences.
-   *
-   * If it is `true` [convert] replaces invalid (or unterminated) character
-   * sequences with the Unicode Replacement character `U+FFFD` (�). Otherwise
-   * it throws a [FormatException].
-   */
-  const Utf8Decoder({bool allowMalformed: false})
-      : this._allowMalformed = allowMalformed;
+  /// Instantiates a new [Utf8Decoder].
+  ///
+  /// The optional [allowMalformed] argument defines how [convert] deals
+  /// with invalid or unterminated character sequences.
+  ///
+  /// If it is `true`, [convert] replaces invalid (or unterminated) character
+  /// sequences with the Unicode Replacement character `U+FFFD` (�). Otherwise
+  /// it throws a [FormatException].
+  const Utf8Decoder({bool allowMalformed = false})
+      : _allowMalformed = allowMalformed;
 
-  /**
-   * Converts the UTF-8 [codeUnits] (a list of unsigned 8-bit integers) to the
-   * corresponding string.
-   *
-   * Uses the code units from [start] to, but no including, [end].
-   * If [end] is omitted, it defaults to `codeUnits.length`.
-   *
-   * If the [codeUnits] start with the encoding of a
-   * [UNICODE_BOM_CHARACTER_RUNE], that character is discarded.
-   */
-  String convert(List<int> codeUnits, [int start = 0, int end]) {
+  /// Converts the UTF-8 [codeUnits] (a list of unsigned 8-bit integers) to the
+  /// corresponding string.
+  ///
+  /// Uses the code units from [start] to, but not including, [end].
+  /// If [end] is omitted, it defaults to `codeUnits.length`.
+  ///
+  /// If the [codeUnits] start with the encoding of a
+  /// [unicodeBomCharacterRune], that character is discarded.
+  String convert(List<int> codeUnits, [int start = 0, int? end]) {
     // Allow the implementation to intercept and specialize based on the type
     // of codeUnits.
-    String result = _convertIntercepted(_allowMalformed, codeUnits, start, end);
+    var result = _convertIntercepted(_allowMalformed, codeUnits, start, end);
     if (result != null) {
       return result;
     }
 
-    int length = codeUnits.length;
-    RangeError.checkValidRange(start, end, length);
-    if (end == null) end = length;
-    StringBuffer buffer = new StringBuffer();
-    _Utf8Decoder decoder = new _Utf8Decoder(buffer, _allowMalformed);
-    decoder.convert(codeUnits, start, end);
-    decoder.flush(codeUnits, end);
-    return buffer.toString();
+    return _Utf8Decoder(_allowMalformed).convertSingle(codeUnits, start, end);
   }
 
-  /**
-   * Starts a chunked conversion.
-   *
-   * The converter works more efficiently if the given [sink] is a
-   * [StringConversionSink].
-   */
+  /// Starts a chunked conversion.
+  ///
+  /// The converter works more efficiently if the given [sink] is a
+  /// [StringConversionSink].
   ByteConversionSink startChunkedConversion(Sink<String> sink) {
     StringConversionSink stringSink;
     if (sink is StringConversionSink) {
       stringSink = sink;
     } else {
-      stringSink = new StringConversionSink.from(sink);
+      stringSink = StringConversionSink.from(sink);
     }
     return stringSink.asUtf8Sink(_allowMalformed);
   }
@@ -367,8 +370,8 @@ class Utf8Decoder extends Converter<List<int>, String> {
 
   external Converter<List<int>, T> fuse<T>(Converter<String, T> next);
 
-  external static String _convertIntercepted(
-      bool allowMalformed, List<int> codeUnits, int start, int end);
+  external static String? _convertIntercepted(
+      bool allowMalformed, List<int> codeUnits, int start, int? end);
 }
 
 // UTF-8 constants.
@@ -378,7 +381,6 @@ const int _THREE_BYTE_LIMIT = 0xffff; // 16 bits
 const int _FOUR_BYTE_LIMIT = 0x10ffff; // 21 bits, truncated to Unicode max.
 
 // UTF-16 constants.
-const int _SURROGATE_MASK = 0xF800;
 const int _SURROGATE_TAG_MASK = 0xFC00;
 const int _SURROGATE_VALUE_MASK = 0x3FF;
 const int _LEAD_SURROGATE_MIN = 0xD800;
@@ -392,196 +394,328 @@ int _combineSurrogatePair(int lead, int tail) =>
     0x10000 + ((lead & _SURROGATE_VALUE_MASK) << 10) |
     (tail & _SURROGATE_VALUE_MASK);
 
-/**
- * Decodes UTF-8.
- *
- * The decoder handles chunked input.
- */
-// TODO(floitsch): make this class public.
 class _Utf8Decoder {
-  final bool _allowMalformed;
-  final StringSink _stringSink;
-  bool _isFirstCharacter = true;
-  int _value = 0;
-  int _expectedUnits = 0;
-  int _extraUnits = 0;
+  /// Decode malformed UTF-8 as replacement characters (instead of throwing)?
+  final bool allowMalformed;
 
-  _Utf8Decoder(this._stringSink, this._allowMalformed);
+  /// Decoder DFA state.
+  int _state;
 
-  bool get hasPartialInput => _expectedUnits > 0;
+  /// Partially decoded character. Meaning depends on state. Not used when in
+  /// the initial/accept state. When in an error state, contains the index into
+  /// the input of the error.
+  int _charOrIndex = 0;
 
-  // Limits of one through four byte encodings.
-  static const List<int> _LIMITS = const <int>[
-    _ONE_BYTE_LIMIT,
-    _TWO_BYTE_LIMIT,
-    _THREE_BYTE_LIMIT,
-    _FOUR_BYTE_LIMIT
-  ];
+  // State machine for UTF-8 decoding, based on this decoder by Björn Höhrmann:
+  // https://bjoern.hoehrmann.de/utf-8/decoder/dfa/
+  //
+  // One iteration in the state machine proceeds as:
+  //
+  // type = typeTable[byte];
+  // char = (state != accept)
+  //     ? (byte & 0x3F) | (char << 6)
+  //     : byte & (shiftedByteMask >> type);
+  // state = transitionTable[state + type];
+  //
+  // After each iteration, if state == accept, char is output as a character.
 
-  void close() {
-    flush();
-  }
+  // Mask to and on the type read from the table.
+  static const int typeMask = 0x1F;
+  // Mask shifted right by byte type to mask first byte of sequence.
+  static const int shiftedByteMask = 0xF0FE;
 
-  /**
-   * Flushes this decoder as if closed.
-   *
-   * This method throws if the input was partial and the decoder was
-   * constructed with `allowMalformed` set to `false`.
-   *
-   * The [source] and [offset] of the current position may be provided,
-   * and are included in the exception if one is thrown.
-   */
-  void flush([List<int> source, int offset]) {
-    if (hasPartialInput) {
-      if (!_allowMalformed) {
-        throw new FormatException(
-            "Unfinished UTF-8 octet sequence", source, offset);
-      }
-      _stringSink.writeCharCode(UNICODE_REPLACEMENT_CHARACTER_RUNE);
-      _value = 0;
-      _expectedUnits = 0;
-      _extraUnits = 0;
+  // Byte types.
+  // 'A' = ASCII, 00-7F
+  // 'B' = 2-byte, C2-DF
+  // 'C' = 3-byte, E1-EC, EE
+  // 'D' = 3-byte (possibly surrogate), ED
+  // 'E' = Illegal, C0-C1, F5+
+  // 'F' = Low extension, 80-8F
+  // 'G' = Mid extension, 90-9F
+  // 'H' = High extension, A0-BA, BC-BE
+  // 'I' = Second byte of BOM, BB
+  // 'J' = Third byte of BOM, BF
+  // 'K' = 3-byte (possibly overlong), E0
+  // 'L' = First byte of BOM, EF
+  // 'M' = 4-byte (possibly out-of-range), F4
+  // 'N' = 4-byte, F1-F3
+  // 'O' = 4-byte (possibly overlong), F0
+  static const String typeTable = ""
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" // 00-1F
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" // 20-3F
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" // 40-5F
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" // 60-7F
+      "FFFFFFFFFFFFFFFFGGGGGGGGGGGGGGGG" // 80-9F
+      "HHHHHHHHHHHHHHHHHHHHHHHHHHHIHHHJ" // A0-BF
+      "EEBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" // C0-DF
+      "KCCCCCCCCCCCCDCLONNNMEEEEEEEEEEE" // E0-FF
+      ;
+
+  // States (offsets into transition table).
+  static const int IA = 0x00; // Initial / Accept
+  static const int BB = 0x10; // Before BOM
+  static const int AB = 0x20; // After BOM
+  static const int X1 = 0x30; // Expecting one extension byte
+  static const int X2 = 0x3A; // Expecting two extension bytes
+  static const int X3 = 0x44; // Expecting three extension bytes
+  static const int TO = 0x4E; // Possibly overlong 3-byte
+  static const int TS = 0x58; // Possibly surrogate
+  static const int QO = 0x62; // Possibly overlong 4-byte
+  static const int QR = 0x6C; // Possibly out-of-range 4-byte
+  static const int B1 = 0x76; // One byte into BOM
+  static const int B2 = 0x80; // Two bytes into BOM
+  static const int E1 = 0x41; // Error: Missing extension byte
+  static const int E2 = 0x43; // Error: Unexpected extension byte
+  static const int E3 = 0x45; // Error: Invalid byte
+  static const int E4 = 0x47; // Error: Overlong encoding
+  static const int E5 = 0x49; // Error: Out of range
+  static const int E6 = 0x4B; // Error: Surrogate
+  static const int E7 = 0x4D; // Error: Unfinished
+
+  // Character equivalents for states.
+  static const String _IA = '\u0000';
+  static const String _BB = '\u0010';
+  static const String _AB = '\u0020';
+  static const String _X1 = '\u0030';
+  static const String _X2 = '\u003A';
+  static const String _X3 = '\u0044';
+  static const String _TO = '\u004E';
+  static const String _TS = '\u0058';
+  static const String _QO = '\u0062';
+  static const String _QR = '\u006C';
+  static const String _B1 = '\u0076';
+  static const String _B2 = '\u0080';
+  static const String _E1 = '\u0041';
+  static const String _E2 = '\u0043';
+  static const String _E3 = '\u0045';
+  static const String _E4 = '\u0047';
+  static const String _E5 = '\u0049';
+  static const String _E6 = '\u004B';
+  static const String _E7 = '\u004D';
+
+  // Transition table of the state machine. Maps state and byte type
+  // to next state.
+  static const String transitionTable = " "
+      // A   B   C   D   E   F   G   H   I   J   K   L   M   N   O
+      "$_IA$_X1$_X2$_TS$_E3$_E2$_E2$_E2$_E2$_E2$_TO$_X2$_QR$_X3$_QO " // IA
+      "$_IA$_X1$_X2$_TS$_E3$_E2$_E2$_E2$_E2$_E2$_TO$_B1$_QR$_X3$_QO " // BB
+      "$_IA$_X1$_X2$_TS$_E3$_E2$_E2$_E2$_E2$_E2$_TO$_X2$_QR$_X3$_QO " // AB
+      "$_E1$_E1$_E1$_E1$_E1$_IA$_IA$_IA$_IA$_IA" // Overlap 5 E1s        X1
+      "$_E1$_E1$_E1$_E1$_E1$_X1$_X1$_X1$_X1$_X1" // Overlap 5 E1s        X2
+      "$_E1$_E1$_E1$_E1$_E1$_X2$_X2$_X2$_X2$_X2" // Overlap 5 E1s        X3
+      "$_E1$_E1$_E1$_E1$_E1$_E4$_E4$_X1$_X1$_X1" // Overlap 5 E1s        TO
+      "$_E1$_E1$_E1$_E1$_E1$_X1$_X1$_E6$_E6$_E6" // Overlap 5 E1s        TS
+      "$_E1$_E1$_E1$_E1$_E1$_E4$_X2$_X2$_X2$_X2" // Overlap 5 E1s        QO
+      "$_E1$_E1$_E1$_E1$_E1$_X2$_E5$_E5$_E5$_E5" // Overlap 5 E1s        QR
+      "$_E1$_E1$_E1$_E1$_E1$_X1$_X1$_X1$_B2$_X1" // Overlap 5 E1s        B1
+      "$_E1$_E1$_E1$_E1$_E1$_IA$_IA$_IA$_IA$_AB$_E1$_E1$_E1$_E1$_E1" //  B2
+      ;
+
+  // Aliases for states.
+  static const int initial = IA;
+  static const int accept = IA;
+  static const int beforeBom = BB;
+  static const int afterBom = AB;
+  static const int errorMissingExtension = E1;
+  static const int errorUnexpectedExtension = E2;
+  static const int errorInvalid = E3;
+  static const int errorOverlong = E4;
+  static const int errorOutOfRange = E5;
+  static const int errorSurrogate = E6;
+  static const int errorUnfinished = E7;
+
+  @pragma("vm:prefer-inline")
+  static bool isErrorState(int state) => (state & 1) != 0;
+
+  static String errorDescription(int state) {
+    switch (state) {
+      case errorMissingExtension:
+        return "Missing extension byte";
+      case errorUnexpectedExtension:
+        return "Unexpected extension byte";
+      case errorInvalid:
+        return "Invalid UTF-8 byte";
+      case errorOverlong:
+        return "Overlong encoding";
+      case errorOutOfRange:
+        return "Out of unicode range";
+      case errorSurrogate:
+        return "Encoded surrogate";
+      case errorUnfinished:
+        return "Unfinished UTF-8 octet sequence";
+      default:
+        return "";
     }
   }
 
-  void convert(List<int> codeUnits, int startIndex, int endIndex) {
-    int value = _value;
-    int expectedUnits = _expectedUnits;
-    int extraUnits = _extraUnits;
-    _value = 0;
-    _expectedUnits = 0;
-    _extraUnits = 0;
+  external _Utf8Decoder(bool allowMalformed);
 
-    int scanOneByteCharacters(units, int from) {
-      final to = endIndex;
-      final mask = _ONE_BYTE_LIMIT;
-      for (var i = from; i < to; i++) {
-        final unit = units[i];
-        if ((unit & mask) != unit) return i - from;
-      }
-      return to - from;
+  external String convertSingle(List<int> codeUnits, int start, int? maybeEnd);
+
+  external String convertChunked(List<int> codeUnits, int start, int? maybeEnd);
+
+  String convertGeneral(
+      List<int> codeUnits, int start, int? maybeEnd, bool single) {
+    int end = RangeError.checkValidRange(start, maybeEnd, codeUnits.length);
+
+    if (start == end) return "";
+
+    // Have bytes as Uint8List.
+    Uint8List bytes;
+    int errorOffset;
+    if (codeUnits is Uint8List) {
+      bytes = codeUnits;
+      errorOffset = 0;
+    } else {
+      bytes = _makeUint8List(codeUnits, start, end);
+      errorOffset = start;
+      end -= start;
+      start = 0;
     }
 
-    void addSingleBytes(int from, int to) {
-      assert(from >= startIndex && from <= endIndex);
-      assert(to >= startIndex && to <= endIndex);
-      _stringSink.write(new String.fromCharCodes(codeUnits, from, to));
+    String result = _convertRecursive(bytes, start, end, single);
+    if (isErrorState(_state)) {
+      String message = errorDescription(_state);
+      _state = initial; // Ready for more input.
+      throw FormatException(message, codeUnits, errorOffset + _charOrIndex);
     }
+    return result;
+  }
 
-    int i = startIndex;
+  String _convertRecursive(Uint8List bytes, int start, int end, bool single) {
+    // Chunk long strings to avoid a pathological case of JS repeated string
+    // concatenation.
+    if (end - start > 1000) {
+      int mid = (start + end) ~/ 2;
+      String s1 = _convertRecursive(bytes, start, mid, false);
+      if (isErrorState(_state)) return s1;
+      String s2 = _convertRecursive(bytes, mid, end, single);
+      return s1 + s2;
+    }
+    return decodeGeneral(bytes, start, end, single);
+  }
+
+  /// Flushes this decoder as if closed.
+  ///
+  /// This method throws if the input was partial and the decoder was
+  /// constructed with `allowMalformed` set to `false`.
+  void flush(StringSink sink) {
+    final int state = _state;
+    _state = initial;
+    if (state <= afterBom) {
+      return;
+    }
+    // Unfinished sequence.
+    if (allowMalformed) {
+      sink.writeCharCode(unicodeReplacementCharacterRune);
+    } else {
+      throw FormatException(errorDescription(errorUnfinished), null, null);
+    }
+  }
+
+  String decodeGeneral(Uint8List bytes, int start, int end, bool single) {
+    final String typeTable = _Utf8Decoder.typeTable;
+    final String transitionTable = _Utf8Decoder.transitionTable;
+    int state = _state;
+    int char = _charOrIndex;
+    final StringBuffer buffer = StringBuffer();
+    int i = start;
+    int byte = bytes[i++];
     loop:
     while (true) {
       multibyte:
-      if (expectedUnits > 0) {
-        do {
-          if (i == endIndex) {
-            break loop;
-          }
-          int unit = codeUnits[i];
-          if ((unit & 0xC0) != 0x80) {
-            expectedUnits = 0;
-            if (!_allowMalformed) {
-              throw new FormatException(
-                  "Bad UTF-8 encoding 0x${unit.toRadixString(16)}",
-                  codeUnits,
-                  i);
+      while (true) {
+        int type = typeTable.codeUnitAt(byte) & typeMask;
+        char = (state <= afterBom)
+            ? byte & (shiftedByteMask >> type)
+            : (byte & 0x3F) | (char << 6);
+        state = transitionTable.codeUnitAt(state + type);
+        if (state == accept) {
+          buffer.writeCharCode(char);
+          if (i == end) break loop;
+          break multibyte;
+        } else if (isErrorState(state)) {
+          if (allowMalformed) {
+            switch (state) {
+              case errorInvalid:
+              case errorUnexpectedExtension:
+                // A single byte that can't start a sequence.
+                buffer.writeCharCode(unicodeReplacementCharacterRune);
+                break;
+              case errorMissingExtension:
+                // Unfinished sequence followed by a byte that can start a
+                // sequence.
+                buffer.writeCharCode(unicodeReplacementCharacterRune);
+                // Re-parse offending byte.
+                i -= 1;
+                break;
+              default:
+                // Unfinished sequence followed by a byte that can't start a
+                // sequence.
+                buffer.writeCharCode(unicodeReplacementCharacterRune);
+                buffer.writeCharCode(unicodeReplacementCharacterRune);
+                break;
             }
-            _isFirstCharacter = false;
-            _stringSink.writeCharCode(UNICODE_REPLACEMENT_CHARACTER_RUNE);
-            break multibyte;
+            state = initial;
           } else {
-            value = (value << 6) | (unit & 0x3f);
-            expectedUnits--;
-            i++;
+            _state = state;
+            _charOrIndex = i - 1;
+            return "";
           }
-        } while (expectedUnits > 0);
-        if (value <= _LIMITS[extraUnits - 1]) {
-          // Overly long encoding. The value could be encoded with a shorter
-          // encoding.
-          if (!_allowMalformed) {
-            throw new FormatException(
-                "Overlong encoding of 0x${value.toRadixString(16)}",
-                codeUnits,
-                i - extraUnits - 1);
-          }
-          expectedUnits = extraUnits = 0;
-          value = UNICODE_REPLACEMENT_CHARACTER_RUNE;
         }
-        if (value > _FOUR_BYTE_LIMIT) {
-          if (!_allowMalformed) {
-            throw new FormatException(
-                "Character outside valid Unicode range: "
-                "0x${value.toRadixString(16)}",
-                codeUnits,
-                i - extraUnits - 1);
-          }
-          value = UNICODE_REPLACEMENT_CHARACTER_RUNE;
-        }
-        if (!_isFirstCharacter || value != UNICODE_BOM_CHARACTER_RUNE) {
-          _stringSink.writeCharCode(value);
-        }
-        _isFirstCharacter = false;
+        if (i == end) break loop;
+        byte = bytes[i++];
       }
 
-      while (i < endIndex) {
-        int oneBytes = scanOneByteCharacters(codeUnits, i);
-        if (oneBytes > 0) {
-          _isFirstCharacter = false;
-          addSingleBytes(i, i + oneBytes);
-          i += oneBytes;
-          if (i == endIndex) break;
-        }
-        int unit = codeUnits[i++];
-        // TODO(floitsch): the way we test we could potentially allow
-        // units that are too large, if they happen to have the
-        // right bit-pattern. (Same is true for the multibyte loop above).
-        // TODO(floitsch): optimize this loop. See:
-        // https://codereview.chromium.org/22929022/diff/1/sdk/lib/convert/utf.dart?column_width=80
-        if (unit < 0) {
-          // TODO(floitsch): should this be unit <= 0 ?
-          if (!_allowMalformed) {
-            throw new FormatException(
-                "Negative UTF-8 code unit: -0x${(-unit).toRadixString(16)}",
-                codeUnits,
-                i - 1);
+      final int markStart = i;
+      byte = bytes[i++];
+      if (byte < 128) {
+        int markEnd = end;
+        while (i < end) {
+          byte = bytes[i++];
+          if (byte >= 128) {
+            markEnd = i - 1;
+            break;
           }
-          _stringSink.writeCharCode(UNICODE_REPLACEMENT_CHARACTER_RUNE);
+        }
+        assert(markStart < markEnd);
+        if (markEnd - markStart < 20) {
+          for (int m = markStart; m < markEnd; m++) {
+            buffer.writeCharCode(bytes[m]);
+          }
         } else {
-          assert(unit > _ONE_BYTE_LIMIT);
-          if ((unit & 0xE0) == 0xC0) {
-            value = unit & 0x1F;
-            expectedUnits = extraUnits = 1;
-            continue loop;
-          }
-          if ((unit & 0xF0) == 0xE0) {
-            value = unit & 0x0F;
-            expectedUnits = extraUnits = 2;
-            continue loop;
-          }
-          // 0xF5, 0xF6 ... 0xFF never appear in valid UTF-8 sequences.
-          if ((unit & 0xF8) == 0xF0 && unit < 0xF5) {
-            value = unit & 0x07;
-            expectedUnits = extraUnits = 3;
-            continue loop;
-          }
-          if (!_allowMalformed) {
-            throw new FormatException(
-                "Bad UTF-8 encoding 0x${unit.toRadixString(16)}",
-                codeUnits,
-                i - 1);
-          }
-          value = UNICODE_REPLACEMENT_CHARACTER_RUNE;
-          expectedUnits = extraUnits = 0;
-          _isFirstCharacter = false;
-          _stringSink.writeCharCode(value);
+          buffer.write(String.fromCharCodes(bytes, markStart, markEnd));
         }
+        if (markEnd == end) break loop;
       }
-      break loop;
     }
-    if (expectedUnits > 0) {
-      _value = value;
-      _expectedUnits = expectedUnits;
-      _extraUnits = extraUnits;
+
+    if (single && state > afterBom) {
+      // Unfinished sequence.
+      if (allowMalformed) {
+        buffer.writeCharCode(unicodeReplacementCharacterRune);
+      } else {
+        _state = errorUnfinished;
+        _charOrIndex = end;
+        return "";
+      }
     }
+    _state = state;
+    _charOrIndex = char;
+    return buffer.toString();
+  }
+
+  static Uint8List _makeUint8List(List<int> codeUnits, int start, int end) {
+    final int length = end - start;
+    final Uint8List bytes = Uint8List(length);
+    for (int i = 0; i < length; i++) {
+      int b = codeUnits[start + i];
+      if ((b & ~0xFF) != 0) {
+        // Replace invalid byte values by FF, which is also invalid.
+        b = 0xFF;
+      }
+      bytes[i] = b;
+    }
+    return bytes;
   }
 }

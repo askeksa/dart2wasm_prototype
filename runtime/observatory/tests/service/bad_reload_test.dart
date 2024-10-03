@@ -1,7 +1,9 @@
 // Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override
+
+// OtherResources=bad_reload/v1/main.dart
+// OtherResources=bad_reload/v2/main.dart
 
 import 'test_helper.dart';
 import 'dart:async';
@@ -11,7 +13,7 @@ import 'dart:io';
 import 'service_test_common.dart';
 import 'package:observatory/service.dart';
 import 'package:path/path.dart' as path;
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 
 // Chop off the file name.
 String baseDirectory = path.dirname(Platform.script.path) + '/';
@@ -33,12 +35,20 @@ Future<String> invokeTest(Isolate isolate) async {
   await isolate.reload();
   Library lib = isolate.rootLibrary;
   await lib.load();
-  Instance result = await lib.evaluate('test()');
+  Instance result = await lib.evaluate('test()') as Instance;
   expect(result.isString, isTrue);
-  return result.valueAsString;
+  return result.valueAsString as String;
 }
 
-var tests = [
+Future<void> invokeTestWithError(Isolate isolate) async {
+  await isolate.reload();
+  Library lib = isolate.rootLibrary;
+  await lib.load();
+  final result = await lib.evaluate('test()');
+  expect(result.isError, isTrue);
+}
+
+var tests = <IsolateTest>[
   // Stopped at 'debugger' statement.
   hasStoppedAtBreakpoint,
   // Resume the isolate into the while loop.
@@ -51,30 +61,28 @@ var tests = [
     await vm.reloadIsolates();
     expect(vm.isolates.length, 2);
 
-    // Find the slave isolate.
-    Isolate slaveIsolate =
+    // Find the spawned isolate.
+    Isolate spawnedIsolate =
         vm.isolates.firstWhere((Isolate i) => i != mainIsolate);
-    expect(slaveIsolate, isNotNull);
+    expect(spawnedIsolate, isNotNull);
 
     // Invoke test in v1.
-    String v1 = await invokeTest(slaveIsolate);
+    String v1 = await invokeTest(spawnedIsolate);
     expect(v1, 'apple');
 
     // Reload to v2.
-    var response = await slaveIsolate.reloadSources(
+    var response = await spawnedIsolate.reloadSources(
       rootLibUri: v2Uri.toString(),
     );
     // Observe that it failed.
     expect(response['success'], isFalse);
-    List<Map<String, dynamic>> notices = response['details']['notices'];
+    List notices = response['notices'];
     expect(notices.length, equals(1));
     Map<String, dynamic> reasonForCancelling = notices[0];
     expect(reasonForCancelling['type'], equals('ReasonForCancelling'));
     expect(reasonForCancelling['message'], contains('library_isnt_here_man'));
 
-    // Invoke test in v2.
-    String v2 = await invokeTest(slaveIsolate);
-    expect(v2, 'apple');
+    await invokeTestWithError(spawnedIsolate);
   }
 ];
 

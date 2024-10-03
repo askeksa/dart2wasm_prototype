@@ -1,26 +1,25 @@
 // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override
 
 import 'dart:async';
 
 import 'package:observatory/cli.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 
 class TestCommand extends Command {
   TestCommand(this.out, name, children) : super(name, children);
-  StringBuffer out;
+  StringBuffer? out;
 
   Future run(List<String> args) {
-    out.write('executing ${name}(${args})\n');
+    out!.write('executing ${name}(${args})\n');
     return new Future.value(null);
   }
 }
 
 class TestCompleteCommand extends Command {
   TestCompleteCommand(this.out, name, children) : super(name, children);
-  StringBuffer out;
+  StringBuffer? out;
 
   Future<List<String>> complete(List<String> args) {
     var possibles = ['one ', 'two ', 'three '];
@@ -29,25 +28,25 @@ class TestCompleteCommand extends Command {
   }
 
   Future run(List<String> args) {
-    out.write('executing ${name}(${args})\n');
+    out!.write('executing ${name}(${args})\n');
     return new Future.value(null);
   }
 }
 
 void testCommandComplete() {
   RootCommand cmd = new RootCommand([
-    new TestCommand(null, 'alpha', []),
-    new TestCommand(null, 'game', [
-      new TestCommand(null, 'checkers', []),
-      new TestCommand(null, 'chess', [])
+    new TestCommand(null, 'alpha', <Command>[]),
+    new TestCommand(null, 'game', <Command>[
+      new TestCommand(null, 'checkers', <Command>[]),
+      new TestCommand(null, 'chess', <Command>[])
     ]),
-    new TestCommand(null, 'gamera', [
-      new TestCommand(null, 'london', []),
-      new TestCommand(null, 'tokyo', []),
-      new TestCommand(null, 'topeka', [])
+    new TestCommand(null, 'gamera', <Command>[
+      new TestCommand(null, 'london', <Command>[]),
+      new TestCommand(null, 'tokyo', <Command>[]),
+      new TestCommand(null, 'topeka', <Command>[])
     ]),
     new TestCompleteCommand(
-        null, 'count', [new TestCommand(null, 'chocula', [])])
+        null, 'count', <Command>[new TestCommand(null, 'chocula', <Command>[])])
   ]);
 
   // Show all commands.
@@ -144,75 +143,84 @@ void testCommandComplete() {
   });
 }
 
-void testCommandRunSimple() {
+testCommandRunSimple() async {
   // Run a simple command.
   StringBuffer out = new StringBuffer();
-  RootCommand cmd = new RootCommand([new TestCommand(out, 'alpha', [])]);
+  RootCommand cmd =
+      new RootCommand([new TestCommand(out, 'alpha', <Command>[])]);
 
   // Full name dispatch works.  Argument passing works.
-  cmd.runCommand('alpha dog').then(expectAsync((_) {
-    expect(out.toString(), contains('executing alpha([dog])\n'));
-    out.clear();
-    // Substring dispatch works.
-    cmd.runCommand('al cat mouse').then(expectAsync((_) {
-      expect(out.toString(), contains('executing alpha([cat , mouse])\n'));
-    }));
-  }));
+  await cmd.runCommand('alpha dog');
+  expect(out.toString(), contains('executing alpha([dog])\n'));
+  out.clear();
+  // Substring dispatch works.
+  await cmd.runCommand('al cat mouse');
+  expect(out.toString(), contains('executing alpha([cat , mouse])\n'));
 }
 
-void testCommandRunSubcommand() {
+testCommandRunSubcommand() async {
   // Run a simple command.
   StringBuffer out = new StringBuffer();
   RootCommand cmd = new RootCommand([
-    new TestCommand(out, 'alpha',
-        [new TestCommand(out, 'beta', []), new TestCommand(out, 'gamma', [])])
+    new TestCommand(out, 'alpha', [
+      new TestCommand(out, 'beta', <Command>[]),
+      new TestCommand(out, 'gamma', <Command>[])
+    ])
   ]);
 
-  cmd.runCommand('a b').then(expectAsync((_) {
-    expect(out.toString(), equals('executing beta([])\n'));
-    out.clear();
-    cmd.runCommand('alpha g ').then(expectAsync((_) {
-      expect(out.toString(), equals('executing gamma([])\n'));
-    }));
-  }));
+  await cmd.runCommand('a b');
+  expect(out.toString(), equals('executing beta([])\n'));
+  out.clear();
+  await cmd.runCommand('alpha g ');
+  expect(out.toString(), equals('executing gamma([])\n'));
 }
 
-void testCommandRunNotFound() {
+testCommandRunNotFound() async {
   // Run a simple command.
   StringBuffer out = new StringBuffer();
-  RootCommand cmd = new RootCommand([new TestCommand(out, 'alpha', [])]);
+  RootCommand cmd =
+      new RootCommand([new TestCommand(out, 'alpha', <Command>[])]);
 
-  cmd.runCommand('goose').catchError(expectAsync((e) {
-    expect(e.toString(), equals("No such command: 'goose'"));
-  }));
+  dynamic e;
+  try {
+    await cmd.runCommand('goose');
+  } catch (ex) {
+    e = ex;
+  }
+  expect(e.toString(), equals("No such command: 'goose'"));
 }
 
-void testCommandRunAmbiguous() {
+testCommandRunAmbiguous() async {
   // Run a simple command.
   StringBuffer out = new StringBuffer();
-  RootCommand cmd = new RootCommand(
-      [new TestCommand(out, 'alpha', []), new TestCommand(out, 'ankle', [])]);
+  RootCommand cmd = new RootCommand([
+    new TestCommand(out, 'alpha', <Command>[]),
+    new TestCommand(out, 'ankle', <Command>[])
+  ]);
 
-  cmd.runCommand('a 55').catchError(expectAsync((e) {
-    expect(e.toString(), equals("Command 'a 55' is ambiguous: [alpha, ankle]"));
-    out.clear();
-    cmd.runCommand('ankl 55').then(expectAsync((_) {
-      expect(out.toString(), equals('executing ankle([55])\n'));
-    }));
-  }));
+  dynamic e;
+  try {
+    await cmd.runCommand('a 55');
+  } catch (ex) {
+    e = ex;
+  }
+  expect(e.toString(), equals("Command 'a 55' is ambiguous: [alpha, ankle]"));
+  out.clear();
+
+  await cmd.runCommand('ankl 55');
+  expect(out.toString(), equals('executing ankle([55])\n'));
 }
 
-void testCommandRunAlias() {
+testCommandRunAlias() async {
   // Run a simple command.
   StringBuffer out = new StringBuffer();
-  var aliasCmd = new TestCommand(out, 'alpha', []);
+  var aliasCmd = new TestCommand(out, 'alpha', <Command>[]);
   aliasCmd.alias = 'a';
   RootCommand cmd =
-      new RootCommand([aliasCmd, new TestCommand(out, 'ankle', [])]);
+      new RootCommand([aliasCmd, new TestCommand(out, 'ankle', <Command>[])]);
 
-  cmd.runCommand('a 55').then(expectAsync((_) {
-    expect(out.toString(), equals('executing alpha([55])\n'));
-  }));
+  await cmd.runCommand('a 55');
+  expect(out.toString(), equals('executing alpha([55])\n'));
 }
 
 main() {

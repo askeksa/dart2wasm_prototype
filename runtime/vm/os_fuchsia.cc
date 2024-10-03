@@ -3,18 +3,337 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_FUCHSIA)
+#if defined(DART_HOST_OS_FUCHSIA)
 
 #include "vm/os.h"
 
 #include <errno.h>
-#include <magenta/process.h>
-#include <magenta/syscalls.h>
-#include <magenta/syscalls/object.h>
-#include <magenta/types.h>
+#include <fcntl.h>
+#include <stdint.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <fuchsia/intl/cpp/fidl.h>
+#include <lib/async-loop/default.h>
+#include <lib/async-loop/loop.h>
+#include <lib/async/default.h>
+#include <lib/inspect/cpp/inspect.h>
+#include <lib/sys/cpp/component_context.h>
+#include <lib/sys/cpp/service_directory.h>
+#include <lib/sys/inspect/cpp/component.h>
+#include <zircon/process.h>
+#include <zircon/syscalls.h>
+#include <zircon/syscalls/object.h>
+#include <zircon/threads.h>
+#include <zircon/time.h>
+#include <zircon/types.h>
+
+#include <set>
+
+#include "unicode/errorcode.h"
+#include "unicode/timezone.h"
+#include "unicode/umachine.h"
 
 #include "platform/assert.h"
+#include "platform/syslog.h"
+#include "platform/utils.h"
+#include "vm/lockers.h"
+#include "vm/os_thread.h"
 #include "vm/zone.h"
+
+namespace {
+
+using dart::Mutex;
+using dart::MutexLocker;
+using dart::Syslog;
+using dart::Zone;
+
+// This is the default timezone returned if it could not be obtained.  For
+// Fuchsia, the default device timezone is always UTC.
+static const char kDefaultTimezone[] = "UTC";
+
+static constexpr int32_t kMsPerSec = 1000;
+
+// The data directory containing ICU timezone data files.
+static constexpr char kICUTZDataDir[] = "/config/data/tzdata/icu/44/le";
+
+// This is the general OK status.
+static constexpr int32_t kOk = 0;
+
+// This status means that the error code is not initialized yet ("set" was not
+// yet called).  Error codes are usually either 0 (kOk), or negative.
+static constexpr int32_t kUninitialized = 1;
+
+// The status codes for tzdata file open and read.
+enum class TZDataStatus {
+  // The operation completed without error.
+  OK = 0,
+  // The open call for the tzdata file did not succeed.
+  COULD_NOT_OPEN = -1,
+  // The close call (after tzdata was loaded) did not succeed.
+  COULD_NOT_CLOSE = -2,
+};
+
+// Adds a facility for introspecting timezone data errors.  Allows insight into
+// the internal state of the VM even if error reporting facilities fail.
+//
+// Under normal operation, all metric values below should be zero.
+class InspectMetrics {
+ public:
+  // Takes ownership of the vm_node.
+  explicit InspectMetrics(std::unique_ptr<inspect::Node> vm_node)
+      : vm_node_(std::move(vm_node)),
+        dst_status_(vm_node_->CreateInt("dst_status", kUninitialized)),
+        tz_data_status_(vm_node_->CreateInt("tz_data_status", kUninitialized)),
+        tz_data_close_status_(
+            vm_node_->CreateInt("tz_data_close_status", kUninitialized)),
+        get_profile_status_(
+            vm_node_->CreateInt("get_profile_status", kUninitialized)),
+        profiles_timezone_content_status_(
+            vm_node_->CreateInt("timezone_content_status", kOk)),
+        num_get_profile_calls_(vm_node_->CreateInt("num_get_profile_calls", 0)),
+        num_on_change_calls_(vm_node_->CreateInt("num_on_change_calls", 0)),
+        num_intl_provider_errors_(
+            vm_node_->CreateInt("num_intl_provider_errors", 0)) {}
+
+  // Registers a single call to GetProfile callback.
+  void RegisterGetProfileCall() { num_get_profile_calls_.Add(1); }
+
+  // Registers a single call to OnChange callback.
+  void RegisterOnChangeCall() { num_on_change_calls_.Add(1); }
+
+  // Registers a provider error.
+  void RegisterIntlProviderError() { num_intl_provider_errors_.Add(1); }
+
+  // Sets the last status code for DST offset calls.
+  void SetDSTOffsetStatus(zx_status_t status) {
+    dst_status_.Set(static_cast<int32_t>(status));
+  }
+
+  // Sets the return value of call to InitializeTZData, and the status of the
+  // reported by close() on tzdata files.
+  void SetInitTzData(TZDataStatus value, int32_t status) {
+    tz_data_status_.Set(static_cast<int32_t>(value));
+    tz_data_close_status_.Set(status);
+  }
+
+  // Sets the last status code for the call to PropertyProvider::GetProfile.
+  void SetProfileStatus(zx_status_t status) {
+    get_profile_status_.Set(static_cast<int32_t>(status));
+  }
+
+  // Sets the last status seen while examining timezones returned from
+  // PropertyProvider::GetProfile.
+  void SetTimeZoneContentStatus(zx_status_t status) {
+    profiles_timezone_content_status_.Set(static_cast<int32_t>(status));
+  }
+
+ private:
+  // The OS metrics node.
+  std::unique_ptr<inspect::Node> vm_node_;
+
+  // The status of the last GetTimeZoneOffset call.
+  inspect::IntProperty dst_status_;
+
+  // The status of the initialization.
+  inspect::IntProperty tz_data_status_;
+
+  // The return code for the close() call for tzdata files.
+  inspect::IntProperty tz_data_close_status_;
+
+  // The return code of the GetProfile call in GetTimeZoneName.  If this is
+  // nonzero, then os_fuchsia.cc reported a default timezone as a fallback.
+  inspect::IntProperty get_profile_status_;
+
+  // U_ILLEGAL_ARGUMENT_ERROR(=1) if timezones read from ProfileProvider were
+  // incorrect. Otherwise 0.  If this metric reports U_ILLEGAL_ARGUMENT_ERROR,
+  // the os_fuchsia.cc module reported a default timezone as a fallback.
+  inspect::IntProperty profiles_timezone_content_status_;
+
+  // Keeps a number of get_profile update calls.
+  inspect::IntProperty num_get_profile_calls_;
+
+  // Number of "on change" callback calls.
+  inspect::IntProperty num_on_change_calls_;
+
+  // Keeps a number of errors encountered in intl provider.
+  inspect::IntProperty num_intl_provider_errors_;
+};
+
+// Thread-safe storage for the current timezone name.
+//
+// Keeps an up to date timezone cache, updating if needed through the
+// asynchronous update interface.  Access to this class is thread-safe.
+class TimezoneName final {
+ public:
+  // Creates a new instance of TimezoneName.  Does not take ownership of
+  // metrics.
+  static std::shared_ptr<TimezoneName> New(
+      fuchsia::intl::PropertyProviderPtr proxy,
+      std::weak_ptr<InspectMetrics> metrics) {
+    auto timezone_name =
+        std::make_shared<TimezoneName>(std::move(proxy), metrics);
+    timezone_name->InitHandlers(timezone_name);
+    return timezone_name;
+  }
+
+  TimezoneName(fuchsia::intl::PropertyProviderPtr proxy,
+               std::weak_ptr<InspectMetrics> metrics)
+      : m_(),
+        metrics_(std::move(metrics)),
+        proxy_(std::move(proxy)),
+        timezone_name_(kDefaultTimezone) {
+    ASSERT(metrics_.lock() != nullptr);
+  }
+
+  // Gets the current timezone name.  Repeated calls may retrieve updated
+  // values.
+  std::string Get() const {
+    MutexLocker lock(&m_);
+    // Returns a copy, to avoid a data race with async updates.
+    return timezone_name_;
+  }
+
+ private:
+  // Sets the event handlers in this resolver.  Intended to resolve a circular
+  // reference between the shared timezone name and this.
+  void InitHandlers(std::shared_ptr<TimezoneName> timezone_name) {
+    ASSERT(timezone_name.get() == this);
+    timezone_name->proxy_.set_error_handler(
+        [weak_this =
+             std::weak_ptr<TimezoneName>(timezone_name)](zx_status_t status) {
+          if (!weak_this.expired()) {
+            weak_this.lock()->ErrorHandler(status);
+          }
+        });
+    timezone_name->proxy_.events().OnChange =
+        [weak_this = std::weak_ptr<TimezoneName>(timezone_name)]() {
+          if (!weak_this.expired()) {
+            weak_this.lock()->OnChangeCallback();
+          }
+        };
+    timezone_name->proxy_->GetProfile(
+        [weak_this = std::weak_ptr<TimezoneName>(timezone_name)](
+            fuchsia::intl::Profile profile) {
+          if (!weak_this.expired()) {
+            weak_this.lock()->GetProfileCallback(std::move(profile));
+          }
+        });
+  }
+
+  // Called on a profile provider error in the context of the event loop
+  // thread.
+  void ErrorHandler(zx_status_t status) {
+    MutexLocker lock(&m_);
+    WithMetrics([status](std::shared_ptr<InspectMetrics> metrics) {
+      metrics->SetProfileStatus(status);
+      metrics->RegisterIntlProviderError();
+    });
+  }
+
+  // Called when an OnChange event is received in the context of the event loop
+  // thread.  The only action here is to trigger an asynchronous update of the
+  // intl profile.
+  void OnChangeCallback() {
+    MutexLocker lock(&m_);
+    WithMetrics([](std::shared_ptr<InspectMetrics> metrics) {
+      metrics->RegisterOnChangeCall();
+    });
+    proxy_->GetProfile([this](fuchsia::intl::Profile profile) {
+      this->GetProfileCallback(std::move(profile));
+    });
+  }
+
+  // Called when a GetProfile async request is resolved, in the context of the
+  // event loop thread.
+  void GetProfileCallback(fuchsia::intl::Profile profile) {
+    MutexLocker lock(&m_);
+    WithMetrics([](std::shared_ptr<InspectMetrics> metrics) {
+      metrics->RegisterGetProfileCall();
+    });
+    const std::vector<fuchsia::intl::TimeZoneId>& timezones =
+        profile.time_zones();
+    if (timezones.empty()) {
+      WithMetrics([](std::shared_ptr<InspectMetrics> metrics) {
+        metrics->SetTimeZoneContentStatus(U_ILLEGAL_ARGUMENT_ERROR);
+      });
+      // Empty timezone array is not up to fuchsia::intl spec.  The serving
+      // endpoint is broken and should be fixed.
+      Syslog::PrintErr("got empty timezone value\n");
+      return;
+    }
+    WithMetrics([](std::shared_ptr<InspectMetrics> metrics) {
+      metrics->SetProfileStatus(ZX_OK);
+      metrics->SetTimeZoneContentStatus(ZX_OK);
+    });
+
+    timezone_name_ = timezones[0].id;
+  }
+
+  // Runs the provided function only on valid metrics.
+  void WithMetrics(std::function<void(std::shared_ptr<InspectMetrics> m)> f) {
+    std::shared_ptr<InspectMetrics> l = metrics_.lock();
+    if (l != nullptr) {
+      f(l);
+    }
+  }
+
+  // Guards timezone_name_ because the callbacks will be called in an
+  // asynchronous thread.
+  mutable Mutex m_;
+
+  // Used to keep tally on the update events. Not owned.
+  std::weak_ptr<InspectMetrics> metrics_;
+
+  // A client-side proxy for a connection to the property provider service.
+  fuchsia::intl::PropertyProviderPtr proxy_;
+
+  // Caches the current timezone name.  This is updated asynchronously through
+  // GetProfileCallback.
+  std::string timezone_name_;
+};
+
+// The timezone names encountered so far.  The timezone names must live forever.
+std::set<const std::string> timezone_names;
+
+// Initialized on OS:Init(), deinitialized on OS::Cleanup.
+std::shared_ptr<InspectMetrics> metrics;
+std::shared_ptr<TimezoneName> timezone_name;
+async_loop_t* message_loop = nullptr;
+
+// Initializes the source of timezone data if available.  Timezone data file in
+// Fuchsia is at a fixed directory path.  Returns true on success.
+bool InitializeTZData() {
+  ASSERT(metrics != nullptr);
+  // Try opening the path to check if present.  No need to verify that it is a
+  // directory since ICU loading will return an error if the TZ data path is
+  // wrong.
+  int fd = openat(AT_FDCWD, kICUTZDataDir, O_RDONLY);
+  if (fd < 0) {
+    metrics->SetInitTzData(TZDataStatus::COULD_NOT_OPEN, fd);
+    return false;
+  }
+  // 0 == Not overwriting the env var if already set.
+  setenv("ICU_TIMEZONE_FILES_DIR", kICUTZDataDir, 0);
+  int32_t close_status = close(fd);
+  if (close_status != 0) {
+    metrics->SetInitTzData(TZDataStatus::COULD_NOT_CLOSE, close_status);
+    return false;
+  }
+  metrics->SetInitTzData(TZDataStatus::OK, 0);
+  return true;
+}
+
+int64_t GetCurrentTimeNanos() {
+  struct timespec ts;
+  if (timespec_get(&ts, TIME_UTC) == 0) {
+    FATAL("timespec_get failed");
+    return 0;
+  }
+  return zx_time_add_duration(ZX_SEC(ts.tv_sec), ZX_NSEC(ts.tv_nsec));
+}
+
+}  // namespace
 
 namespace dart {
 
@@ -31,79 +350,118 @@ const char* OS::Name() {
   return "fuchsia";
 }
 
-
 intptr_t OS::ProcessId() {
   return static_cast<intptr_t>(getpid());
 }
 
+// TODO(FL-98): Change this to talk to fuchsia.dart to get timezone service to
+// directly get timezone.
+//
+// Putting this hack right now due to CP-120 as I need to remove
+// component:ConnectToEnvironmentServices and this is the only thing that is
+// blocking it and FL-98 will take time.
+static fuchsia::intl::PropertyProviderPtr property_provider;
 
-static bool LocalTime(int64_t seconds_since_epoch, tm* tm_result) {
-  time_t seconds = static_cast<time_t>(seconds_since_epoch);
-  if (seconds != seconds_since_epoch) {
-    return false;
+static zx_status_t GetLocalAndDstOffsetInSeconds(int64_t seconds_since_epoch,
+                                                 int32_t* local_offset,
+                                                 int32_t* dst_offset) {
+  const char* timezone_id = OS::GetTimeZoneName(seconds_since_epoch);
+  std::unique_ptr<icu::TimeZone> timezone(
+      icu::TimeZone::createTimeZone(timezone_id));
+  UErrorCode error = U_ZERO_ERROR;
+  const auto ms_since_epoch =
+      static_cast<UDate>(kMsPerSec * seconds_since_epoch);
+  // The units of time that local_offset and dst_offset are returned from this
+  // function is, usefully, not documented, but it seems that the units are
+  // milliseconds.  Add these variables here for clarity.
+  int32_t local_offset_ms = 0;
+  int32_t dst_offset_ms = 0;
+  timezone->getOffset(ms_since_epoch, /*local_time=*/0, local_offset_ms,
+                      dst_offset_ms, error);
+  metrics->SetDSTOffsetStatus(error);
+  if (error != U_ZERO_ERROR) {
+    icu::ErrorCode icu_error;
+    icu_error.set(error);
+    Syslog::PrintErr("could not get DST offset: %s\n", icu_error.errorName());
+    return ZX_ERR_INTERNAL;
   }
-  struct tm* error_code = localtime_r(&seconds, tm_result);
-  return error_code != NULL;
+  // We must return offset in seconds, so convert.
+  *local_offset = local_offset_ms / kMsPerSec;
+  *dst_offset = dst_offset_ms / kMsPerSec;
+  return ZX_OK;
 }
 
-
+// Returns a C string with the time zone name. This module retains the
+// ownership of the pointer.
 const char* OS::GetTimeZoneName(int64_t seconds_since_epoch) {
-  tm decomposed;
-  bool succeeded = LocalTime(seconds_since_epoch, &decomposed);
-  // If unsuccessful, return an empty string like V8 does.
-  return (succeeded && (decomposed.tm_zone != NULL)) ? decomposed.tm_zone : "";
-}
+  ASSERT(timezone_name != nullptr);
 
+  // Sadly, since we do not know how long the timezone name will be needed, we
+  // can not ever deallocate it. So instead, we put it into a a set that will
+  // not move it around in memory and return a pointer to it.  Since the number
+  // of timezones is finite, this ensures that the memory taken up by timezones
+  // does not grow indefinitely, even if we end up retaining all the timezones
+  // there are.
+  const auto i = timezone_names.insert(timezone_name->Get());
+  ASSERT(i.first != timezone_names.end());
+  return i.first->c_str();
+}
 
 int OS::GetTimeZoneOffsetInSeconds(int64_t seconds_since_epoch) {
-  tm decomposed;
-  bool succeeded = LocalTime(seconds_since_epoch, &decomposed);
-  // Even if the offset was 24 hours it would still easily fit into 32 bits.
-  // If unsuccessful, return zero like V8 does.
-  return succeeded ? static_cast<int>(decomposed.tm_gmtoff) : 0;
+  int32_t local_offset = 0;
+  int32_t dst_offset = 0;
+  const zx_status_t status = GetLocalAndDstOffsetInSeconds(
+      seconds_since_epoch, &local_offset, &dst_offset);
+  return status == ZX_OK ? local_offset + dst_offset : 0;
 }
-
 
 int OS::GetLocalTimeZoneAdjustmentInSeconds() {
-  // TODO(floitsch): avoid excessive calls to tzset?
-  tzset();
-  // Even if the offset was 24 hours it would still easily fit into 32 bits.
-  // Note that Unix and Dart disagree on the sign.
-  return static_cast<int>(-timezone);
+  int32_t local_offset, dst_offset;
+  int64_t now_seconds = GetCurrentTimeNanos() / ZX_SEC(1);
+  zx_status_t status =
+      GetLocalAndDstOffsetInSeconds(now_seconds, &local_offset, &dst_offset);
+  return status == ZX_OK ? local_offset : 0;
 }
-
 
 int64_t OS::GetCurrentTimeMillis() {
-  return GetCurrentTimeMicros() / 1000;
+  return GetCurrentTimeNanos() / ZX_MSEC(1);
 }
-
 
 int64_t OS::GetCurrentTimeMicros() {
-  return mx_time_get(MX_CLOCK_UTC) / kNanosecondsPerMicrosecond;
+  return GetCurrentTimeNanos() / ZX_USEC(1);
 }
-
 
 int64_t OS::GetCurrentMonotonicTicks() {
-  return mx_time_get(MX_CLOCK_MONOTONIC);
+  return zx_clock_get_monotonic();
 }
-
 
 int64_t OS::GetCurrentMonotonicFrequency() {
   return kNanosecondsPerSecond;
 }
 
-
 int64_t OS::GetCurrentMonotonicMicros() {
-  int64_t ticks = GetCurrentMonotonicTicks();
+  const int64_t ticks = GetCurrentMonotonicTicks();
   ASSERT(GetCurrentMonotonicFrequency() == kNanosecondsPerSecond);
   return ticks / kNanosecondsPerMicrosecond;
 }
 
-
 int64_t OS::GetCurrentThreadCPUMicros() {
-  return mx_time_get(MX_CLOCK_THREAD) / kNanosecondsPerMicrosecond;
+  zx_info_thread_stats_t info = {};
+  zx_status_t status = zx_object_get_info(thrd_get_zx_handle(thrd_current()),
+                                          ZX_INFO_THREAD_STATS, &info,
+                                          sizeof(info), nullptr, nullptr);
+  return status == ZX_OK ? info.total_runtime / kNanosecondsPerMicrosecond : 0;
 }
 
+// On Fuchsia, thread timestamp values are not used in the tracing/timeline
+// integration. Because of this, we try to avoid querying them, since doing so
+// has both a runtime and trace buffer storage cost.
+int64_t OS::GetCurrentThreadCPUMicrosForTimeline() {
+  return -1;
+}
+
+// The timezone names encountered so far.  The timezone names must live forever.
+std::set<const std::string> timezone_names;
 
 // TODO(5411554):  May need to hoist these architecture dependent code
 // into a architecture specific file e.g: os_ia32_fuchsia.cc
@@ -111,7 +469,7 @@ intptr_t OS::ActivationFrameAlignment() {
 #if defined(TARGET_ARCH_IA32) || defined(TARGET_ARCH_X64) ||                   \
     defined(TARGET_ARCH_ARM64)
   const int kMinimumAlignment = 16;
-#elif defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_DBC)
+#elif defined(TARGET_ARCH_ARM)
   const int kMinimumAlignment = 8;
 #else
 #error Unsupported architecture.
@@ -125,71 +483,26 @@ intptr_t OS::ActivationFrameAlignment() {
   return alignment;
 }
 
-
-intptr_t OS::PreferredCodeAlignment() {
-#if defined(TARGET_ARCH_IA32) || defined(TARGET_ARCH_X64) ||                   \
-    defined(TARGET_ARCH_ARM64) || defined(TARGET_ARCH_DBC)
-  const int kMinimumAlignment = 32;
-#elif defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_MIPS)
-  const int kMinimumAlignment = 16;
-#else
-#error Unsupported architecture.
-#endif
-  intptr_t alignment = kMinimumAlignment;
-  // TODO(5411554): Allow overriding default code alignment for
-  // testing purposes.
-  // Flags::DebugIsInt("codealign", &alignment);
-  ASSERT(Utils::IsPowerOfTwo(alignment));
-  ASSERT(alignment >= kMinimumAlignment);
-  ASSERT(alignment <= OS::kMaxPreferredCodeAlignment);
-  return alignment;
-}
-
-
 int OS::NumberOfAvailableProcessors() {
   return sysconf(_SC_NPROCESSORS_CONF);
 }
-
-
-uintptr_t OS::MaxRSS() {
-  mx_info_task_stats_t task_stats;
-  mx_handle_t process = mx_process_self();
-  mx_status_t status = mx_object_get_info(
-      process, MX_INFO_TASK_STATS, &task_stats, sizeof(task_stats), NULL, NULL);
-  return (status == NO_ERROR) ? task_stats.mem_committed_bytes : 0;
-}
-
 
 void OS::Sleep(int64_t millis) {
   SleepMicros(millis * kMicrosecondsPerMillisecond);
 }
 
-
 void OS::SleepMicros(int64_t micros) {
-  mx_nanosleep(mx_deadline_after(micros * kNanosecondsPerMicrosecond));
+  zx_nanosleep(zx_deadline_after(micros * kNanosecondsPerMicrosecond));
 }
-
 
 void OS::DebugBreak() {
   UNIMPLEMENTED();
 }
 
-
-uintptr_t DART_NOINLINE OS::GetProgramCounter() {
+DART_NOINLINE uintptr_t OS::GetProgramCounter() {
   return reinterpret_cast<uintptr_t>(
       __builtin_extract_return_addr(__builtin_return_address(0)));
 }
-
-
-char* OS::StrNDup(const char* s, intptr_t n) {
-  return strndup(s, n);
-}
-
-
-intptr_t OS::StrNLen(const char* s, intptr_t n) {
-  return strnlen(s, n);
-}
-
 
 void OS::Print(const char* format, ...) {
   va_list args;
@@ -198,30 +511,10 @@ void OS::Print(const char* format, ...) {
   va_end(args);
 }
 
-
 void OS::VFPrint(FILE* stream, const char* format, va_list args) {
   vfprintf(stream, format, args);
   fflush(stream);
 }
-
-
-int OS::SNPrint(char* str, size_t size, const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  int retval = VSNPrint(str, size, format, args);
-  va_end(args);
-  return retval;
-}
-
-
-int OS::VSNPrint(char* str, size_t size, const char* format, va_list args) {
-  int retval = vsnprintf(str, size, format, args);
-  if (retval < 0) {
-    FATAL1("Fatal error in OS::VSNPrint with format '%s'", format);
-  }
-  return retval;
-}
-
 
 char* OS::SCreate(Zone* zone, const char* format, ...) {
   va_list args;
@@ -231,16 +524,15 @@ char* OS::SCreate(Zone* zone, const char* format, ...) {
   return buffer;
 }
 
-
 char* OS::VSCreate(Zone* zone, const char* format, va_list args) {
   // Measure.
   va_list measure_args;
   va_copy(measure_args, args);
-  intptr_t len = VSNPrint(NULL, 0, format, measure_args);
+  intptr_t len = Utils::VSNPrint(NULL, 0, format, measure_args);
   va_end(measure_args);
 
   char* buffer;
-  if (zone) {
+  if (zone != nullptr) {
     buffer = zone->Alloc<char>(len + 1);
   } else {
     buffer = reinterpret_cast<char*>(malloc(len + 1));
@@ -250,11 +542,10 @@ char* OS::VSCreate(Zone* zone, const char* format, va_list args) {
   // Print.
   va_list print_args;
   va_copy(print_args, args);
-  VSNPrint(buffer, len + 1, format, print_args);
+  Utils::VSNPrint(buffer, len + 1, format, print_args);
   va_end(print_args);
   return buffer;
 }
-
 
 bool OS::StringToInt64(const char* str, int64_t* value) {
   ASSERT(str != NULL && strlen(str) > 0 && value != NULL);
@@ -263,16 +554,23 @@ bool OS::StringToInt64(const char* str, int64_t* value) {
   int i = 0;
   if (str[0] == '-') {
     i = 1;
+  } else if (str[0] == '+') {
+    i = 1;
   }
   if ((str[i] == '0') && (str[i + 1] == 'x' || str[i + 1] == 'X') &&
       (str[i + 2] != '\0')) {
     base = 16;
   }
   errno = 0;
-  *value = strtoll(str, &endptr, base);
+  if (base == 16) {
+    // Unsigned 64-bit hexadecimal integer literals are allowed but
+    // immediately interpreted as signed 64-bit integers.
+    *value = static_cast<int64_t>(strtoull(str, &endptr, base));
+  } else {
+    *value = strtoll(str, &endptr, base);
+  }
   return ((errno == 0) && (endptr != str) && (*endptr == 0));
 }
-
 
 void OS::RegisterCodeObservers() {
 #ifndef PRODUCT
@@ -282,7 +580,6 @@ void OS::RegisterCodeObservers() {
 #endif  // !PRODUCT
 }
 
-
 void OS::PrintErr(const char* format, ...) {
   va_list args;
   va_start(args, format);
@@ -290,29 +587,55 @@ void OS::PrintErr(const char* format, ...) {
   va_end(args);
 }
 
+void OS::Init() {
+  if (async_get_default_dispatcher() == nullptr) {
+    async_loop_create(&kAsyncLoopConfigAttachToCurrentThread, &message_loop);
+    async_set_default_dispatcher(async_loop_get_dispatcher(message_loop));
+    async_loop_start_thread(message_loop, "Fuchsia async loop", nullptr);
+  }
 
-void OS::InitOnce() {
-  // TODO(5411554): For now we check that initonce is called only once,
-  // Once there is more formal mechanism to call InitOnce we can move
-  // this check there.
-  static bool init_once_called = false;
-  ASSERT(init_once_called == false);
-  init_once_called = true;
+  auto vm_node = dart::TakeDartVmNode();
+
+  // TODO(fxbug.dev/69558) allow vm_node to be null and not crash
+  ASSERT(vm_node != nullptr);
+  metrics = std::make_shared<InspectMetrics>(std::move(vm_node));
+
+  InitializeTZData();
+  auto services = sys::ServiceDirectory::CreateFromNamespace();
+  services->Connect(property_provider.NewRequest());
+
+  timezone_name = TimezoneName::New(std::move(property_provider), metrics);
 }
 
+void OS::Cleanup() {
+  if (message_loop != nullptr) {
+    async_loop_shutdown(message_loop);
+  }
+  timezone_name.reset();
+  metrics.reset();
 
-void OS::Shutdown() {}
+  if (message_loop != nullptr) {
+    // Check message_loop is still the default dispatcher before clearing it.
+    if (async_get_default_dispatcher() ==
+        async_loop_get_dispatcher(message_loop)) {
+      async_set_default_dispatcher(nullptr);
+    }
+    async_loop_destroy(message_loop);
+    message_loop = nullptr;
+  }
+}
 
+void OS::PrepareToAbort() {}
 
 void OS::Abort() {
+  PrepareToAbort();
   abort();
 }
 
-
 void OS::Exit(int code) {
-  UNIMPLEMENTED();
+  exit(code);
 }
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_FUCHSIA)
+#endif  // defined(DART_HOST_OS_FUCHSIA)

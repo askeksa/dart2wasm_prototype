@@ -7,29 +7,27 @@ library error_ref_element;
 import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' show ErrorRef;
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
 
-class ErrorRefElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<ErrorRefElement>('error-ref');
-
-  RenderingScheduler<ErrorRefElement> _r;
+class ErrorRefElement extends CustomElement implements Renderable {
+  late RenderingScheduler<ErrorRefElement> _r;
 
   Stream<RenderedEvent<ErrorRefElement>> get onRendered => _r.onRendered;
 
-  ErrorRef _error;
+  late ErrorRef _error;
 
   ErrorRef get error => _error;
 
-  factory ErrorRefElement(ErrorRef error, {RenderingQueue queue}) {
+  factory ErrorRefElement(ErrorRef error, {RenderingQueue? queue}) {
     assert(error != null);
-    ErrorRefElement e = document.createElement(tag.name);
+    ErrorRefElement e = new ErrorRefElement.created();
     e._r = new RenderingScheduler<ErrorRefElement>(e, queue: queue);
     e._error = error;
     return e;
   }
 
-  ErrorRefElement.created() : super.created();
+  ErrorRefElement.created() : super.created('error-ref');
 
   @override
   void attached() {
@@ -40,11 +38,11 @@ class ErrorRefElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [new PreElement()..text = error.message];
+    children = <Element>[new PreElement()..text = error.message];
   }
 }

@@ -1,7 +1,7 @@
 // Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
+// @dart=2.9
 /*@testedFeatures=inference*/
 library test;
 
@@ -26,9 +26,10 @@ class B<E> extends A<E> implements M {
 
 foo() {
   int y = /*error:INVALID_ASSIGNMENT*/ new B<String>()
-      . /*@target=B::m*/ m(null, null)
-      .value;
-  String z = new B<String>(). /*@target=B::m*/ m(null, null).value;
+      . /*@target=B.m*/ m(null, null)
+      . /*@target=A.value*/ value;
+  String z =
+      new B<String>(). /*@target=B.m*/ m(null, null). /*@target=A.value*/ value;
 }
 
 main() {}

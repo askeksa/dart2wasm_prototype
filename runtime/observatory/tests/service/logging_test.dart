@@ -4,7 +4,7 @@
 
 import 'dart:developer' as developer;
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'package:logging/logging.dart';
 import 'service_test_common.dart';
 import 'test_helper.dart';
@@ -30,22 +30,22 @@ void run() {
   Logger.root.info('YES');
 }
 
-var tests = [
+var tests = <IsolateTest>[
   hasStoppedAtBreakpoint,
   resumeIsolateAndAwaitEvent(Isolate.kLoggingStream, (ServiceEvent event) {
     expect(event.kind, equals(ServiceEvent.kLogging));
-    expect(event.logRecord['sequenceNumber'], equals(0));
-    expect(event.logRecord['message'].valueAsString, equals('Hey Buddy!'));
-    expect(event.logRecord['level'], equals(Level.FINE));
-    expect(event.logRecord['time'], new isInstanceOf<DateTime>());
+    expect(event.logRecord!['sequenceNumber'], equals(0));
+    expect(event.logRecord!['message'].valueAsString, equals('Hey Buddy!'));
+    expect(event.logRecord!['level'], equals(Level.FINE));
+    expect(event.logRecord!['time'], isA<DateTime>());
   }),
   hasStoppedAtBreakpoint,
   resumeIsolateAndAwaitEvent(Isolate.kLoggingStream, (ServiceEvent event) {
     expect(event.kind, equals(ServiceEvent.kLogging));
-    expect(event.logRecord['sequenceNumber'], equals(1));
-    expect(event.logRecord['level'], equals(Level.INFO));
-    expect(event.logRecord['message'].valueAsString, equals('YES'));
-    expect(event.logRecord['time'], new isInstanceOf<DateTime>());
+    expect(event.logRecord!['sequenceNumber'], equals(1));
+    expect(event.logRecord!['level'], equals(Level.INFO));
+    expect(event.logRecord!['message'].valueAsString, equals('YES'));
+    expect(event.logRecord!['time'], isA<DateTime>());
   }),
 ];
 

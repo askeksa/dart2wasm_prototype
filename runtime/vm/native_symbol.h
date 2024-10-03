@@ -14,13 +14,15 @@ class Mutex;
 
 class NativeSymbolResolver : public AllStatic {
  public:
-  static void InitOnce();
-  static void ShutdownOnce();
-  static char* LookupSymbolName(uintptr_t pc, uintptr_t* start);
-  static bool LookupSharedObject(uword pc, uword* dso_base, char** dso_name);
+  static void Init();
+  static void Cleanup();
+  static char* LookupSymbolName(uword pc, uword* start);
+  static bool LookupSharedObject(uword pc,
+                                 uword* dso_base = nullptr,
+                                 char** dso_name = nullptr);
   static void FreeSymbolName(char* name);
+  static void AddSymbols(const char* dso_name, void* buffer, size_t size);
 };
-
 
 }  // namespace dart
 

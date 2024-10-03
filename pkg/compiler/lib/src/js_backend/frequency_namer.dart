@@ -7,51 +7,38 @@ part of js_backend.namer;
 class FrequencyBasedNamer extends Namer
     with _MinifiedFieldNamer, _MinifiedOneShotInterceptorNamer
     implements jsAst.TokenFinalizer {
+  @override
   _FieldNamingRegistry fieldRegistry;
-  List<TokenName> tokens = new List<TokenName>();
+  List<TokenName> tokens = [];
 
-  Map<NamingScope, TokenScope> _tokenScopes =
-      new Maplet<NamingScope, TokenScope>();
+  final Map<NamingScope, TokenScope> _tokenScopes = {};
 
-  // Some basic settings for smaller names
-  String get isolateName => 'I';
-  String get isolatePropertiesName => 'p';
-  bool get shouldMinify => true;
+  @override
+  String get genericInstantiationPrefix => r'$I';
 
-  final String getterPrefix = 'g';
-  final String setterPrefix = 's';
-  final String callPrefix = ''; // this will create function names $<n>
-  String get requiredParameterField => r'$R';
-  String get defaultValuesField => r'$D';
-  String get operatorSignature => r'$S';
-
-  jsAst.Name get staticsPropertyName =>
-      _staticsPropertyName ??= getFreshName(instanceScope, 'static');
-
-  FrequencyBasedNamer(
-      ClosedWorld closedWorld, CodegenWorldBuilder codegenWorldBuilder)
-      : super(closedWorld, codegenWorldBuilder) {
-    fieldRegistry = new _FieldNamingRegistry(this);
+  FrequencyBasedNamer(JClosedWorld closedWorld, FixedNames fixedNames)
+      : super(closedWorld, fixedNames) {
+    fieldRegistry = _FieldNamingRegistry(this);
   }
 
   TokenScope newScopeFor(NamingScope scope) {
     if (scope == instanceScope) {
-      Set<String> illegalNames = new Set<String>.from(jsReserved);
+      Set<String> illegalNames = Set<String>.from(jsReserved);
       for (String illegal in MinifyNamer._reservedNativeProperties) {
         illegalNames.add(illegal);
         if (MinifyNamer._hasBannedPrefix(illegal)) {
           illegalNames.add(illegal.substring(1));
         }
       }
-      return new TokenScope(illegalNames);
+      return TokenScope(illegalNames: illegalNames);
     } else {
-      return new TokenScope(jsReserved);
+      return TokenScope(illegalNames: jsReserved);
     }
   }
 
   @override
   jsAst.Name getFreshName(NamingScope scope, String proposedName,
-      {bool sanitizeForNatives: false, bool sanitizeForAnnotations: false}) {
+      {bool sanitizeForNatives = false, bool sanitizeForAnnotations = false}) {
     // Grab the scope for this token
     TokenScope tokenScope =
         _tokenScopes.putIfAbsent(scope, () => newScopeFor(scope));
@@ -61,13 +48,13 @@ class FrequencyBasedNamer extends Namer
         sanitizeForNatives: sanitizeForNatives,
         sanitizeForAnnotations: sanitizeForAnnotations);
 
-    TokenName name = new TokenName(tokenScope, proposed);
+    TokenName name = TokenName(tokenScope, proposed);
     tokens.add(name);
     return name;
   }
 
   @override
-  jsAst.Name instanceFieldPropertyName(FieldElement element) {
+  jsAst.Name instanceFieldPropertyName(FieldEntity element) {
     jsAst.Name proposed = _minifiedInstanceFieldPropertyName(element);
     if (proposed != null) {
       return proposed;
@@ -91,10 +78,13 @@ class FrequencyBasedNamer extends Namer
 }
 
 class TokenScope {
-  List<int> _nextName = [$a];
+  int initialChar;
+  List<int> _nextName;
   final Set<String> illegalNames;
 
-  TokenScope([this.illegalNames = const ImmutableEmptySet()]);
+  TokenScope({this.illegalNames = const {}, this.initialChar = $a}) {
+    _nextName = [initialChar];
+  }
 
   /// Increments the letter at [pos] in the current name. Also takes care of
   /// overflows to the left. Returns the carry bit, i.e., it returns `true`
@@ -118,7 +108,7 @@ class TokenScope {
       value = $A;
     } else if (value == $Z) {
       overflow = _incrementPosition(pos - 1);
-      value = (pos > 0) ? $_ : $a;
+      value = (pos > 0) ? $_ : initialChar;
     } else {
       value++;
     }
@@ -135,7 +125,7 @@ class TokenScope {
   String getNextName() {
     String proposal;
     do {
-      proposal = new String.fromCharCodes(_nextName);
+      proposal = String.fromCharCodes(_nextName);
       _incrementName();
     } while (MinifyNamer._hasBannedPrefix(proposal) ||
         illegalNames.contains(proposal));

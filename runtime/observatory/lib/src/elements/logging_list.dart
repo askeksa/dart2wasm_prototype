@@ -7,19 +7,17 @@ import 'dart:html';
 import 'package:logging/logging.dart';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/utils.dart';
 
-class LoggingListElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<LoggingListElement>('logging-list');
-
-  RenderingScheduler<LoggingListElement> _r;
+class LoggingListElement extends CustomElement implements Renderable {
+  late RenderingScheduler<LoggingListElement> _r;
 
   Stream<RenderedEvent<LoggingListElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.EventRepository _events;
-  StreamSubscription _subscription;
+  late M.IsolateRef _isolate;
+  late M.EventRepository _events;
+  late StreamSubscription _subscription;
   Level _level = Level.ALL;
   final _logs = <Map>[];
 
@@ -29,17 +27,17 @@ class LoggingListElement extends HtmlElement implements Renderable {
   set level(Level value) => _level = _r.checkAndReact(_level, value);
 
   factory LoggingListElement(M.IsolateRef isolate, M.EventRepository events,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(events != null);
-    LoggingListElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    LoggingListElement e = new LoggingListElement.created();
+    e._r = new RenderingScheduler<LoggingListElement>(e, queue: queue);
     e._isolate = isolate;
     e._events = events;
     return e;
   }
 
-  LoggingListElement.created() : super.created();
+  LoggingListElement.created() : super.created('logging-list');
 
   @override
   attached() {
@@ -59,16 +57,16 @@ class LoggingListElement extends HtmlElement implements Renderable {
   detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
     _subscription.cancel();
   }
 
   void render() {
     children = _logs
         .where(_shouldBeVisible)
-        .map((logRecord) => new DivElement()
+        .map<Element>((logRecord) => new DivElement()
           ..classes = ['logItem', logRecord['level'].name]
-          ..children = [
+          ..children = <Element>[
             new SpanElement()
               ..classes = ['level']
               ..text = logRecord['level'].name,

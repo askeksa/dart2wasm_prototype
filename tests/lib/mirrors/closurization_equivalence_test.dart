@@ -2,9 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library lib;
-
-@MirrorsUsed(targets: "lib")
 import 'dart:mirrors';
 import 'package:expect/expect.dart';
 
@@ -16,7 +13,7 @@ class C {
 }
 
 main() {
-  LibraryMirror thisLibrary = reflectClass(C).owner;
+  LibraryMirror thisLibrary = reflectClass(C).owner as LibraryMirror;
   Expect.equals(thisLibrary.declarations[#topLevelMethod],
       (reflect(topLevelMethod) as ClosureMirror).function, "topLevel");
 

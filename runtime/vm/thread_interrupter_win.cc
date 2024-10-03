@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "platform/globals.h"
-#if defined(HOST_OS_WINDOWS)
+#if defined(DART_HOST_OS_WINDOWS)
 
 #include "vm/flags.h"
 #include "vm/os.h"
@@ -14,7 +14,6 @@ namespace dart {
 
 #ifndef PRODUCT
 
-DECLARE_FLAG(bool, thread_interrupter);
 DECLARE_FLAG(bool, trace_thread_interrupter);
 
 #define kThreadError -1
@@ -53,7 +52,6 @@ class ThreadInterrupterWin : public AllStatic {
     return false;
   }
 
-
   static void Interrupt(OSThread* os_thread) {
     ASSERT(!OSThread::Compare(GetCurrentThreadId(), os_thread->id()));
     HANDLE handle = OpenThread(
@@ -83,7 +81,7 @@ class ThreadInterrupterWin : public AllStatic {
     // Currently we sample only threads that are associated
     // with an isolate. It is safe to call 'os_thread->thread()'
     // here as the thread which is being queried is suspended.
-    Thread* thread = os_thread->thread();
+    Thread* thread = static_cast<Thread*>(os_thread->thread());
     if (thread != NULL) {
       Profiler::SampleThread(thread, its);
     }
@@ -91,12 +89,6 @@ class ThreadInterrupterWin : public AllStatic {
     CloseHandle(handle);
   }
 };
-
-
-bool ThreadInterrupter::IsDebuggerAttached() {
-  return false;
-}
-
 
 void ThreadInterrupter::InterruptThread(OSThread* thread) {
   if (FLAG_trace_thread_interrupter) {
@@ -110,11 +102,9 @@ void ThreadInterrupter::InterruptThread(OSThread* thread) {
   }
 }
 
-
 void ThreadInterrupter::InstallSignalHandler() {
   // Nothing to do on Windows.
 }
-
 
 void ThreadInterrupter::RemoveSignalHandler() {
   // Nothing to do on Windows.
@@ -124,4 +114,4 @@ void ThreadInterrupter::RemoveSignalHandler() {
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_WINDOWS)
+#endif  // defined(DART_HOST_OS_WINDOWS)

@@ -9,7 +9,7 @@ class Ticker {
 
   bool isVerbose;
 
-  Duration previousTick;
+  late Duration previousTick;
 
   Ticker({this.isVerbose: true}) {
     previousTick = sw.elapsed;
@@ -28,5 +28,10 @@ class Ticker {
     } finally {
       previousTick = sw.elapsed;
     }
+  }
+
+  void reset() {
+    sw.reset();
+    previousTick = sw.elapsed;
   }
 }

@@ -1,10 +1,9 @@
 // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override
 
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'test_helper.dart';
 import 'service_test_common.dart';
 import 'dart:async';
@@ -18,7 +17,7 @@ testMain() {
   print(foo);
 }
 
-var tests = [
+var tests = <IsolateTest>[
   hasPausedAtStart,
 
   // Add breakpoints at line 11 and line 12.
@@ -29,8 +28,8 @@ var tests = [
 
     var bpt1 = await isolate.addBreakpoint(script, LINE_A);
     var bpt2 = await isolate.addBreakpoint(script, LINE_B);
-    expect(await bpt1.location.getLine(), equals(LINE_A));
-    expect(await bpt2.location.getLine(), equals(LINE_B));
+    expect(await bpt1.location!.getLine(), equals(LINE_A));
+    expect(await bpt2.location!.getLine(), equals(LINE_B));
 
     var stream = await isolate.vm.getEventStream(VM.kDebugStream);
     Completer completer = new Completer();
@@ -42,7 +41,7 @@ var tests = [
         print('break count is $breakCount');
         if (breakCount == 1) {
           // We are stopped at breakpoint 1.
-          expect(event.breakpoint.number, equals(bpt1.number));
+          expect(event.breakpoint!.number, equals(bpt1.number));
 
           // Remove both breakpoints
           var result = await isolate.removeBreakpoint(bpt1);

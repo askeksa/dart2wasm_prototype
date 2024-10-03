@@ -5,8 +5,8 @@
 #ifndef RUNTIME_VM_REGEXP_ASSEMBLER_IR_H_
 #define RUNTIME_VM_REGEXP_ASSEMBLER_IR_H_
 
-#include "vm/assembler.h"
-#include "vm/intermediate_language.h"
+#include "vm/compiler/assembler/assembler.h"
+#include "vm/compiler/backend/il.h"
 #include "vm/object.h"
 #include "vm/regexp_assembler.h"
 
@@ -32,16 +32,17 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
                          intptr_t capture_count,
                          const ParsedFunction* parsed_function,
                          const ZoneGrowableArray<const ICData*>& ic_data_array,
+                         intptr_t osr_id,
                          Zone* zone);
   virtual ~IRRegExpMacroAssembler();
 
   virtual bool CanReadUnaligned();
 
-  static RawArray* Execute(const RegExp& regexp,
-                           const String& input,
-                           const Smi& start_offset,
-                           bool sticky,
-                           Zone* zone);
+  static ArrayPtr Execute(const RegExp& regexp,
+                          const String& input,
+                          const Smi& start_offset,
+                          bool sticky,
+                          Zone* zone);
 
   virtual bool IsClosed() const { return (current_instruction_ == NULL); }
 
@@ -60,10 +61,13 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
   // A "greedy loop" is a loop that is both greedy and with a simple
   // body. It has a particularly simple implementation.
   virtual void CheckGreedyLoop(BlockLabel* on_tos_equals_current_position);
-  virtual void CheckNotAtStart(BlockLabel* on_not_at_start);
+  virtual void CheckNotAtStart(intptr_t cp_offset, BlockLabel* on_not_at_start);
   virtual void CheckNotBackReference(intptr_t start_reg,
+                                     bool read_backward,
                                      BlockLabel* on_no_match);
   virtual void CheckNotBackReferenceIgnoreCase(intptr_t start_reg,
+                                               bool read_backward,
+                                               bool unicode,
                                                BlockLabel* on_no_match);
   virtual void CheckNotCharacter(uint32_t c, BlockLabel* on_not_equal);
   virtual void CheckNotCharacterAfterAnd(uint32_t c,
@@ -132,6 +136,10 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
   void FinalizeRegistersArray();
 
  private:
+  intptr_t GetNextDeoptId() const {
+    return thread_->compiler_state().GetNextDeoptId();
+  }
+
   // Generate the contents of preset blocks. The entry block is the entry point
   // of the generated code.
   void GenerateEntryBlock();
@@ -220,56 +228,53 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
   // Used by generated RegExp code.
   ConstantInstr* WordCharacterMapConstant() const;
 
-  ComparisonInstr* Comparison(ComparisonKind kind,
-                              PushArgumentInstr* lhs,
-                              PushArgumentInstr* rhs);
+  ComparisonInstr* Comparison(ComparisonKind kind, Value* lhs, Value* rhs);
   ComparisonInstr* Comparison(ComparisonKind kind,
                               Definition* lhs,
                               Definition* rhs);
 
   InstanceCallInstr* InstanceCall(const InstanceCallDescriptor& desc,
-                                  PushArgumentInstr* arg1) const;
+                                  Value* arg1) const;
   InstanceCallInstr* InstanceCall(const InstanceCallDescriptor& desc,
-                                  PushArgumentInstr* arg1,
-                                  PushArgumentInstr* arg2) const;
+                                  Value* arg1,
+                                  Value* arg2) const;
   InstanceCallInstr* InstanceCall(const InstanceCallDescriptor& desc,
-                                  PushArgumentInstr* arg1,
-                                  PushArgumentInstr* arg2,
-                                  PushArgumentInstr* arg3) const;
-  InstanceCallInstr* InstanceCall(
-      const InstanceCallDescriptor& desc,
-      ZoneGrowableArray<PushArgumentInstr*>* arguments) const;
+                                  Value* arg1,
+                                  Value* arg2,
+                                  Value* arg3) const;
+  InstanceCallInstr* InstanceCall(const InstanceCallDescriptor& desc,
+                                  InputsArray* arguments) const;
 
-  StaticCallInstr* StaticCall(const Function& function) const;
   StaticCallInstr* StaticCall(const Function& function,
-                              PushArgumentInstr* arg1) const;
+                              ICData::RebindRule rebind_rule) const;
   StaticCallInstr* StaticCall(const Function& function,
-                              PushArgumentInstr* arg1,
-                              PushArgumentInstr* arg2) const;
-  StaticCallInstr* StaticCall(
-      const Function& function,
-      ZoneGrowableArray<PushArgumentInstr*>* arguments) const;
+                              Value* arg1,
+                              ICData::RebindRule rebind_rule) const;
+  StaticCallInstr* StaticCall(const Function& function,
+                              Value* arg1,
+                              Value* arg2,
+                              ICData::RebindRule rebind_rule) const;
+  StaticCallInstr* StaticCall(const Function& function,
+                              InputsArray* arguments,
+                              ICData::RebindRule rebind_rule) const;
 
   // Creates a new block consisting simply of a goto to dst.
   TargetEntryInstr* TargetWithJoinGoto(JoinEntryInstr* dst);
   IndirectEntryInstr* IndirectWithJoinGoto(JoinEntryInstr* dst);
 
   // Adds, respectively subtracts lhs and rhs and returns the result.
-  Definition* Add(PushArgumentInstr* lhs, PushArgumentInstr* rhs);
-  Definition* Sub(PushArgumentInstr* lhs, PushArgumentInstr* rhs);
+  Definition* Add(Value* lhs, Value* rhs);
+  Definition* Sub(Value* lhs, Value* rhs);
 
   LoadLocalInstr* LoadLocal(LocalVariable* local) const;
   void StoreLocal(LocalVariable* local, Value* value);
 
-  PushArgumentInstr* PushArgument(Value* value);
-  PushArgumentInstr* PushLocal(LocalVariable* local);
+  Value* PushLocal(LocalVariable* local);
 
-  PushArgumentInstr* PushRegisterIndex(intptr_t reg);
+  Value* PushRegisterIndex(intptr_t reg);
   Value* LoadRegister(intptr_t reg);
   void StoreRegister(intptr_t reg, intptr_t value);
-  void StoreRegister(PushArgumentInstr* registers,
-                     PushArgumentInstr* index,
-                     PushArgumentInstr* value);
+  void StoreRegister(Value* registers, Value* index, Value* value);
 
   // Load a number of characters at the given offset from the
   // current position, into the current-character register.
@@ -282,8 +287,8 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
   // Load a number of characters starting from index in the pattern string.
   Value* LoadCodeUnitsAt(LocalVariable* index, intptr_t character_count);
 
-  // Check whether preemption has been requested.
-  void CheckPreemption();
+  // Check whether preemption has been requested. Also serves as an OSR entry.
+  void CheckPreemption(bool is_backtrack);
 
   // Byte size of chars in the string to match (decided by the Mode argument)
   inline intptr_t char_size() { return static_cast<int>(mode_); }
@@ -336,12 +341,12 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
   void GrowStack();
 
   // Prints the specified argument. Used for debugging.
-  void Print(PushArgumentInstr* argument);
+  void Print(Value* argument);
 
   // A utility class tracking ids of various objects such as blocks, temps, etc.
   class IdAllocator : public ValueObject {
    public:
-    IdAllocator() : next_id(0) {}
+    explicit IdAllocator(intptr_t first_id = 0) : next_id(first_id) {}
 
     intptr_t Count() const { return next_id; }
     intptr_t Alloc(intptr_t count = 1) {
@@ -358,6 +363,8 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
    private:
     intptr_t next_id;
   };
+
+  Thread* thread_;
 
   // Which mode to generate code for (ASCII or UC16).
   Mode mode_;
@@ -429,11 +436,9 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
 
   IdAllocator block_id_;
   IdAllocator temp_id_;
-  IdAllocator arg_id_;
   IdAllocator local_id_;
   IdAllocator indirect_id_;
 };
-
 
 }  // namespace dart
 

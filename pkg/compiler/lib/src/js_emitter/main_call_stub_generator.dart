@@ -6,51 +6,66 @@ library dart2js.js_emitter.main_call_stub_generator;
 
 import 'package:js_runtime/shared/embedded_names.dart' as embeddedNames;
 
-import '../common_elements.dart';
+import '../common/elements.dart';
 import '../elements/entities.dart';
 import '../js/js.dart' as jsAst;
 import '../js/js.dart' show js;
-import '../js_backend/backend_usage.dart' show BackendUsage;
 
 import 'code_emitter_task.dart' show Emitter;
 
 class MainCallStubGenerator {
-  final CommonElements _commonElements;
-  final Emitter _emitter;
-  final BackendUsage _backendUsage;
-
-  MainCallStubGenerator(
-      this._commonElements, this._emitter, this._backendUsage);
-
-  /// Returns the code equivalent to:
-  ///   `function(args) { $.startRootIsolate(X.main$closure(), args); }`
-  jsAst.Expression _buildIsolateSetupClosure(
-      FunctionEntity appMain, FunctionEntity isolateMain) {
-    jsAst.Expression mainAccess = _emitter.isolateStaticClosureAccess(appMain);
-    // Since we pass the closurized version of the main method to
-    // the isolate method, we must make sure that it exists.
-    return js('function(a){ #(#, a); }',
-        [_emitter.staticFunctionAccess(isolateMain), mainAccess]);
-  }
-
-  jsAst.Statement generateInvokeMain(FunctionEntity main) {
-    jsAst.Expression mainCallClosure = null;
-    if (_backendUsage.isIsolateInUse) {
-      FunctionEntity isolateMain = _commonElements.startRootIsolate;
-      mainCallClosure = _buildIsolateSetupClosure(main, isolateMain);
-    } else {
-      mainCallClosure = _emitter.staticFunctionAccess(main);
-    }
-
+  static jsAst.Statement generateInvokeMain(CommonElements commonElements,
+      Emitter emitter, FunctionEntity main, bool requiresStartupMetrics) {
+    jsAst.Expression mainAccess = emitter.staticFunctionAccess(main);
     jsAst.Expression currentScriptAccess =
-        _emitter.generateEmbeddedGlobalAccess(embeddedNames.CURRENT_SCRIPT);
+        emitter.generateEmbeddedGlobalAccess(embeddedNames.CURRENT_SCRIPT);
+
+    // TODO(https://github.com/dart-lang/language/issues/1120#issuecomment-670802088):
+    // Validate constraints on `main()` in resolution for dart2js, and in DDC.
+
+    final parameterStructure = main.parameterStructure;
+
+    // The forwarding stub passes all arguments, i.e. both required and optional
+    // positional arguments. We ignore named arguments, assuming the `main()`
+    // has been validated earlier.
+    int positionalParameters = parameterStructure.positionalParameters;
+
+    jsAst.Expression mainCallClosure;
+    if (positionalParameters == 0) {
+      if (parameterStructure.namedParameters.isEmpty) {
+        // e.g. `void main()`.
+        // No parameters. The compiled Dart `main` has no parameters and will
+        // ignore any extra parameters passed in, so it can be used directly.
+        mainCallClosure = mainAccess;
+      } else {
+        // e.g. `void main({arg})`.  We should not get here. Drop the named
+        // arguments as we don't know how to convert them.
+        mainCallClosure = js(r'''function() { return #(); }''', mainAccess);
+      }
+    } else {
+      jsAst.Expression convertArgumentList =
+          emitter.staticFunctionAccess(commonElements.convertMainArgumentList);
+      if (positionalParameters == 1) {
+        // e.g. `void main(List<String> args)`,  `main([args])`.
+        mainCallClosure = js(
+          r'''function(args) { return #(#(args)); }''',
+          [mainAccess, convertArgumentList],
+        );
+      } else {
+        // positionalParameters == 2.
+        // e.g. `void main(List<String> args, Object? extra)`
+        mainCallClosure = js(
+          r'''function(args, extra) { return #(#(args), extra); }''',
+          [mainAccess, convertArgumentList],
+        );
+      }
+    }
 
     // This code finds the currently executing script by listening to the
     // onload event of all script tags and getting the first script which
     // finishes. Since onload is called immediately after execution this should
     // not substantially change execution order.
-    return js.statement(
-        '''
+    return js.statement('''
       (function (callback) {
         if (typeof document === "undefined") {
           callback(null);
@@ -58,7 +73,7 @@ class MainCallStubGenerator {
         }
         // When running as a content-script of a chrome-extension the
         // 'currentScript' is `null` (but not undefined).
-        if (typeof document.currentScript != 'undefined') {
+        if (typeof document.currentScript != "undefined") {
           callback(document.currentScript);
           return;
         }
@@ -76,15 +91,20 @@ class MainCallStubGenerator {
       })(function(currentScript) {
         #currentScript = currentScript;
 
-        if (typeof dartMainRunner === "function") {
-          dartMainRunner(#mainCallClosure, []);
-        } else {
-          #mainCallClosure([]);
+        if (#startupMetrics) {
+          init.#startupMetricsEmbeddedGlobal.add('callMainMs');
         }
-      })''',
-        {
-          'currentScript': currentScriptAccess,
-          'mainCallClosure': mainCallClosure
-        });
+        var callMain = #mainCallClosure;
+        if (typeof dartMainRunner === "function") {
+          dartMainRunner(callMain, []);
+        } else {
+          callMain([]);
+        }
+      })''', {
+      'currentScript': currentScriptAccess,
+      'mainCallClosure': mainCallClosure,
+      'startupMetrics': requiresStartupMetrics,
+      'startupMetricsEmbeddedGlobal': embeddedNames.STARTUP_METRICS,
+    });
   }
 }

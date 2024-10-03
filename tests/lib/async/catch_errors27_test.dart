@@ -13,7 +13,7 @@ main() {
 
   var events = [];
   StreamController controller;
-  Stream stream;
+  late Stream stream;
   // Test that streams live in the zone they have been listened too.
   // It doesn't matter how many zone-boundaries the stream traverses. What
   // counts is the zone where `listen` was invoked.

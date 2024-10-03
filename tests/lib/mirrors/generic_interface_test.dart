@@ -4,7 +4,6 @@
 
 library test.generic_bounded;
 
-@MirrorsUsed(targets: "test.generic_bounded")
 import 'dart:mirrors';
 
 import 'package:expect/expect.dart';
@@ -21,7 +20,7 @@ class Generic<R> implements Interface<R> {}
 
 class Bienbounded implements Bounded<int> {}
 
-class Malbounded implements Bounded<String> {} // //# 01: static type warning
+class Malbounded implements Bounded<String> {} // //# 01: compile-time error
 class FBounded implements Interface<FBounded> {}
 
 class Mixin {}
@@ -91,21 +90,6 @@ main() {
   Expect.equals(reflectClass(Object), rFromGeneric.upperBound);
   Expect.equals(reflectClass(Object), xFromGenericMixinApplication.upperBound);
   Expect.equals(reflectClass(Object), yFromGenericClass.upperBound);
-
-  typeParameters(interfaceDecl, [#T]);
-  typeParameters(boundedDecl, [#S]);
-  typeParameters(interfaceOfInt, [#T]);
-  typeParameters(interfaceOfR, [#T]);
-  typeParameters(interfaceOfBool, [#T]);
-  typeParameters(boundedOfInt, [#S]);
-  typeParameters(boundedOfString, [#S]); // //# 01: continued
-  typeParameters(interfaceOfFBounded, [#T]);
-  typeParameters(interfaceOfInt2, [#T]);
-  typeParameters(interfaceOfX, [#T]);
-  typeParameters(interfaceOfDouble, [#T]);
-  typeParameters(interfaceOfInt3, [#T]);
-  typeParameters(interfaceOfY, [#T]);
-  typeParameters(interfaceOfDouble2, [#T]);
 
   typeArguments(interfaceDecl, []);
   typeArguments(boundedDecl, []);

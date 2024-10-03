@@ -6,14 +6,13 @@
 # some enhancements since the commands on Mac are slightly different than on
 # Linux.
 
-import("../goma.gni")
 import("//build/config/mac/mac_sdk.gni")
+import("../goma.gni")
 
 assert(host_os == "mac")
 
-import("//build/toolchain/clang.gni")
-import("//build/toolchain/goma.gni")
 import("//build/config/sysroot.gni")
+import("//build/toolchain/goma.gni")
 
 if (use_goma) {
   goma_prefix = "$goma_dir/gomacc "
@@ -21,18 +20,13 @@ if (use_goma) {
   goma_prefix = ""
 }
 
-# This will copy the gyp-mac-tool to the build directory. We pass in the source
-# file of the win tool.
-gyp_mac_tool_source =
-    rebase_path("//third_party/gyp/pylib/gyp/mac_tool.py", root_build_dir)
-exec_script("setup_toolchain.py", [ gyp_mac_tool_source ])
-
 # Shared toolchain definition. Invocations should set toolchain_os to set the
 # build args in this definition.
 template("mac_toolchain") {
   toolchain(target_name) {
     assert(defined(invoker.cc), "mac_toolchain() must specify a \"cc\" value")
     assert(defined(invoker.cxx), "mac_toolchain() must specify a \"cxx\" value")
+    assert(defined(invoker.ar), "mac_toolchain() must specify an \"ar\" value")
     assert(defined(invoker.ld), "mac_toolchain() must specify a \"ld\" value")
     assert(defined(invoker.toolchain_cpu),
            "mac_toolchain() must specify a \"toolchain_cpu\"")
@@ -44,6 +38,7 @@ template("mac_toolchain") {
     # these values in our scope.
     cc = invoker.cc
     cxx = invoker.cxx
+    ar = invoker.ar
     ld = invoker.ld
 
     # Make these apply to all tools below.
@@ -66,9 +61,8 @@ template("mac_toolchain") {
       command = "$cc -MMD -MF $depfile {{defines}} {{include_dirs}} $sysroot_flags $toolchain_flags {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       description = "CC {{output}}"
-      outputs = [
-        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.o",
-      ]
+      outputs =
+          [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
     }
 
     tool("cxx") {
@@ -76,9 +70,8 @@ template("mac_toolchain") {
       command = "$cxx -MMD -MF $depfile {{defines}} {{include_dirs}} $sysroot_flags $toolchain_flags {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       description = "CXX {{output}}"
-      outputs = [
-        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.o",
-      ]
+      outputs =
+          [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
     }
 
     tool("asm") {
@@ -87,9 +80,8 @@ template("mac_toolchain") {
       command = "$cc -MMD -MF $depfile {{defines}} {{include_dirs}} $sysroot_flags $toolchain_flags {{asmflags}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       description = "ASM {{output}}"
-      outputs = [
-        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.o",
-      ]
+      outputs =
+          [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
     }
 
     tool("objc") {
@@ -97,9 +89,8 @@ template("mac_toolchain") {
       command = "$cxx -MMD -MF $depfile {{defines}} {{include_dirs}} $sysroot_flags $toolchain_flags {{cflags}} {{cflags_c}} {{cflags_objc}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       description = "OBJC {{output}}"
-      outputs = [
-        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.o",
-      ]
+      outputs =
+          [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
     }
 
     tool("objcxx") {
@@ -107,23 +98,24 @@ template("mac_toolchain") {
       command = "$cxx -MMD -MF $depfile {{defines}} {{include_dirs}} $sysroot_flags $toolchain_flags {{cflags}} {{cflags_cc}} {{cflags_objcc}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       description = "OBJCXX {{output}}"
-      outputs = [
-        "{{target_out_dir}}/{{target_output_name}}/{{source_name_part}}.o",
-      ]
+      outputs =
+          [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
     }
 
     tool("alink") {
-      command = "rm -f {{output}} && ./gyp-mac-tool filter-libtool libtool -static -o {{output}} {{inputs}}"
-      description = "LIBTOOL-STATIC {{output}}"
-      outputs = [
-        "{{target_out_dir}}/{{target_output_name}}{{output_extension}}",
-      ]
+      rspfile = "{{output}}.rsp"
+      command = "rm -f {{output}} && $ar rcs {{output}} @$rspfile"
+      description = "AR {{output}}"
+      rspfile_content = "{{inputs}}"
+      outputs =
+          [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
       default_output_extension = ".a"
       output_prefix = "lib"
     }
 
     tool("solink") {
-      dylib = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"  # eg "./libfoo.dylib"
+      dylib = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"  # eg
+                                                                             # "./libfoo.dylib"
       rspfile = dylib + ".rsp"
 
       # These variables are not build into GN but are helpers that implement
@@ -138,7 +130,7 @@ template("mac_toolchain") {
       temporary_tocname = dylib + ".tmp"
 
       does_reexport_command = "[ ! -e $dylib -o ! -e $tocname ] || otool -l $dylib | grep -q LC_REEXPORT_DYLIB"
-      link_command = "$ld -shared $sysroot_flags $toolchain_flags {{ldflags}} -o $dylib -Wl,-filelist,$rspfile {{solibs}} {{libs}}"
+      link_command = "$ld -shared $sysroot_flags $toolchain_flags {{ldflags}} -o $dylib -Wl,-filelist,$rspfile {{solibs}} {{libs}} {{frameworks}}"
       replace_command = "if ! cmp -s $temporary_tocname $tocname; then mv $temporary_tocname $tocname"
       extract_toc_command = "{ otool -l $dylib | grep LC_ID_DYLIB -A 5; nm -gP $dylib | cut -f1-2 -d' ' | grep -v U\$\$; true; }"
 
@@ -171,15 +163,27 @@ template("mac_toolchain") {
     }
 
     tool("link") {
-      outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
+      exename = "{{target_output_name}}{{output_extension}}"
+      outfile = "{{root_out_dir}}/$exename"
       rspfile = "$outfile.rsp"
 
-      command = "$ld $sysroot_flags $toolchain_flags {{ldflags}} -Xlinker -rpath -Xlinker @executable_path/Frameworks -o $outfile -Wl,-filelist,$rspfile {{solibs}} {{libs}}"
+      if (defined(invoker.strip)) {
+        stripped_outfile = "{{root_out_dir}}/exe.stripped/$exename"
+      }
+
+      command = "$ld $sysroot_flags $toolchain_flags {{ldflags}} -Xlinker -rpath -Xlinker @executable_path/Frameworks -o $outfile -Wl,-filelist,$rspfile {{solibs}} {{libs}} {{frameworks}}"
+      if (defined(invoker.strip)) {
+        strip = invoker.strip
+        strip_command = "${strip} -x -o $stripped_outfile $outfile"
+        command += " && " + strip_command
+      }
+
       description = "LINK $outfile"
       rspfile_content = "{{inputs_newline}}"
-      outputs = [
-        outfile,
-      ]
+      outputs = [ outfile ]
+      if (defined(invoker.strip)) {
+        outputs += [ stripped_outfile ]
+      }
     }
 
     tool("stamp") {
@@ -211,12 +215,16 @@ template("mac_toolchain") {
 mac_toolchain("clang_x64") {
   toolchain_cpu = "x64"
   toolchain_os = "mac"
-  prefix = rebase_path("//buildtools/toolchain/clang+llvm-x86_64-darwin/bin",
-                       root_build_dir)
+  prefix = rebase_path("//buildtools/mac-x64/clang/bin", root_build_dir)
   cc = "${goma_prefix}$prefix/clang"
   cxx = "${goma_prefix}$prefix/clang++"
+  ar = "${prefix}/llvm-ar"
   ld = cxx
+  strip = "strip"
   is_clang = true
+  if (mac_enable_relative_sdk_path) {
+    mac_sdk_path = rebase_path(mac_sdk_path, root_build_dir)
+  }
   sysroot_flags = "-isysroot $mac_sdk_path -mmacosx-version-min=$mac_sdk_min"
 }
 
@@ -224,11 +232,31 @@ mac_toolchain("clang_x64") {
 mac_toolchain("clang_x86") {
   toolchain_cpu = "i386"
   toolchain_os = "mac"
-  prefix = rebase_path("//buildtools/toolchain/clang+llvm-x86_64-darwin/bin",
-                       root_build_dir)
+  prefix = rebase_path("//buildtools/mac-x64/clang/bin", root_build_dir)
   cc = "${goma_prefix}$prefix/clang"
   cxx = "${goma_prefix}$prefix/clang++"
+  ar = "${prefix}/llvm-ar"
   ld = cxx
+  strip = "strip"
   is_clang = true
+  if (mac_enable_relative_sdk_path) {
+    mac_sdk_path = rebase_path(mac_sdk_path, root_build_dir)
+  }
+  sysroot_flags = "-isysroot $mac_sdk_path -mmacosx-version-min=$mac_sdk_min"
+}
+
+mac_toolchain("clang_arm64") {
+  toolchain_cpu = "arm64"
+  toolchain_os = "mac"
+  prefix = rebase_path("//buildtools/mac-x64/clang/bin", root_build_dir)
+  cc = "${goma_prefix}$prefix/clang"
+  cxx = "${goma_prefix}$prefix/clang++"
+  ar = "${prefix}/llvm-ar"
+  ld = cxx
+  strip = "strip"
+  is_clang = true
+  if (mac_enable_relative_sdk_path) {
+    mac_sdk_path = rebase_path(mac_sdk_path, root_build_dir)
+  }
   sysroot_flags = "-isysroot $mac_sdk_path -mmacosx-version-min=$mac_sdk_min"
 }

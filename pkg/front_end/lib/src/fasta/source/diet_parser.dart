@@ -4,38 +4,21 @@
 
 library fasta.diet_parser;
 
-import '../fasta_codes.dart' show codeExpectedOpenParens;
+import 'package:_fe_analyzer_shared/src/scanner/token.dart' show Token;
 
-import '../parser/class_member_parser.dart' show ClassMemberParser;
+import 'package:_fe_analyzer_shared/src/parser/parser.dart'
+    show ClassMemberParser, Listener, MemberKind;
 
-import '../parser/listener.dart' show Listener;
-
-import '../parser/parser.dart' show MemberKind, optional;
-
-import '../scanner/token.dart' show BeginGroupToken;
-
-import '../../scanner/token.dart' show Token;
+const bool useImplicitCreationExpressionInCfe = true;
 
 // TODO(ahe): Move this to parser package.
 class DietParser extends ClassMemberParser {
-  DietParser(Listener listener) : super(listener);
+  DietParser(Listener listener)
+      : super(listener,
+            useImplicitCreationExpression: useImplicitCreationExpressionInCfe);
 
-  Token parseFormalParameters(Token token, MemberKind kind) {
-    return skipFormals(token, kind);
-  }
-
-  Token skipFormals(Token token, MemberKind kind) {
-    listener.beginOptionalFormalParameters(token);
-    if (!optional('(', token)) {
-      if (optional(';', token)) {
-        reportRecoverableErrorCode(token, codeExpectedOpenParens);
-        return token;
-      }
-      return reportUnexpectedToken(token).next;
-    }
-    BeginGroupToken beginGroupToken = token;
-    Token endToken = beginGroupToken.endGroup;
-    listener.endFormalParameters(0, token, endToken, kind);
-    return endToken.next;
+  @override
+  Token parseFormalParametersRest(Token token, MemberKind kind) {
+    return skipFormalParametersRest(token, kind);
   }
 }

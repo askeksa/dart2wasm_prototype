@@ -5,14 +5,15 @@
 #include "vm/dart_api_impl.h"
 #include "vm/dart_api_state.h"
 #include "vm/object.h"
+#include "vm/symbols.h"
 #include "vm/unit_test.h"
 
 namespace dart {
 
-RawField* LookupField(Dart_Handle library,
-                      const char* class_name,
-                      const char* field_name) {
-  RawLibrary* raw_library = Library::RawCast(Api::UnwrapHandle(library));
+FieldPtr LookupField(Dart_Handle library,
+                     const char* class_name,
+                     const char* field_name) {
+  LibraryPtr raw_library = Library::RawCast(Api::UnwrapHandle(library));
   Library& lib = Library::ZoneHandle(raw_library);
   const String& classname =
       String::Handle(Symbols::New(Thread::Current(), class_name));
@@ -23,16 +24,15 @@ RawField* LookupField(Dart_Handle library,
   Field& field =
       Field::ZoneHandle(cls.LookupInstanceFieldAllowPrivate(fieldname));
   EXPECT(!field.IsNull());
-  return field.raw();
+  return field.ptr();
 }
-
 
 TEST_CASE(GuardFieldSimpleTest) {
   const char* script_chars =
       "class A {\n"
       "  var f1 = 3.0;\n"
-      "  var f2 = 3;\n"
-      "  var f3 = new List(4);\n"
+      "  dynamic f2 = 3;\n"
+      "  var f3 = List<dynamic>.filled(4, null);\n"
       "  foo() {\n"
       "    f1 = f1 + f1;\n"
       "  }\n"
@@ -43,14 +43,14 @@ TEST_CASE(GuardFieldSimpleTest) {
       "}\n"
       "\n"
       "runFoo() {\n"
-      "  var a = new A();\n"
+      "  var a = A();\n"
       "  for (int i = 0; i < 2000; i++) {\n"
       "    a.foo();\n"
       "  }\n"
       "}\n"
       "\n"
       "runBar() {\n"
-      "  var a = new A();\n"
+      "  var a = A();\n"
       "  for (int i = 0; i < 2000; i++) {\n"
       "    a.bar();\n"
       "  }\n"
@@ -64,6 +64,7 @@ TEST_CASE(GuardFieldSimpleTest) {
   Dart_Handle lib = TestCase::LoadTestScript(script_chars, NULL);
   Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
   EXPECT_VALID(result);
+  TransitionNativeToVM transition(thread);
   Field& f1 = Field::ZoneHandle(LookupField(lib, "A", "f1"));
   Field& f2 = Field::ZoneHandle(LookupField(lib, "A", "f2"));
   Field& f3 = Field::ZoneHandle(LookupField(lib, "A", "f3"));
@@ -77,13 +78,12 @@ TEST_CASE(GuardFieldSimpleTest) {
   EXPECT_EQ(no_length, f3.guarded_list_length());
 }
 
-
 TEST_CASE(GuardFieldFinalListTest) {
   const char* script_chars =
       "class A {\n"
       "  var f1 = 3.0;\n"
-      "  var f2 = 3;\n"
-      "  final f3 = new List(4);\n"
+      "  dynamic f2 = 3;\n"
+      "  final f3 = List<dynamic>.filled(4, null);\n"
       "  foo() {\n"
       "    f1 = f1 + f1;\n"
       "  }\n"
@@ -94,14 +94,14 @@ TEST_CASE(GuardFieldFinalListTest) {
       "}\n"
       "\n"
       "runFoo() {\n"
-      "  var a = new A();\n"
+      "  var a = A();\n"
       "  for (int i = 0; i < 2000; i++) {\n"
       "    a.foo();\n"
       "  }\n"
       "}\n"
       "\n"
       "runBar() {\n"
-      "  var a = new A();\n"
+      "  var a = A();\n"
       "  for (int i = 0; i < 2000; i++) {\n"
       "    a.bar();\n"
       "  }\n"
@@ -115,6 +115,7 @@ TEST_CASE(GuardFieldFinalListTest) {
   Dart_Handle lib = TestCase::LoadTestScript(script_chars, NULL);
   Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
   EXPECT_VALID(result);
+  TransitionNativeToVM transition(thread);
   Field& f1 = Field::ZoneHandle(LookupField(lib, "A", "f1"));
   Field& f2 = Field::ZoneHandle(LookupField(lib, "A", "f2"));
   Field& f3 = Field::ZoneHandle(LookupField(lib, "A", "f3"));
@@ -130,13 +131,12 @@ TEST_CASE(GuardFieldFinalListTest) {
   EXPECT_EQ(false, f3.is_nullable());
 }
 
-
 TEST_CASE(GuardFieldFinalVariableLengthListTest) {
   const char* script_chars =
       "class A {\n"
       "  var f1 = 3.0;\n"
-      "  var f2 = 3;\n"
-      "  final f3 = new List();\n"
+      "  dynamic f2 = 3;\n"
+      "  final f3 = List.empty(growable: true);\n"
       "  foo() {\n"
       "    f1 = f1 + f1;\n"
       "  }\n"
@@ -147,14 +147,14 @@ TEST_CASE(GuardFieldFinalVariableLengthListTest) {
       "}\n"
       "\n"
       "runFoo() {\n"
-      "  var a = new A();\n"
+      "  var a = A();\n"
       "  for (int i = 0; i < 2000; i++) {\n"
       "    a.foo();\n"
       "  }\n"
       "}\n"
       "\n"
       "runBar() {\n"
-      "  var a = new A();\n"
+      "  var a = A();\n"
       "  for (int i = 0; i < 2000; i++) {\n"
       "    a.bar();\n"
       "  }\n"
@@ -168,6 +168,7 @@ TEST_CASE(GuardFieldFinalVariableLengthListTest) {
   Dart_Handle lib = TestCase::LoadTestScript(script_chars, NULL);
   Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
   EXPECT_VALID(result);
+  TransitionNativeToVM transition(thread);
   Field& f1 = Field::ZoneHandle(LookupField(lib, "A", "f1"));
   Field& f2 = Field::ZoneHandle(LookupField(lib, "A", "f2"));
   Field& f3 = Field::ZoneHandle(LookupField(lib, "A", "f3"));
@@ -183,13 +184,12 @@ TEST_CASE(GuardFieldFinalVariableLengthListTest) {
   EXPECT_EQ(false, f3.is_nullable());
 }
 
-
 TEST_CASE(GuardFieldConstructorTest) {
   const char* script_chars =
       "import 'dart:typed_data';\n"
       "class A {\n"
       "  var f1 = 3.0;\n"
-      "  var f2 = 3;\n"
+      "  dynamic f2 = 3;\n"
       "  final f3;\n"
       "  A(x) : f3 = x;\n"
       "  foo() {\n"
@@ -225,6 +225,7 @@ TEST_CASE(GuardFieldConstructorTest) {
   Dart_Handle lib = TestCase::LoadTestScript(script_chars, NULL);
   Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
   EXPECT_VALID(result);
+  TransitionNativeToVM transition(thread);
   Field& f1 = Field::ZoneHandle(LookupField(lib, "A", "f1"));
   Field& f2 = Field::ZoneHandle(LookupField(lib, "A", "f2"));
   Field& f3 = Field::ZoneHandle(LookupField(lib, "A", "f3"));
@@ -240,7 +241,6 @@ TEST_CASE(GuardFieldConstructorTest) {
   EXPECT_EQ(kTypedDataFloat32ArrayCid, f3.guarded_cid());
   EXPECT_EQ(false, f3.is_nullable());
 }
-
 
 TEST_CASE(GuardFieldConstructor2Test) {
   const char* script_chars =
@@ -274,6 +274,7 @@ TEST_CASE(GuardFieldConstructor2Test) {
   Dart_Handle lib = TestCase::LoadTestScript(script_chars, NULL);
   Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
   EXPECT_VALID(result);
+  TransitionNativeToVM transition(thread);
   Field& f3 = Field::ZoneHandle(LookupField(lib, "A", "f3"));
   const intptr_t no_length = Field::kNoFixedLength;
   EXPECT_EQ(no_length, f3.guarded_list_length());

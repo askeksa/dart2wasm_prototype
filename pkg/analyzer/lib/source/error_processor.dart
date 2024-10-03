@@ -1,18 +1,15 @@
-// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer.source.error_processor;
-
 import 'package:analyzer/error/error.dart';
-import 'package:analyzer/src/error/codes.dart';
 import 'package:analyzer/src/generated/engine.dart';
 import 'package:analyzer/src/generated/utilities_general.dart';
 import 'package:analyzer/src/task/options.dart';
 import 'package:yaml/yaml.dart';
 
 /// String identifiers mapped to associated severities.
-const Map<String, ErrorSeverity> severityMap = const {
+const Map<String, ErrorSeverity> severityMap = {
   'error': ErrorSeverity.ERROR,
   'info': ErrorSeverity.INFO,
   'warning': ErrorSeverity.WARNING
@@ -28,41 +25,34 @@ class ErrorConfig {
   ///     new ErrorConfig({'missing_return' : 'error'});
   /// will create a processor config that turns `missing_return` hints into
   /// errors.
-  ErrorConfig(Object codeMap) {
+  ErrorConfig(YamlNode? codeMap) {
     _processMap(codeMap);
   }
 
-  void _process(String code, Object action) {
+  void _process(String? code, Object action) {
     code = toUpperCase(code);
-    action = toLowerCase(action);
-    if (AnalyzerOptions.ignoreSynonyms.contains(action)) {
-      processors.add(new ErrorProcessor.ignore(code));
+    var actionStr = toLowerCase(action);
+    if (AnalyzerOptions.ignoreSynonyms.contains(actionStr)) {
+      processors.add(ErrorProcessor.ignore(code!));
     } else {
-      ErrorSeverity severity = _toSeverity(action);
+      var severity = _toSeverity(actionStr);
       if (severity != null) {
-        processors.add(new ErrorProcessor(code, severity));
+        processors.add(ErrorProcessor(code!, severity));
       }
     }
   }
 
-  void _processMap(Object codes) {
+  void _processMap(YamlNode? codes) {
     if (codes is YamlMap) {
-      // TODO(pq): stop traversing nodes and unify w/ standard map handling
       codes.nodes.forEach((k, v) {
         if (k is YamlScalar && v is YamlScalar) {
           _process(k.value, v.value);
         }
       });
-    } else if (codes is Map) {
-      codes.forEach((k, v) {
-        if (k is String) {
-          _process(k, v);
-        }
-      });
     }
   }
 
-  ErrorSeverity _toSeverity(String severity) => severityMap[severity];
+  ErrorSeverity? _toSeverity(String? severity) => severityMap[severity];
 }
 
 /// Process errors by filtering or changing associated [ErrorSeverity].
@@ -73,7 +63,7 @@ class ErrorProcessor {
   /// The desired severity of the processed error.
   ///
   /// If `null`, this processor will "filter" the associated error code.
-  final ErrorSeverity severity;
+  final ErrorSeverity? severity;
 
   /// Create an error processor that assigns errors with this [code] the
   /// given [severity].
@@ -82,7 +72,7 @@ class ErrorProcessor {
   ErrorProcessor(this.code, [this.severity]);
 
   /// Create an error processor that ignores the given error by [code].
-  factory ErrorProcessor.ignore(String code) => new ErrorProcessor(code);
+  factory ErrorProcessor.ignore(String code) => ErrorProcessor(code);
 
   /// The string that unique describes the processor.
   String get description => '$code -> ${severity?.name}';
@@ -97,8 +87,8 @@ class ErrorProcessor {
 
   /// Return an error processor associated in the [analysisOptions] for the
   /// given [error], or `null` if none is found.
-  static ErrorProcessor getProcessor(
-      AnalysisOptions analysisOptions, AnalysisError error) {
+  static ErrorProcessor? getProcessor(
+      AnalysisOptions? analysisOptions, AnalysisError error) {
     if (analysisOptions == null) {
       return null;
     }
@@ -106,40 +96,13 @@ class ErrorProcessor {
     // Let the user configure how specific errors are processed.
     List<ErrorProcessor> processors = analysisOptions.errorProcessors;
 
-    // Give strong mode a chance to upgrade it.
-    if (analysisOptions.strongMode) {
-      processors = processors.toList();
-      processors.add(_StrongModeTypeErrorProcessor.instance);
+    // Add the strong mode processor.
+    processors = processors.toList();
+    for (var processor in processors) {
+      if (processor.appliesTo(error)) {
+        return processor;
+      }
     }
-    return processors.firstWhere((ErrorProcessor p) => p.appliesTo(error),
-        orElse: () => null);
-  }
-}
-
-/// In strong mode, this upgrades static type warnings to errors.
-class _StrongModeTypeErrorProcessor implements ErrorProcessor {
-  static final instance = new _StrongModeTypeErrorProcessor();
-
-  // TODO(rnystrom): As far as I know, this is only used to implement
-  // appliesTo(). Consider making it private in ErrorProcessor if possible.
-  String get code => throw new UnsupportedError(
-      "_StrongModeTypeErrorProcessor is not specific to an error code.");
-
-  @override
-  String get description => 'allStrongWarnings -> ERROR';
-
-  /// In strong mode, type warnings are upgraded to errors.
-  ErrorSeverity get severity => ErrorSeverity.ERROR;
-
-  /// Check if this processor applies to the given [error].
-  bool appliesTo(AnalysisError error) {
-    ErrorCode errorCode = error.errorCode;
-    if (errorCode is StaticTypeWarningCode) {
-      return true;
-    }
-    if (errorCode is StaticWarningCode) {
-      return errorCode.isStrongModeError;
-    }
-    return false;
+    return null;
   }
 }

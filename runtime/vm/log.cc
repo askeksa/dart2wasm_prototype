@@ -4,6 +4,7 @@
 
 #include "vm/log.h"
 
+#include "vm/dart.h"
 #include "vm/flags.h"
 #include "vm/isolate.h"
 #include "vm/thread.h"
@@ -12,40 +13,82 @@ namespace dart {
 
 DEFINE_FLAG(bool, force_log_flush, false, "Always flush log messages.");
 
+// The following flag is useful when debugging on Android, since
+// adb logcat truncates messages that are "too long" (and always
+// flushing would result in too many short messages).
+DEFINE_FLAG(
+    int,
+    force_log_flush_at_size,
+    0,
+    "Flush log messages when buffer exceeds given size (disabled when 0).");
+
 DEFINE_FLAG(charp,
             isolate_log_filter,
-            NULL,
+            nullptr,
             "Log isolates whose name include the filter. "
             "Default: service isolate log messages are suppressed "
             "(specify 'vm-service' to log them).");
 
-Log::Log(LogPrinter printer)
-    : printer_(printer), manual_flush_(0), buffer_(0) {}
+DEFINE_FLAG(charp,
+            redirect_isolate_log_to,
+            nullptr,
+            "Log isolate messages into the given file.");
 
+namespace {
+class LogFile {
+ public:
+  static const LogFile& Instance() {
+    static LogFile log_file;
+    return log_file;
+  }
+
+  static void Print(const char* data) {
+    Dart::file_write_callback()(data, strlen(data), Instance().handle_);
+  }
+
+ private:
+  LogFile()
+      : handle_(Dart::file_open_callback()(FLAG_redirect_isolate_log_to,
+                                           /*write=*/true)) {}
+
+  ~LogFile() { Dart::file_close_callback()(handle_); }
+
+  void* handle_;
+};
+}  // namespace
+
+Log::Log(LogPrinter printer) : printer_(printer), manual_flush_(0), buffer_(0) {
+  if (printer_ == nullptr) {
+    if (FLAG_redirect_isolate_log_to == nullptr) {
+      printer_ = [](const char* data) { OS::PrintErr("%s", data); };
+    } else {
+      printer_ = &LogFile::Print;
+    }
+  }
+}
 
 Log::~Log() {
   // Did someone enable manual flushing and then forgot to Flush?
   ASSERT(cursor() == 0);
 }
 
-
 Log* Log::Current() {
   Thread* thread = Thread::Current();
-  if (thread == NULL) {
+  if (thread == nullptr) {
     OSThread* os_thread = OSThread::Current();
-    ASSERT(os_thread != NULL);
+    ASSERT(os_thread != nullptr);
     return os_thread->log();
   }
-  Isolate* isolate = thread->isolate();
-  if (isolate != NULL && Log::ShouldLogForIsolate(isolate)) {
+  IsolateGroup* isolate_group = thread->isolate_group();
+  if ((isolate_group != nullptr) &&
+      Log::ShouldLogForIsolateGroup(isolate_group)) {
     OSThread* os_thread = thread->os_thread();
-    ASSERT(os_thread != NULL);
+    ASSERT(os_thread != nullptr);
     return os_thread->log();
   } else {
     return Log::NoOpLog();
   }
 }
-
 
 void Log::Print(const char* format, ...) {
   if (this == NoOpLog()) {
@@ -58,7 +101,6 @@ void Log::Print(const char* format, ...) {
   va_end(args);
 }
 
-
 void Log::VPrint(const char* format, va_list args) {
   if (this == NoOpLog()) {
     return;
@@ -67,14 +109,14 @@ void Log::VPrint(const char* format, va_list args) {
   // Measure.
   va_list measure_args;
   va_copy(measure_args, args);
-  intptr_t len = OS::VSNPrint(NULL, 0, format, measure_args);
+  intptr_t len = Utils::VSNPrint(nullptr, 0, format, measure_args);
   va_end(measure_args);
 
   // Print.
   char* buffer = reinterpret_cast<char*>(malloc(len + 1));
   va_list print_args;
   va_copy(print_args, args);
-  OS::VSNPrint(buffer, (len + 1), format, print_args);
+  Utils::VSNPrint(buffer, (len + 1), format, print_args);
   va_end(print_args);
 
   // Append.
@@ -84,11 +126,10 @@ void Log::VPrint(const char* format, va_list args) {
   }
   free(buffer);
 
-  if ((manual_flush_ == 0) || FLAG_force_log_flush) {
+  if (ShouldFlush()) {
     Flush();
   }
 }
-
 
 void Log::Flush(const intptr_t cursor) {
   if (this == NoOpLog()) {
@@ -102,11 +143,10 @@ void Log::Flush(const intptr_t cursor) {
   }
   TerminateString();
   const char* str = &buffer_[cursor];
-  ASSERT(str != NULL);
-  printer_("%s", str);
+  ASSERT(str != nullptr);
+  printer_(str);
   buffer_.TruncateTo(cursor);
 }
-
 
 void Log::Clear() {
   if (this == NoOpLog()) {
@@ -115,35 +155,31 @@ void Log::Clear() {
   buffer_.TruncateTo(0);
 }
 
-
 intptr_t Log::cursor() const {
   return buffer_.length();
 }
 
-
-bool Log::ShouldLogForIsolate(const Isolate* isolate) {
-  if (FLAG_isolate_log_filter == NULL) {
-    if (isolate->is_service_isolate()) {
-      // By default, do not log for the service isolate.
+bool Log::ShouldLogForIsolateGroup(const IsolateGroup* isolate_group) {
+  if (FLAG_isolate_log_filter == nullptr) {
+    if (IsolateGroup::IsSystemIsolateGroup(isolate_group)) {
+      // By default, do not log for the service or kernel isolates.
       return false;
     }
     return true;
   }
-  const char* name = isolate->name();
-  ASSERT(name != NULL);
-  if (strstr(name, FLAG_isolate_log_filter) == NULL) {
+  const char* name = isolate_group->source()->name;
+  ASSERT(name != nullptr);
+  if (strstr(name, FLAG_isolate_log_filter) == nullptr) {
     // Filter does not match, do not log for this isolate.
     return false;
   }
   return true;
 }
 
-
 Log Log::noop_log_;
 Log* Log::NoOpLog() {
   return &noop_log_;
 }
-
 
 void Log::TerminateString() {
   if (this == NoOpLog()) {
@@ -152,7 +188,6 @@ void Log::TerminateString() {
   buffer_.Add('\0');
 }
 
-
 void Log::EnableManualFlush() {
   if (this == NoOpLog()) {
     return;
@@ -160,8 +195,7 @@ void Log::EnableManualFlush() {
   manual_flush_++;
 }
 
-
-void Log::DisableManualFlush() {
+void Log::DisableManualFlush(const intptr_t cursor) {
   if (this == NoOpLog()) {
     return;
   }
@@ -169,19 +203,29 @@ void Log::DisableManualFlush() {
   manual_flush_--;
   ASSERT(manual_flush_ >= 0);
   if (manual_flush_ == 0) {
-    Flush();
+    Flush(cursor);
   }
 }
 
+bool Log::ShouldFlush() const {
+#ifdef DART_TARGET_OS_ANDROID
+  // Android truncates on 1023 characters, flush more eagerly.
+  // Flush on newlines, because otherwise Android inserts newlines everywhere.
+  if (*(buffer_.end() - 1) == '\n') {
+    return true;
+  }
+#endif  // DART_TARGET_OS_ANDROID
+  return ((manual_flush_ == 0) || FLAG_force_log_flush ||
+          ((FLAG_force_log_flush_at_size > 0) &&
+           (cursor() > FLAG_force_log_flush_at_size)));
+}
 
 void LogBlock::Initialize() {
   log_->EnableManualFlush();
 }
 
-
 LogBlock::~LogBlock() {
-  log_->Flush(cursor_);
-  log_->DisableManualFlush();
+  log_->DisableManualFlush(cursor_);
 }
 
 }  // namespace dart

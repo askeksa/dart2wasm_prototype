@@ -34,7 +34,30 @@ class Expectation {
 
   const Expectation(this.name, this.group);
 
+  const Expectation.fail(this.name) : group = ExpectationGroup.Fail;
+
+  /// Returns the canonical expectation representing [group]. That is, one of
+  /// the above expectations (except for `Meta` which returns `this`).
+  Expectation get canonical => fromGroup(group) ?? this;
+
   String toString() => name;
+
+  static Expectation? fromGroup(ExpectationGroup group) {
+    switch (group) {
+      case ExpectationGroup.Crash:
+        return Expectation.Crash;
+      case ExpectationGroup.Fail:
+        return Expectation.Fail;
+      case ExpectationGroup.Meta:
+        return null;
+      case ExpectationGroup.Pass:
+        return Expectation.Pass;
+      case ExpectationGroup.Skip:
+        return Expectation.Skip;
+      case ExpectationGroup.Timeout:
+        return Expectation.Timeout;
+    }
+  }
 }
 
 class ExpectationSet {
@@ -49,13 +72,14 @@ class ExpectationSet {
         const Expectation("MissingCompileTimeError", ExpectationGroup.Fail),
     "missingruntimeerror":
         const Expectation("MissingRuntimeError", ExpectationGroup.Fail),
+    "runtimeerror": const Expectation("RuntimeError", ExpectationGroup.Fail),
   });
 
   final Map<String, Expectation> internalMap;
 
   const ExpectationSet(this.internalMap);
 
-  operator [](String name) {
+  Expectation operator [](String name) {
     return internalMap[name.toLowerCase()] ??
         (throw "No expectation named: '$name'.");
   }
@@ -64,9 +88,11 @@ class ExpectationSet {
     Map<String, Expectation> internalMap =
         new Map<String, Expectation>.from(Default.internalMap);
     for (Map map in data) {
-      String name;
-      String group;
-      map.forEach((String key, String value) {
+      String? name;
+      String? group;
+      map.forEach((_key, _value) {
+        String key = _key;
+        String value = _value;
         switch (key) {
           case "name":
             name = value;
@@ -86,12 +112,12 @@ class ExpectationSet {
       if (group == null) {
         throw "No group provided in '$map'";
       }
-      Expectation expectation = new Expectation(name, groupFromString(group));
-      name = name.toLowerCase();
+      Expectation expectation = new Expectation(name!, groupFromString(group!));
+      name = name!.toLowerCase();
       if (internalMap.containsKey(name)) {
         throw "Duplicated expectation name: '$name'.";
       }
-      internalMap[name] = expectation;
+      internalMap[name!] = expectation;
     }
     return new ExpectationSet(internalMap);
   }

@@ -1,100 +1,118 @@
-// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer_cli.test.formatter;
-
-import 'package:analyzer/analyzer.dart';
-import 'package:analyzer/src/generated/engine.dart';
+import 'package:analyzer/dart/analysis/session.dart';
+import 'package:analyzer/error/error.dart';
+import 'package:analyzer/source/line_info.dart';
+import 'package:analyzer/src/dart/analysis/results.dart';
 import 'package:analyzer_cli/src/ansi.dart' as ansi;
 import 'package:analyzer_cli/src/error_formatter.dart';
+import 'package:path/path.dart' as package_path;
 import 'package:test/test.dart' hide ErrorFormatter;
-import 'package:typed_mock/typed_mock.dart';
 
 import 'mocks.dart';
 
-main() {
+void main() {
   group('reporter', () {
-    StringBuffer out;
-    AnalysisStats stats;
-    MockCommandLineOptions options;
-    ErrorFormatter reporter;
+    late StringBuffer out;
+    late AnalysisStats stats;
+    late MockCommandLineOptions options;
+    late ErrorFormatter reporter;
 
     setUp(() {
       ansi.runningTests = true;
 
-      out = new StringBuffer();
-      stats = new AnalysisStats();
+      out = StringBuffer();
+      stats = AnalysisStats();
 
-      options = new MockCommandLineOptions();
-      when(options.enableTypeChecks).thenReturn(false);
-      when(options.infosAreFatal).thenReturn(false);
-      when(options.machineFormat).thenReturn(false);
-      when(options.verbose).thenReturn(false);
-      when(options.color).thenReturn(false);
-
-      reporter = new HumanErrorFormatter(out, options, stats);
+      options = MockCommandLineOptions();
+      options.enableTypeChecks = false;
+      options.infosAreFatal = false;
+      options.jsonFormat = false;
+      options.machineFormat = false;
+      options.verbose = false;
+      options.color = false;
     });
 
     tearDown(() {
       ansi.runningTests = false;
     });
 
-    test('error', () {
-      AnalysisErrorInfo error =
-          mockError(ErrorType.SYNTACTIC_ERROR, ErrorSeverity.ERROR);
-      reporter.formatErrors([error]);
-      reporter.flush();
+    group('human', () {
+      setUp(() {
+        reporter = HumanErrorFormatter(out, options, stats);
+      });
 
-      expect(out.toString().trim(),
-          'error • MSG at /foo/bar/baz.dart:3:3 • mock_code');
+      test('error', () {
+        var error = mockResult(ErrorType.SYNTACTIC_ERROR, ErrorSeverity.ERROR);
+        reporter.formatErrors([error]);
+        reporter.flush();
+
+        expect(out.toString().trim(),
+            'error • MSG • /foo/bar/baz.dart:3:3 • mock_code');
+      });
+
+      test('hint', () {
+        var error = mockResult(ErrorType.HINT, ErrorSeverity.INFO);
+        reporter.formatErrors([error]);
+        reporter.flush();
+
+        expect(out.toString().trim(),
+            'hint • MSG • /foo/bar/baz.dart:3:3 • mock_code');
+      });
+
+      test('stats', () {
+        var error = mockResult(ErrorType.HINT, ErrorSeverity.INFO);
+        reporter.formatErrors([error]);
+        reporter.flush();
+        stats.print(out);
+        expect(
+            out.toString().trim(),
+            'hint • MSG • /foo/bar/baz.dart:3:3 • mock_code\n'
+            '1 hint found.');
+      });
     });
 
-    test('hint', () {
-      AnalysisErrorInfo error = mockError(ErrorType.HINT, ErrorSeverity.INFO);
-      reporter.formatErrors([error]);
-      reporter.flush();
+    group('json', () {
+      setUp(() {
+        reporter = JsonErrorFormatter(out, options, stats);
+      });
 
-      expect(out.toString().trim(),
-          'hint • MSG at /foo/bar/baz.dart:3:3 • mock_code');
-    });
+      test('error', () {
+        var error = mockResult(ErrorType.SYNTACTIC_ERROR, ErrorSeverity.ERROR);
+        reporter.formatErrors([error]);
+        reporter.flush();
 
-    test('stats', () {
-      AnalysisErrorInfo error = mockError(ErrorType.HINT, ErrorSeverity.INFO);
-      reporter.formatErrors([error]);
-      reporter.flush();
-      stats.print(out);
-      expect(
-          out.toString().trim(),
-          'hint • MSG at /foo/bar/baz.dart:3:3 • mock_code\n'
-          '1 hint found.');
+        expect(
+            out.toString().trim(),
+            '{"version":1,"diagnostics":[{'
+            '"code":"mock_code","severity":"ERROR","type":"SYNTACTIC_ERROR",'
+            '"location":{"file":"/foo/bar/baz.dart","range":{'
+            '"start":{"offset":20,"line":3,"column":3},'
+            '"end":{"offset":23,"line":3,"column":3}}},'
+            '"problemMessage":"MSG"}]}');
+      });
     });
   });
 }
 
-MockAnalysisErrorInfo mockError(ErrorType type, ErrorSeverity severity) {
+ErrorsResultImpl mockResult(ErrorType type, ErrorSeverity severity) {
   // ErrorInfo
-  var info = new MockAnalysisErrorInfo();
-  var error = new MockAnalysisError();
-  var lineInfo = new MockLineInfo();
-  var location = new MockLineInfo_Location();
-  when(location.columnNumber).thenReturn(3);
-  when(location.lineNumber).thenReturn(3);
-  when(lineInfo.getLocation(anyObject)).thenReturn(location);
-  when(info.lineInfo).thenReturn(lineInfo);
+  var location = CharacterLocation(3, 3);
+  var lineInfo = MockLineInfo(defaultLocation: location);
 
   // Details
-  var code = new MockErrorCode();
-  when(code.type).thenReturn(type);
-  when(code.errorSeverity).thenReturn(severity);
-  when(code.name).thenReturn('mock_code');
-  when(error.errorCode).thenReturn(code);
-  when(error.message).thenReturn('MSG');
-  when(error.offset).thenReturn(20);
-  var source = new MockSource();
-  when(source.fullName).thenReturn('/foo/bar/baz.dart');
-  when(error.source).thenReturn(source);
-  when(info.errors).thenReturn([error]);
+  var code = MockErrorCode(type, severity, 'mock_code');
+  var path = '/foo/bar/baz.dart';
+  var source = MockSource(path, package_path.toUri(path));
+  var error = MockAnalysisError(source, code, 20, 'MSG');
 
-  return info;
+  return ErrorsResultImpl(_MockAnslysisSession(), source.fullName,
+      Uri.file('/'), lineInfo, false, [error]);
+}
+
+class _MockAnslysisSession implements AnalysisSession {
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

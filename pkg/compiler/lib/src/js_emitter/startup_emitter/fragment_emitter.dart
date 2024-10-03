@@ -4,27 +4,6 @@
 
 part of dart2js.js_emitter.startup_emitter.model_emitter;
 
-/// The name of the property that stores the tear-off getter on a static
-/// function.
-///
-/// This property is only used when isolates are used.
-///
-/// When serializing static functions we transmit the
-/// name of the static function, but not the name of the function's getter. We
-/// store the getter-function on the static function itself, which allows us to
-/// find it easily.
-const String tearOffPropertyName = r'$tearOff';
-
-/// The name of the property that stores the list of fields on a constructor.
-///
-/// This property is only used when isolates are used.
-///
-/// When serializing objects we extract all fields from any given object.
-/// We extract the names of all fields from a fresh empty object. This list
-/// is cached on the constructor in this property to to avoid too many
-/// allocations.
-const String cachedClassFieldNames = r'$cachedFieldNames';
-
 /// The fast startup emitter's goal is to minimize the amount of work that the
 /// JavaScript engine has to do before it can start running user code.
 ///
@@ -54,8 +33,17 @@ const String cachedClassFieldNames = r'$cachedFieldNames';
 // JavaScript variables (like `Array`) we are free to chose whatever variable
 // names we want. Furthermore, the pretty-printer minifies local variables, thus
 // reducing their size.
-const String mainBoilerplate = '''
+const String _mainBoilerplate = '''
 (function dartProgram() {
+
+if (#startupMetrics) {
+  // Stash the metrics on the main unit IIFE.
+  // TODO(sra): When the JavaScript local renamer is more intelligent, we can
+  // simply use a local variable.
+  (dartProgram.$STARTUP_METRICS = ${ModelEmitter.startupMetricsGlobal})
+      .add("dartProgramMs");
+}
+
 // Copies the own properties from [from] to [to].
 function copyProperties(from, to) {
   var keys = Object.keys(from);
@@ -65,27 +53,44 @@ function copyProperties(from, to) {
   }
 }
 
+// Copies the own properties from [from] to [to] if not already present in [to].
+function mixinPropertiesHard(from, to) {
+  var keys = Object.keys(from);
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (!to.hasOwnProperty(key)) {
+      to[key] = from[key];
+    }
+  }
+}
+// Copies the own properties from [from] to [to] (specialized version of
+// `mixinPropertiesHard` when it is known the properties are disjoint).
+function mixinPropertiesEasy(from, to) {
+  if (#legacyJavaScript) {
+    copyProperties(from, to);
+  } else {
+    Object.assign(to, from);
+  }
+}
+
 // Only use direct proto access to construct the prototype chain (instead of
 // copying properties) on platforms where we know it works well (Chrome / d8).
 var supportsDirectProtoAccess = #directAccessTestExpression;
 
-var functionsHaveName = (function() {
-  function t() {};
-  return (typeof t.name == 'string')
-})();
-
 // Sets the name property of functions, if the JS engine doesn't set the name
 // itself.
-// As of 2015 only IE doesn't set the name.
+// As of 2018 only IE11 doesn't set the name.
 function setFunctionNamesIfNecessary(holders) {
-  if (functionsHaveName) return;
+  function t(){};
+  if (typeof t.name == "string") return;
+
   for (var i = 0; i < holders.length; i++) {
     var holder = holders[i];
     var keys = Object.keys(holder);
     for (var j = 0; j < keys.length; j++) {
       var key = keys[j];
       var f = holder[key];
-      if (typeof f == 'function') f.name = key;
+      if (typeof f == "function") f.name = key;
     }
   }
 }
@@ -95,7 +100,8 @@ function setFunctionNamesIfNecessary(holders) {
 // proto-property of the classes 'prototype' field.
 // Older IEs use `Object.create` and copy over the properties.
 function inherit(cls, sup) {
-  cls.#typeNameProperty = cls.name;  // Needed for RTI.
+  // cls.prototype.constructor carries the cached RTI. We could avoid this by
+  // using ES6 classes, but the side effects of this need to be tested.
   cls.prototype.constructor = cls;
   cls.prototype[#operatorIsPrefix + cls.name] = cls;
 
@@ -113,9 +119,21 @@ function inherit(cls, sup) {
   }
 }
 
+// Batched version of [inherit] for multiple classes from one superclass.
+function inheritMany(sup, classes) {
+  for (var i = 0; i < classes.length; i++) {
+    inherit(classes[i], sup);
+  }
+}
+
 // Mixes in the properties of [mixin] into [cls].
-function mixin(cls, mixin) {
-  copyProperties(mixin.prototype, cls.prototype);
+function mixinEasy(cls, mixin) {
+  mixinPropertiesEasy(mixin.prototype, cls.prototype);
+  cls.prototype.constructor = cls;
+}
+function mixinHard(cls, mixin) {
+  mixinPropertiesHard(mixin.prototype, cls.prototype);
+  cls.prototype.constructor = cls;
 }
 
 // Creates a lazy field.
@@ -123,7 +141,7 @@ function mixin(cls, mixin) {
 // A lazy field has a storage entry, [name], which holds the value, and a
 // getter ([getterName]) to access the field. If the field wasn't set before
 // the first access, it is initialized with the [initializer].
-function lazy(holder, name, getterName, initializer) {
+function lazyOld(holder, name, getterName, initializer) {
   var uninitializedSentinel = holder;
   holder[name] = uninitializedSentinel;
   holder[getterName] = function() {
@@ -154,6 +172,54 @@ function lazy(holder, name, getterName, initializer) {
   };
 }
 
+// Creates a lazy field that uses non-nullable initialization semantics.
+//
+// A lazy field has a storage entry, [name], which holds the value, and a
+// getter ([getterName]) to access the field. If the field wasn't set before
+// the first access, it is initialized with the [initializer].
+function lazy(holder, name, getterName, initializer) {
+  var uninitializedSentinel = holder;
+  holder[name] = uninitializedSentinel;
+  holder[getterName] = function() {
+    if (holder[name] === uninitializedSentinel) {
+      holder[name] = initializer();
+    }
+    holder[getterName] = function() { return this[name]; };
+    return holder[name];
+  };
+}
+
+// Creates a lazy final static field that uses non-nullable initialization
+// semantics.
+//
+// A lazy final field has a storage entry, [name], which holds the value, and a
+// getter ([getterName]) to access the field. The field is initialized on first
+// access with the [initializer].
+function lazyFinal(holder, name, getterName, initializer) {
+  var uninitializedSentinel = holder;
+  holder[name] = uninitializedSentinel;
+  holder[getterName] = function() {
+    if (holder[name] === uninitializedSentinel) {
+      var value = initializer();
+      if (holder[name] !== uninitializedSentinel) {
+        // Since there is no setter, the only way to get here is via bounded
+        // recursion, where `initializer` calls the lazy final getter.
+        #throwLateFieldADI(name);
+      }
+      holder[name] = value;
+    }
+    // TODO(sra): Does the value need to be stored in the holder at all?
+    // Potentially a call to the getter could be replaced with an access to
+    // holder slot if dominated by a previous call to the getter. Does the
+    // optimizer do this? If so, within a single function, the dominance
+    // relations should allow a local copy via GVN, so it is not that valuable
+    // an optimization for a `final` static variable.
+    var finalValue = holder[name];
+    holder[getterName] = function() { return finalValue; };
+    return finalValue;
+  };
+}
+
 // Given a list, marks it as constant.
 //
 // The runtime ensures that const-lists cannot be modified.
@@ -175,6 +241,12 @@ function convertToFastObject(properties) {
   return properties;
 }
 
+function convertAllToFastObject(arrayOfObjects) {
+  for (var i = 0; i < arrayOfObjects.length; ++i) {
+    convertToFastObject(arrayOfObjects[i]);
+  }
+}
+
 // This variable is used by the tearOffCode to guarantee unique functions per
 // tear-offs.
 var functionCounter = 0;
@@ -182,58 +254,78 @@ var functionCounter = 0;
 
 // Each deferred hunk comes with its own types which are added to the end
 // of the types-array.
-// The `funTypes` passed to the `installTearOff` function below is relative to
+// The `funType` passed to the `installTearOff` function below is relative to
 // the hunk the function comes from. The `typesOffset` variable encodes the
 // offset at which the new types will be added.
 var typesOffset = 0;
 
-// Adapts the stored data, so it's suitable for a tearOff call.
-//
-// Stores the tear-off getter-function in the [container]'s [getterName]
-// property.
-//
-// The [container] is either a class (that is, its prototype), or the holder for
-// static functions.
-//
-// The argument [funsOrNames] is an array of strings or functions. If it is a
-// name, then the function should be fetched from the container. The first
-// entry in that array *must* be a string.
-//
-// TODO(floitsch): Change tearOffCode to accept the data directly, or create a
-// different tearOffCode?
-function installTearOff(
-    container, getterName, isStatic, isIntercepted, requiredParameterCount,
-    optionalParameterDefaultValues, callNames, funsOrNames, funType) {
-  // A function can have several stubs (for example to fill in optional
-  // arguments). We collect these functions in the `funs` array.
-  var funs = [];
-  for (var i = 0; i < funsOrNames.length; i++) {
-    var fun = funsOrNames[i];
-    if ((typeof fun) == 'string') fun = container[fun];
-    fun.#callName = callNames[i];
-    funs.push(fun);
+/// Collect and canonicalize tear-off parameters.
+///
+/// [container] is either the `prototype` of a class constructor, or the holder
+/// for static functions.
+///
+/// [funsOrNames] is an array of strings or functions. If it is a
+/// name, then the function should be fetched from the container. The first
+/// entry in that array *must* be a string.
+// TODO(sra): It might be more readable to manually inline and simplify at the
+// two calls. It would need to be assessed as it would likely make the object
+// references polymorphic.
+function tearOffParameters(
+    container, isStatic, isIntercepted,
+    requiredParameterCount, optionalParameterDefaultValues,
+    callNames, funsOrNames, funType, applyIndex, needsDirectAccess) {
+  if (typeof funType == "number") {
+    // The [funType] can be a string type recipe or an index into the types
+    // table.  If it points into the types-table we need to update the index, in
+    // case the tear-off is part of a deferred hunk.
+    funType += typesOffset;
   }
+  return {
+    #tpContainer: container,
+    #tpIsStatic: isStatic,
+    #tpIsIntercepted: isIntercepted,
+    #tpRequiredParameterCount: requiredParameterCount,
+    #tpOptionalParamaterDefaultValues: optionalParameterDefaultValues,
+    #tpCallNames: callNames,
+    #tpFunctionsOrNames: funsOrNames,
+    #tpFunctionType: funType,
+    #tpApplyIndex: applyIndex || 0,
+    #tpNeedsDirectAccess: needsDirectAccess,
+  }
+}
 
-  // The main function to which all stubs redirect.
-  var fun = funs[0];
+/// Stores the static tear-off getter-function in the [holder]'s [getterName]
+/// property.
+function installStaticTearOff(
+    holder, getterName,
+    requiredParameterCount, optionalParameterDefaultValues,
+    callNames, funsOrNames, funType, applyIndex) {
+  // TODO(sra): Specialize for very common simple cases.
+  var parameters = tearOffParameters(
+      holder, true, false,
+      requiredParameterCount, optionalParameterDefaultValues,
+      callNames, funsOrNames, funType, applyIndex, false);
+  var getterFunction = staticTearOffGetter(parameters);
+  // TODO(sra): Returning [getterFunction] would be more versatile. We might
+  // want to store the static tearoff getter in a different holder, or in no
+  // holder if it is immediately called from the constant pool and otherwise
+  // unreferenced.
+  holder[getterName] = getterFunction;
+}
 
-  fun[#argumentCount] = requiredParameterCount;
-  fun[#defaultArgumentValues] = optionalParameterDefaultValues;
-  var reflectionInfo = funType;
-  if (typeof reflectionInfo == "number") {
-    // The reflectionInfo can either be a function, or a pointer into the types
-    // table. If it points into the types-table we need to update the index,
-    // in case the tear-off is part of a deferred hunk.
-    reflectionInfo = reflectionInfo + typesOffset;
-  }
-  var name = funsOrNames[0];
-  fun.#stubName = name;
-  var getterFunction =
-      tearOff(funs, reflectionInfo, isStatic, name, isIntercepted);
-  container[getterName] = getterFunction;
-  if (isStatic) {
-    fun.$tearOffPropertyName = getterFunction;
-  }
+/// Stores the instance tear-off getter-function in the [prototype]'s
+/// [getterName] property.
+function installInstanceTearOff(
+    prototype, getterName, isIntercepted,
+    requiredParameterCount, optionalParameterDefaultValues,
+    callNames, funsOrNames, funType, applyIndex, needsDirectAccess) {
+  isIntercepted = !!isIntercepted; // force to Boolean.
+  var parameters = tearOffParameters(
+      prototype, false, isIntercepted,
+      requiredParameterCount, optionalParameterDefaultValues,
+      callNames, funsOrNames, funType, applyIndex, !!needsDirectAccess);
+  var getterFunction = instanceTearOffGetter(isIntercepted, parameters);
+  prototype[getterName] = getterFunction;
 }
 
 // Instead of setting the interceptor tags directly we use this update
@@ -263,11 +355,12 @@ function setOrUpdateLeafTags(newTags) {
 // Updates the types embedded global.
 function updateTypes(newTypes) {
   var types = #embeddedTypes;
-  // This relies on the fact that types are added *after* the tear-offs have
-  // been installed. The tear-off function uses the types-length to figure
-  // out at which offset its types are located. If the types were added earlier
-  // the offset would be wrong.
+  var length = types.length;
+  // The tear-off function uses another 'typesOffset' value cached in
+  // [initializeDeferredHunk] so [updateTypes] can be called either before or
+  // after the tearoffs have been installed.
   types.push.apply(types, newTypes);
+  return length;
 }
 
 // Updates the given holder with the properties of the [newHolder].
@@ -277,6 +370,67 @@ function updateHolder(holder, newHolder) {
   return holder;
 }
 
+var #hunkHelpers = (function(){
+  var mkInstance = function(
+      isIntercepted, requiredParameterCount, optionalParameterDefaultValues,
+      callNames, applyIndex) {
+    return function(container, getterName, name, funType) {
+      return installInstanceTearOff(
+          container, getterName, isIntercepted,
+          requiredParameterCount, optionalParameterDefaultValues,
+          callNames, [name], funType, applyIndex,
+          /*needsDirectAccess:*/ false);
+    }
+  },
+
+  mkStatic = function(
+      requiredParameterCount, optionalParameterDefaultValues,
+      callNames, applyIndex) {
+    return function(container, getterName, name, funType) {
+      return installStaticTearOff(
+          container, getterName,
+          requiredParameterCount, optionalParameterDefaultValues,
+          callNames, [name], funType, applyIndex);
+    }
+  };
+
+  // TODO(sra): Minify properties of 'hunkHelpers'.
+  return {
+    inherit: inherit,
+    inheritMany: inheritMany,
+    mixin: mixinEasy,
+    mixinHard: mixinHard,
+    installStaticTearOff: installStaticTearOff,
+    installInstanceTearOff: installInstanceTearOff,
+
+        // Unintercepted methods.
+    _instance_0u: mkInstance(0, 0, null, [#call0selector], 0),
+    _instance_1u: mkInstance(0, 1, null, [#call1selector], 0),
+    _instance_2u: mkInstance(0, 2, null, [#call2selector], 0),
+
+        // Intercepted methods.
+    _instance_0i: mkInstance(1, 0, null, [#call0selector], 0),
+    _instance_1i: mkInstance(1, 1, null, [#call1selector], 0),
+    _instance_2i: mkInstance(1, 2, null, [#call2selector], 0),
+
+        // Static methods.
+    _static_0: mkStatic(0, null, [#call0selector], 0),
+    _static_1: mkStatic(1, null, [#call1selector], 0),
+    _static_2: mkStatic(2, null, [#call2selector], 0),
+
+    makeConstList: makeConstList,
+    lazy: lazy,
+    lazyFinal: lazyFinal,
+    lazyOld: lazyOld,
+    updateHolder: updateHolder,
+    convertToFastObject: convertToFastObject,
+    setFunctionNamesIfNecessary: setFunctionNamesIfNecessary,
+    updateTypes: updateTypes,
+    setOrUpdateInterceptorsByTag: setOrUpdateInterceptorsByTag,
+    setOrUpdateLeafTags: setOrUpdateLeafTags,
+  };
+})();
+
 // Every deferred hunk (i.e. fragment) is a function that we can invoke to
 // initialize it. At this moment it contributes its data to the main hunk.
 function initializeDeferredHunk(hunk) {
@@ -284,41 +438,7 @@ function initializeDeferredHunk(hunk) {
   typesOffset = #embeddedTypes.length;
 
   // TODO(floitsch): extend natives.
-  hunk(inherit, mixin, lazy, makeConstList, convertToFastObject, installTearOff,
-       setFunctionNamesIfNecessary, updateHolder, updateTypes,
-       setOrUpdateInterceptorsByTag, setOrUpdateLeafTags,
-       #embeddedGlobalsObject, holders, #staticState);
-}
-
-// Returns the global with the given [name].
-function getGlobalFromName(name) {
-  // TODO(floitsch): we are running through all holders. Since negative
-  // lookups are expensive we might need to improve this.
-  // Relies on the fact that all names are unique across all holders.
-  for (var i = 0; i < holders.length; i++) {
-    // The constant holder reuses the same names. Therefore we must skip it.
-    if (holders[i] == #constantHolderReference) continue;
-    // Relies on the fact that all variables are unique.
-    if (holders[i][name]) return holders[i][name];
-  }
-}
-
-if (#hasSoftDeferredClasses) {
-  // Loads the soft-deferred classes and initializes them.
-  // Updates the prototype of the given object.
-  function softDef(o) {
-    softDef = function(o) {};  // Replace ourselves.
-    #deferredGlobal[#softId](
-        holders, #embeddedGlobalsObject, #staticState, inherit, mixin,
-        installTearOff);
-    if (o != null) {
-      // TODO(29574): should we do something different for Firefox?
-      // If we recommend that the program triggers the load by itself before
-      // classes are needed, then this line should rarely be hit.
-      // Also, it is only hit at most once (per soft-deferred chunk).
-      o.__proto__ = o.constructor.prototype;
-    }
-  }
+  hunk(hunkHelpers, #embeddedGlobalsObject, holders, #staticState);
 }
 
 if (#isTrackingAllocations) {
@@ -329,7 +449,7 @@ if (#isTrackingAllocations) {
 #holders;
 
 // If the name is not set on the functions, do it now.
-setFunctionNamesIfNecessary(holders);
+hunkHelpers.setFunctionNamesIfNecessary(holders);
 
 // TODO(floitsch): we should build this object as a literal.
 var #staticStateDeclaration = {};
@@ -343,15 +463,32 @@ var #staticStateDeclaration = {};
 // Builds the inheritance structure.
 #inheritance;
 
+// Emits the embedded globals. This needs to be before constants so the embedded
+// global type resources are available for generating constants.
+#embeddedGlobalsPart1;
+
+// Adds the subtype rules for the new RTI.
+#typeRules;
+
+// Adds the variance table for the new RTI.
+#variances;
+
+// Shared strings need to be initialized before constants.
+#sharedStrings;
+
+// Shared types need to be initialized before constants.
+#sharedTypeRtis;
+
 // Instantiates all constants.
 #constants;
+
+// Adds to the embedded globals. A few globals refer to constants.
+#embeddedGlobalsPart2;
+
 // Initializes the static non-final fields (with their constant values).
 #staticNonFinalFields;
 // Creates lazy getters for statics that must run initializers on first access.
 #lazyStatics;
-
-// Emits the embedded globals.
-#embeddedGlobals;
 
 // Sets up the native support.
 // Native-support uses setOrUpdateInterceptorsByTag and setOrUpdateLeafTags.
@@ -360,14 +497,18 @@ var #staticStateDeclaration = {};
 // Sets up the js-interop support.
 #jsInteropSupport;
 
+// Ensure holders are in fast mode, now we have finished adding things.
+convertAllToFastObject(holders);
+convertToFastObject(#staticState);
+
 // Invokes main (making sure that it records the 'current-script' value).
 #invokeMain;
-})()
+})();
 ''';
 
 /// An expression that returns `true` if `__proto__` can be assigned to stitch
 /// together a prototype chain, and the performance is good.
-const String directAccessTestExpression = r'''
+const String _directAccessTestExpression = r'''
   (function () {
     var cls = function () {};
     cls.prototype = {'p': {}};
@@ -395,30 +536,33 @@ const String directAccessTestExpression = r'''
   })()
 ''';
 
+/// Soft-deferred fragments are built similarly to the main fragment.
+
 /// Deferred fragments (aka 'hunks') are built similarly to the main fragment.
 ///
 /// However, at specific moments they need to contribute their data.
 /// For example, once the holders have been created, they are included into
 /// the main holders.
-const String deferredBoilerplate = '''
-function(inherit, mixin, lazy, makeConstList, convertToFastObject,
-         installTearOff, setFunctionNamesIfNecessary, updateHolder, updateTypes,
-         setOrUpdateInterceptorsByTag, setOrUpdateLeafTags,
-         #embeddedGlobalsObject, holdersList, #staticState) {
+///
+/// This template is used for Dart 2.
+const String _deferredBoilerplate = '''
+function(hunkHelpers, #embeddedGlobalsObject, holdersList, #staticState) {
 
 // Builds the holders. They only contain the data for new holders.
-#holders;
-
-// If the name is not set on the functions, do it now.
-setFunctionNamesIfNecessary(#deferredHoldersList);
-
-// Updates the holders of the main-fragment. Uses the provided holdersList to
-// access the main holders.
+// If names are not set on functions, we do it now. Finally, updates the
+// holders of the main-fragment. Uses the provided holdersList to access the
+// main holders.
 // The local holders are replaced by the combined holders. This is necessary
 // for the inheritance setup below.
 #updateHolders;
 // Sets the prototypes of the new classes.
 #prototypes;
+// Add signature function types and compute the types offset in `init.types`.
+// These can only refer to regular classes and in Dart 2 only closures have
+// function types so the `typesOffset` has been safely computed before it's
+// referred in the signatures of the `closures` below.
+var #typesOffset = hunkHelpers.updateTypes(#types);
+#closures;
 // Sets aliases of methods (on the prototypes of classes).
 #aliases;
 // Installs the tear-offs of functions.
@@ -426,6 +570,15 @@ setFunctionNamesIfNecessary(#deferredHoldersList);
 // Builds the inheritance structure.
 #inheritance;
 
+// Adds the subtype rules for the new RTI.
+#typeRules;
+
+// Adds the variance table for the new RTI.
+#variances;
+
+#sharedStrings;
+
+#sharedTypeRtis;
 // Instantiates all constants of this deferred fragment.
 // Note that the constant-holder has been updated earlier and storing the
 // constant values in the constant-holder makes them available globally.
@@ -435,101 +588,195 @@ setFunctionNamesIfNecessary(#deferredHoldersList);
 // Creates lazy getters for statics that must run initializers on first access.
 #lazyStatics;
 
-updateTypes(#types);
-
 // Native-support uses setOrUpdateInterceptorsByTag and setOrUpdateLeafTags.
 #nativeSupport;
 }''';
 
-/// Soft-deferred fragments are built similarly to the main fragment.
+/// This class builds a JavaScript tree for a given fragment.
 ///
-/// However, they don't contribute anything to global namespace, but just
-/// initialize existing classes. For example, they update the inheritance
-/// hierarchy, and add methods the prototypes.
-const String softDeferredBoilerplate = '''
-#deferredGlobal[#softId] =
-    function(holdersList, #embeddedGlobalsObject, #staticState, inherit, mixin,
-    installTearOff) {
-
-// Installs the holders as local variables.
-#installHoldersAsLocals;
-// Sets the prototypes of the new classes.
-#prototypes;
-// Sets aliases of methods (on the prototypes of classes).
-#aliases;
-// Installs the tear-offs of functions.
-#tearOffs;
-// Builds the inheritance structure.
-#inheritance;
-}''';
-
-/**
- * This class builds a JavaScript tree for a given fragment.
- *
- * A fragment is generally written into a separate file so that it can be
- * loaded dynamically when a deferred library is loaded.
- *
- * This class is stateless and can be reused for different fragments.
- */
+/// A fragment is generally written into a separate file so that it can be
+/// loaded dynamically when a deferred library is loaded.
+///
+/// This class is stateless and can be reused for different fragments.
 class FragmentEmitter {
-  final Compiler compiler;
-  final Namer namer;
-  final JavaScriptBackend backend;
-  final ConstantEmitter constantEmitter;
-  final ModelEmitter modelEmitter;
-  final ClosedWorld _closedWorld;
+  final CompilerOptions _options;
+  final DumpInfoTask _dumpInfoTask;
+  final Namer _namer;
+  final Emitter _emitter;
+  final ConstantEmitter _constantEmitter;
+  final ModelEmitter _modelEmitter;
+  final NativeEmitter _nativeEmitter;
+  final JClosedWorld _closedWorld;
+  final CodegenWorld _codegenWorld;
+  RecipeEncoder _recipeEncoder;
+  RulesetEncoder _rulesetEncoder;
+  final DeferredHolderExpressionFinalizer _holderFinalizer;
 
-  FragmentEmitter(this.compiler, this.namer, this.backend, this.constantEmitter,
-      this.modelEmitter, this._closedWorld);
+  ClassHierarchy get _classHierarchy => _closedWorld.classHierarchy;
+  CommonElements get _commonElements => _closedWorld.commonElements;
+  DartTypes get _dartTypes => _closedWorld.dartTypes;
+  JElementEnvironment get _elementEnvironment =>
+      _closedWorld.elementEnvironment;
+  RuntimeTypesNeed get _rtiNeed => _closedWorld.rtiNeed;
 
-  InterceptorData get _interceptorData => _closedWorld.interceptorData;
+  js.Name _call0Name, _call1Name, _call2Name;
+  js.Name get call0Name =>
+      _call0Name ??= _namer.getNameForJsGetName(null, JsGetName.CALL_PREFIX0);
+  js.Name get call1Name =>
+      _call1Name ??= _namer.getNameForJsGetName(null, JsGetName.CALL_PREFIX1);
+  js.Name get call2Name =>
+      _call2Name ??= _namer.getNameForJsGetName(null, JsGetName.CALL_PREFIX2);
+  List<js.Name> _callNamesByArity;
+  List<js.Name> get callNamesByArity =>
+      _callNamesByArity ??= [call0Name, call1Name, call2Name];
 
-  js.Expression generateEmbeddedGlobalAccess(String global) =>
-      modelEmitter.generateEmbeddedGlobalAccess(global);
-
-  js.Expression generateConstantReference(ConstantValue value) =>
-      modelEmitter.generateConstantReference(value);
-
-  js.Expression classReference(Class cls) {
-    return js.js('#.#', [cls.holder.name, cls.name]);
+  FragmentEmitter(
+      this._options,
+      this._dumpInfoTask,
+      this._namer,
+      this._emitter,
+      this._constantEmitter,
+      this._modelEmitter,
+      this._nativeEmitter,
+      this._closedWorld,
+      this._codegenWorld)
+      : _holderFinalizer =
+            DeferredHolderExpressionFinalizerImpl(_closedWorld.commonElements) {
+    _recipeEncoder = RecipeEncoderImpl(
+        _closedWorld,
+        _options.disableRtiOptimization
+            ? TrivialRuntimeTypesSubstitutions(_closedWorld)
+            : RuntimeTypesImpl(_closedWorld),
+        _closedWorld.nativeData,
+        _closedWorld.commonElements);
+    _rulesetEncoder =
+        RulesetEncoder(_closedWorld.dartTypes, _emitter, _recipeEncoder);
   }
 
-  js.Statement emitMainFragment(Program program,
-      Map<DeferredFragment, _DeferredFragmentHash> deferredLoadHashes) {
+  js.Expression generateEmbeddedGlobalAccess(String global) =>
+      _emitter.generateEmbeddedGlobalAccess(global);
+
+  js.Expression generateConstantReference(ConstantValue value) =>
+      _modelEmitter.generateConstantReference(value);
+
+  js.Expression classReference(Class cls) {
+    // TODO(joshualitt): This should be generated by
+    // [DeferredHolderExpressionFinalizer].
+    return js
+        .js('#.#', [_namer.readGlobalObjectForClass(cls.element), cls.name]);
+  }
+
+  void registerEntityAst(Entity entity, js.Node code, {LibraryEntity library}) {
+    _dumpInfoTask.registerEntityAst(entity, code);
+    // TODO(sigmund): stop recoding associations twice, dump-info already
+    // has library to element dependencies to recover this data.
+    if (library != null) _dumpInfoTask.registerEntityAst(library, code);
+  }
+
+  PreFragment emitPreFragment(DeferredFragment fragment, bool estimateSize) {
+    var classPrototypes = emitPrototypes(fragment, includeClosures: false);
+    var closurePrototypes = emitPrototypes(fragment, includeClosures: true);
+    var inheritance = emitInheritance(fragment);
+    var methodAliases = emitInstanceMethodAliases(fragment);
+    var tearOffs = emitInstallTearOffs(fragment);
+    var constants = emitConstants(fragment);
+    var typeRules = emitTypeRules(fragment);
+    var variances = emitVariances(fragment);
+    var staticNonFinalFields = emitStaticNonFinalFields(fragment);
+    var lazyInitializers = emitLazilyInitializedStatics(fragment);
+    // TODO(floitsch): only call emitNativeSupport if we need native.
+    var nativeSupport = emitNativeSupport(fragment);
+    int size = 0;
+    if (estimateSize) {
+      var estimator = SizeEstimator();
+      estimator.visit(classPrototypes);
+      estimator.visit(closurePrototypes);
+      estimator.visit(inheritance);
+      estimator.visit(methodAliases);
+      estimator.visit(tearOffs);
+      estimator.visit(constants);
+      estimator.visit(typeRules);
+      estimator.visit(variances);
+      estimator.visit(staticNonFinalFields);
+      estimator.visit(lazyInitializers);
+      estimator.visit(nativeSupport);
+      size = estimator.charCount;
+    }
+    var emittedOutputUnit = EmittedOutputUnit(
+        fragment,
+        fragment.outputUnit,
+        fragment.libraries,
+        classPrototypes,
+        closurePrototypes,
+        inheritance,
+        methodAliases,
+        tearOffs,
+        constants,
+        typeRules,
+        variances,
+        staticNonFinalFields,
+        lazyInitializers,
+        nativeSupport);
+    return PreFragment(fragment.outputFileName, emittedOutputUnit, size);
+  }
+
+  js.Statement emitMainFragment(
+      Program program,
+      Map<String, List<FinalizedFragment>> fragmentsToLoad,
+      DeferredLoadingState deferredLoadingState) {
     MainFragment fragment = program.fragments.first;
 
-    Iterable<Holder> nonStaticStateHolders =
-        program.holders.where((Holder holder) => !holder.isStaticStateHolder);
-
-    String softDeferredId = "softDeferred${new Random().nextInt(0x7FFFFFFF)}";
-
-    js.Statement mainCode = js.js.statement(mainBoilerplate, {
-      'directAccessTestExpression': js.js(directAccessTestExpression),
-      'typeNameProperty': js.string(ModelEmitter.typeNameProperty),
-      'cyclicThrow': backend.emitter
-          .staticFunctionAccess(compiler.commonElements.cyclicThrowHelper),
-      'operatorIsPrefix': js.string(namer.operatorIsPrefix),
-      'tearOffCode': new js.Block(buildTearOffCode(compiler.options,
-          backend.emitter.emitter, backend.namer, compiler.commonElements)),
+    // Emit holder code.
+    var holderCode = emitHolderCode(fragment.libraries);
+    var holderDeclaration = DeferredHolderResource(
+        DeferredHolderResourceKind.mainFragment,
+        mainResourceName,
+        [fragment],
+        holderCode);
+    js.Statement mainCode = js.js.statement(_mainBoilerplate, {
+      // TODO(29455): 'hunkHelpers' displaces other names, so don't minify it.
+      'hunkHelpers': js.VariableDeclaration('hunkHelpers', allowRename: false),
+      'directAccessTestExpression': js.js(_directAccessTestExpression),
+      'cyclicThrow': _emitter
+          .staticFunctionAccess(_closedWorld.commonElements.cyclicThrowHelper),
+      'throwLateFieldADI': _emitter
+          .staticFunctionAccess(_closedWorld.commonElements.throwLateFieldADI),
+      'operatorIsPrefix': js.string(_namer.fixedNames.operatorIsPrefix),
+      'tearOffCode': js.Block(
+          buildTearOffCode(_options, _emitter, _closedWorld.commonElements)),
       'embeddedTypes': generateEmbeddedGlobalAccess(TYPES),
       'embeddedInterceptorTags':
           generateEmbeddedGlobalAccess(INTERCEPTORS_BY_TAG),
       'embeddedLeafTags': generateEmbeddedGlobalAccess(LEAF_TAGS),
       'embeddedGlobalsObject': js.js("init"),
-      'staticStateDeclaration': new js.VariableDeclaration(
-          namer.staticStateHolder,
-          allowRename: false),
-      'staticState': js.js('#', namer.staticStateHolder),
-      'constantHolderReference': buildConstantHolderReference(program),
-      'holders': emitHolders(program.holders, fragment),
-      'callName': js.string(namer.callNameField),
-      'stubName': js.string(namer.stubNameField),
-      'argumentCount': js.string(namer.requiredParameterField),
-      'defaultArgumentValues': js.string(namer.defaultValuesField),
+      'staticStateDeclaration': DeferredHolderParameter(),
+      'staticState': DeferredHolderParameter(),
+      'holders': holderDeclaration,
+      'startupMetrics': _closedWorld.backendUsage.requiresStartupMetrics,
+
+      // Tearoff parameters:
+      'tpContainer': js.string(TearOffParametersPropertyNames.container),
+      'tpIsStatic': js.string(TearOffParametersPropertyNames.isStatic),
+      'tpIsIntercepted':
+          js.string(TearOffParametersPropertyNames.isIntercepted),
+      'tpRequiredParameterCount':
+          js.string(TearOffParametersPropertyNames.requiredParameterCount),
+      'tpOptionalParamaterDefaultValues': js.string(
+          TearOffParametersPropertyNames.optionalParameterDefaultValues),
+      'tpCallNames': js.string(TearOffParametersPropertyNames.callNames),
+      'tpFunctionsOrNames':
+          js.string(TearOffParametersPropertyNames.funsOrNames),
+      'tpFunctionType': js.string(TearOffParametersPropertyNames.funType),
+      'tpApplyIndex': js.string(TearOffParametersPropertyNames.applyIndex),
+      'tpNeedsDirectAccess':
+          js.string(TearOffParametersPropertyNames.needsDirectAccess),
+
+      //'callName': js.string(_namer.fixedNames.callNameField),
+      //'stubName': js.string(_namer.stubNameField),
+      //'argumentCount': js.string(_namer.fixedNames.requiredParameterField),
+      //'defaultArgumentValues': js.string(_namer.fixedNames.defaultValuesField),
       'deferredGlobal': ModelEmitter.deferredInitializersGlobal,
-      'hasSoftDeferredClasses': program.hasSoftDeferredClasses,
-      'softId': js.string(softDeferredId),
-      'isTrackingAllocations': compiler.options.experimentalTrackAllocations,
+      'isTrackingAllocations': _options.experimentalTrackAllocations,
       'prototypes': emitPrototypes(fragment),
       'inheritance': emitInheritance(fragment),
       'aliases': emitInstanceMethodAliases(fragment),
@@ -537,158 +784,157 @@ class FragmentEmitter {
       'constants': emitConstants(fragment),
       'staticNonFinalFields': emitStaticNonFinalFields(fragment),
       'lazyStatics': emitLazilyInitializedStatics(fragment),
-      'embeddedGlobals': emitEmbeddedGlobals(program, deferredLoadHashes),
-      'nativeSupport': program.needsNativeSupport
-          ? emitNativeSupport(fragment)
-          : new js.EmptyStatement(),
-      'jsInteropSupport': backend.nativeBasicData.isJsInteropUsed
-          ? backend.jsInteropAnalysis.buildJsInteropBootstrap()
-          : new js.EmptyStatement(),
+      'embeddedGlobalsPart1': emitEmbeddedGlobalsPart1(
+          program, fragmentsToLoad, deferredLoadingState),
+      'embeddedGlobalsPart2':
+          emitEmbeddedGlobalsPart2(program, deferredLoadingState),
+      'typeRules': emitTypeRules(fragment),
+      'sharedStrings': StringReferenceResource(),
+      'variances': emitVariances(fragment),
+      'sharedTypeRtis': TypeReferenceResource(),
+      'nativeSupport': emitNativeSupport(fragment),
+      'jsInteropSupport': jsInteropAnalysis.buildJsInteropBootstrap(
+              _codegenWorld, _closedWorld.nativeData, _namer) ??
+          js.EmptyStatement(),
       'invokeMain': fragment.invokeMain,
+
+      'call0selector': js.quoteName(call0Name),
+      'call1selector': js.quoteName(call1Name),
+      'call2selector': js.quoteName(call2Name),
+
+      'legacyJavaScript': _options.features.legacyJavaScript.isEnabled,
     });
-    if (program.hasSoftDeferredClasses) {
-      return new js.Block([
-        js.js.statement(softDeferredBoilerplate, {
-          'deferredGlobal': ModelEmitter.deferredInitializersGlobal,
-          'softId': js.string(softDeferredId),
-          // TODO(floitsch): don't just reference 'init'.
-          'embeddedGlobalsObject': new js.Parameter('init'),
-          'staticState': new js.Parameter(namer.staticStateHolder),
-          'installHoldersAsLocals':
-              emitInstallHoldersAsLocals(nonStaticStateHolders),
-          'prototypes': emitPrototypes(fragment, softDeferred: true),
-          'aliases': emitInstanceMethodAliases(fragment, softDeferred: true),
-          'tearOffs': emitInstallTearOffs(fragment, softDeferred: true),
-          'inheritance': emitInheritance(fragment, softDeferred: true),
-        }),
-        mainCode
-      ]);
-    }
+    // We assume emitMainFragment will be the last piece of code we emit.
+    finalizeCode(mainResourceName, mainCode, holderCode, finalizeHolders: true);
     return mainCode;
   }
 
-  js.Statement emitInstallHoldersAsLocals(Iterable<Holder> holders) {
-    List<js.Statement> holderInits = <js.Statement>[];
-    int counter = 0;
-    for (Holder holder in holders) {
-      holderInits.add(new js.ExpressionStatement(new js.VariableInitialization(
-          new js.VariableDeclaration(holder.name, allowRename: false),
-          js.js("holdersList[#]", js.number(counter++)))));
-    }
-    return new js.Block(holderInits);
-  }
+  js.Expression emitCodeFragment(CodeFragment fragment) {
+    var holderCode = emitHolderCode(fragment.libraries);
 
-  js.Expression emitDeferredFragment(DeferredFragment fragment,
-      js.Expression deferredTypes, List<Holder> holders) {
-    List<Holder> nonStaticStateHolders = holders
-        .where((Holder holder) => !holder.isStaticStateHolder)
-        .toList(growable: false);
+    // TODO(sra): How do we tell if [deferredTypes] is empty? It is filled-in
+    // later via the program finalizers. So we should defer the decision on the
+    // emptiness of the fragment until the finalizers have run.  For now we seem
+    // to get away with the fact that type indexes are either (1) main unit or
+    // (2) local to the emitted unit, so there is no such thing as a type in a
+    // deferred unit that is referenced from another deferred unit.  If we did
+    // not emit any functions, then we probably did not use the signature types
+    // in the OutputUnit's types, leaving them unused and tree-shaken.
 
-    List<js.Statement> updateHolderAssignments = <js.Statement>[];
-    for (int i = 0; i < nonStaticStateHolders.length; i++) {
-      Holder holder = nonStaticStateHolders[i];
-      updateHolderAssignments.add(js.js.statement(
-          '#holder = updateHolder(holdersList[#index], #holder)',
-          {'index': js.number(i), 'holder': new js.VariableUse(holder.name)}));
+    if (holderCode.isEmpty && fragment.isEmpty) {
+      return null;
     }
 
-    // TODO(floitsch): don't just reference 'init'.
-    return js.js(deferredBoilerplate, {
-      'embeddedGlobalsObject': new js.Parameter('init'),
-      'staticState': new js.Parameter(namer.staticStateHolder),
-      'holders': emitHolders(holders, fragment),
-      'deferredHoldersList': new js.ArrayInitializer(nonStaticStateHolders
-          .map((holder) => js.js("#", holder.name))
-          .toList(growable: false)),
-      'updateHolders': new js.Block(updateHolderAssignments),
-      'prototypes': emitPrototypes(fragment),
-      'inheritance': emitInheritance(fragment),
-      'aliases': emitInstanceMethodAliases(fragment),
-      'tearOffs': emitInstallTearOffs(fragment),
-      'constants': emitConstants(fragment),
-      'staticNonFinalFields': emitStaticNonFinalFields(fragment),
-      'lazyStatics': emitLazilyInitializedStatics(fragment),
-      'types': deferredTypes,
-      // TODO(floitsch): only call emitNativeSupport if we need native.
-      'nativeSupport': emitNativeSupport(fragment),
+    var resourceName = fragment.canonicalOutputUnit.name;
+    var updateHolders = DeferredHolderResource(
+        DeferredHolderResourceKind.deferredFragment,
+        resourceName,
+        fragment.fragments,
+        holderCode);
+    js.Expression code = js.js(_deferredBoilerplate, {
+      // TODO(floitsch): don't just reference 'init'.
+      'embeddedGlobalsObject': js.Parameter('init'),
+      'staticState': DeferredHolderParameter(),
+      'updateHolders': updateHolders,
+      'prototypes': fragment.classPrototypes,
+      'closures': fragment.closurePrototypes,
+      'inheritance': fragment.inheritance,
+      'aliases': fragment.methodAliases,
+      'tearOffs': fragment.tearOffs,
+      'typeRules': fragment.typeRules,
+      'variances': fragment.variances,
+      'constants': fragment.constants,
+      'staticNonFinalFields': fragment.staticNonFinalFields,
+      'lazyStatics': fragment.lazyInitializers,
+      'types': fragment.deferredTypes,
+      'nativeSupport': fragment.nativeSupport,
+      'typesOffset': _namer.typesOffsetName,
+      'sharedStrings': StringReferenceResource(),
+      'sharedTypeRtis': TypeReferenceResource(),
     });
+
+    if (_options.experimentStartupFunctions) {
+      code = js.Parentheses(code);
+    }
+    finalizeCode(resourceName, code, holderCode);
+    return code;
   }
 
-  /// Emits all holders, except for the static-state holder.
-  ///
-  /// The emitted holders contain classes (only the constructors) and all
-  /// static functions.
-  js.Statement emitHolders(List<Holder> holders, Fragment fragment) {
-    // Skip the static-state holder in this function.
-    holders = holders
-        .where((Holder holder) => !holder.isStaticStateHolder)
-        .toList(growable: false);
+  /// Adds code to a finalizer.
+  void addCodeToFinalizer(void Function(js.Node) addCode, js.Node fragmentCode,
+      Map<Entity, List<js.Property>> holderCode) {
+    addCode(fragmentCode);
+    for (var properties in holderCode.values) {
+      for (var property in properties) {
+        addCode(property);
+      }
+    }
+  }
 
-    Map<Holder, Map<js.Name, js.Expression>> holderCode =
-        <Holder, Map<js.Name, js.Expression>>{};
+  /// Finalizes the code for a fragment, and optionally finalizes holders.
+  /// Finalizing holders must be the last step of the emitter.
+  void finalizeCode(String resourceName, js.Node code,
+      Map<Entity, List<js.Property>> holderCode,
+      {bool finalizeHolders = false}) {
+    StringReferenceFinalizer stringFinalizer =
+        StringReferenceFinalizerImpl(_options.enableMinification);
+    addCodeToFinalizer(stringFinalizer.addCode, code, holderCode);
+    stringFinalizer.finalize();
+    TypeReferenceFinalizer typeFinalizer = TypeReferenceFinalizerImpl(
+        _emitter, _commonElements, _recipeEncoder, _options.enableMinification);
+    addCodeToFinalizer(typeFinalizer.addCode, code, holderCode);
+    typeFinalizer.finalize();
 
-    for (Holder holder in holders) {
-      holderCode[holder] = <js.Name, js.Expression>{};
+    // DeferredHolders need to be finalized last. In addition, finalizing
+    // holders needs to be the very last thing the [FragmentEmitter] does before
+    // we actually emit code. This is to ensure all holders are registered.
+    // Note: Unlike the above finalizers, which are created and finalized
+    // per output unit, the holderFinalizer is a whole-program finalizer,
+    // which collects deferred [Node]s from each call to `finalizeCode`
+    // before begin finalized once for the last (main) unit.
+    void _addCode(js.Node code) {
+      _holderFinalizer.addCode(resourceName, code);
     }
 
-    for (Library library in fragment.libraries) {
+    addCodeToFinalizer(_addCode, code, holderCode);
+    if (finalizeHolders) {
+      _holderFinalizer.finalize();
+    }
+  }
+
+  /// Emits holder code for a list of libraries. We emit [Property]s directly
+  /// into a map keyed by [Entity] because we don't yet know anything about the
+  /// structure of the underlying holders and thus we cannot emit this code
+  /// directly into the ast.
+  Map<Entity, List<js.Property>> emitHolderCode(List<Library> libraries) {
+    Map<Entity, List<js.Property>> holderCode = {};
+    for (Library library in libraries) {
       for (StaticMethod method in library.statics) {
-        assert(!method.holder.isStaticStateHolder);
-        var staticMethod = emitStaticMethod(method);
-        if (compiler.options.dumpInfo) {
-          for (var code in staticMethod.values) {
-            compiler.dumpInfoTask.registerElementAst(method.element, code);
-            compiler.dumpInfoTask.registerElementAst(library.element, code);
+        Map<js.Name, js.Expression> propertyMap = emitStaticMethod(method);
+        propertyMap.forEach((js.Name key, js.Expression value) {
+          var property = _options.features.legacyJavaScript.isEnabled
+              ? js.Property(js.quoteName(key), value)
+              : js.MethodDefinition(js.quoteName(key), value);
+          Entity holderKey;
+          if (method is StaticStubMethod) {
+            // [StaticStubMethod]s should only be created for interceptors.
+            assert(method.library == _commonElements.interceptorsLibrary);
+            holderKey = method.library;
+          } else {
+            holderKey = method.element;
           }
-        }
-        holderCode[method.holder].addAll(staticMethod);
+          (holderCode[holderKey] ??= []).add(property);
+          registerEntityAst(method.element, property, library: library.element);
+        });
       }
       for (Class cls in library.classes) {
-        assert(!cls.holder.isStaticStateHolder);
-        var constructor = emitConstructor(cls);
-        compiler.dumpInfoTask.registerElementAst(cls.element, constructor);
-        compiler.dumpInfoTask.registerElementAst(library.element, constructor);
-        holderCode[cls.holder][cls.name] = constructor;
+        js.Expression constructor = emitConstructor(cls);
+        var property = js.Property(js.quoteName(cls.name), constructor);
+        (holderCode[cls.element] ??= []).add(property);
+        registerEntityAst(cls.element, property, library: library.element);
       }
     }
-
-    js.VariableInitialization emitHolderInitialization(Holder holder) {
-      List<js.Property> properties = <js.Property>[];
-      holderCode[holder].forEach((js.Name key, js.Expression value) {
-        properties.add(new js.Property(js.quoteName(key), value));
-      });
-
-      return new js.VariableInitialization(
-          new js.VariableDeclaration(holder.name, allowRename: false),
-          new js.ObjectInitializer(properties));
-    }
-
-    // The generated code looks like this:
-    //
-    //    {
-    //      var H = {...}, ..., G = {...};
-    //      var holders = [ H, ..., G ];
-    //    }
-
-    List<js.Statement> statements = [
-      new js.ExpressionStatement(new js.VariableDeclarationList(
-          holders.map(emitHolderInitialization).toList())),
-      js.js.statement(
-          'var holders = #',
-          new js.ArrayInitializer(holders
-              .map((holder) => new js.VariableUse(holder.name))
-              .toList(growable: false)))
-    ];
-    return new js.Block(statements);
-  }
-
-  /// Returns a reference to the constant holder, or the JS-literal `null`.
-  js.Expression buildConstantHolderReference(Program program) {
-    Holder constantHolder = program.holders.firstWhere(
-        (Holder holder) => holder.isConstantsHolder,
-        orElse: () => null);
-    if (constantHolder == null) return new js.LiteralNull();
-    return new js.VariableUse(constantHolder.name);
+    return holderCode;
   }
 
   /// Emits the given [method].
@@ -697,7 +943,7 @@ class FragmentEmitter {
   /// requires stubs. The returned map contains the original method and all
   /// the stubs it needs.
   Map<js.Name, js.Expression> emitStaticMethod(StaticMethod method) {
-    Map<js.Name, js.Expression> jsMethods = <js.Name, js.Expression>{};
+    Map<js.Name, js.Expression> jsMethods = {};
 
     // We don't need to install stub-methods. They can only be used when there
     // are tear-offs, in which case they are emitted there.
@@ -706,7 +952,7 @@ class FragmentEmitter {
         return method.needsTearOff || method.parameterStubs.isEmpty;
       }
       return true;
-    });
+    }());
     jsMethods[method.name] = method.code;
 
     return jsMethods;
@@ -724,48 +970,74 @@ class FragmentEmitter {
     }
 
     var statements = <js.Statement>[];
-    var parameters = <js.Name>[];
+    var parameters = <js.Parameter>[];
     var thisRef;
 
-    if (cls.isSoftDeferred) {
-      statements.add(js.js.statement('softDef(this)'));
-    } else if (compiler.options.experimentalTrackAllocations) {
+    if (_options.experimentalTrackAllocations) {
       String qualifiedName =
           "${cls.element.library.canonicalUri}:${cls.element.name}";
       statements.add(js.js.statement('allocations["$qualifiedName"] = true'));
     }
 
-    // If there are many references to `this`, cache it in a local.
-    if (cls.fields.length + (cls.hasRtiField ? 1 : 0) >= 4) {
-      // TODO(29455): Fix js_ast printer and minifier to avoid conflicts between
-      // js.Name and string-named variables, then use '_' in the js template
-      // text.
+    List<Field> emittedFields = cls.fields.where((f) => !f.isElided).toList();
 
-      // We pick '_' in minified mode because no field minifies to '_'. This
-      // avoids a conflict with one of the parameters which are named the same
-      // as the fields.  Unminified, a field might have the name '_', so we pick
-      // '$_', which is an impossible member name since we escape '$'s in names.
-      js.Name underscore = compiler.options.enableMinification
-          ? new StringBackedName('_')
-          : new StringBackedName(r'$_');
+    // If there are many references to `this`, cache it in a local.
+    if (emittedFields.length + (cls.hasRtiField ? 1 : 0) >= 4) {
+      // Parameters are named t0, t1, etc, so '_' will not conflict. Forcing '_'
+      // in minified mode works because no parameter or local also minifies to
+      // '_' (the minifier doesn't know '_' is available).
+      js.Name underscore = StringBackedName('_');
       statements.add(js.js.statement('var # = this;', underscore));
       thisRef = underscore;
     } else {
       thisRef = js.js('this');
     }
 
-    for (Field field in cls.fields) {
-      js.Name paramName = field.name;
-      parameters.add(paramName);
-      statements
-          .add(js.js.statement('#.# = #', [thisRef, field.name, paramName]));
+    // Chain assignments of the same value, e.g. `this.b = this.a = null`.
+    // Limit chain length so that the JavaScript parser has bounded recursion.
+    const int maxChainLength = 30;
+    js.Expression assignment = null;
+    int chainLength = 0;
+    ConstantValue previousConstant = null;
+    void flushAssignment() {
+      if (assignment != null) {
+        statements.add(js.js.statement('#;', assignment));
+        assignment = null;
+        chainLength = 0;
+        previousConstant = null;
+      }
     }
 
+    for (Field field in emittedFields) {
+      ConstantValue constant = field.initializerInAllocator;
+      if (constant != null) {
+        if (constant == previousConstant && chainLength < maxChainLength) {
+          assignment = js.js('#.# = #', [thisRef, field.name, assignment]);
+        } else {
+          flushAssignment();
+          assignment = js.js('#.# = #', [
+            thisRef,
+            field.name,
+            _constantEmitter.generate(constant),
+          ]);
+        }
+        ++chainLength;
+        previousConstant = constant;
+      } else {
+        flushAssignment();
+        js.Parameter parameter = js.Parameter('t${parameters.length}');
+        parameters.add(parameter);
+        statements.add(
+            js.js.statement('#.# = #', [thisRef, field.name, parameter.name]));
+      }
+    }
+    flushAssignment();
+
     if (cls.hasRtiField) {
-      js.Name paramName = namer.rtiFieldJsName;
-      parameters.add(paramName);
-      statements.add(js.js
-          .statement('#.# = #', [thisRef, namer.rtiFieldJsName, paramName]));
+      js.Parameter parameter = js.Parameter('t${parameters.length}');
+      parameters.add(parameter);
+      statements.add(js.js.statement(
+          '#.# = #', [thisRef, _namer.rtiFieldJsName, parameter.name]));
     }
 
     return js.js('function #(#) { # }', [name, parameters, statements]);
@@ -775,20 +1047,29 @@ class FragmentEmitter {
   ///
   /// This section updates the prototype-property of all constructors in the
   /// global holders.
-  js.Statement emitPrototypes(Fragment fragment, {softDeferred = false}) {
+  ///
+  /// If [includeClosures] is `true` only prototypes for closure classes are
+  /// generated, if [includeClosures] is `false` only prototypes for non-closure
+  /// classes are generated. Otherwise prototypes for all classes are generated.
+  js.Statement emitPrototypes(Fragment fragment, {bool includeClosures}) {
     List<js.Statement> assignments = fragment.libraries
         .expand((Library library) => library.classes)
-        .where((Class cls) => cls.isSoftDeferred == softDeferred)
-        .map((Class cls) {
+        .where((Class cls) {
+      if (includeClosures != null) {
+        if (cls.element.isClosure != includeClosures) {
+          return false;
+        }
+      }
+      return true;
+    }).map((Class cls) {
       var proto = js.js.statement(
           '#.prototype = #;', [classReference(cls), emitPrototype(cls)]);
-      ClassElement element = cls.element;
-      compiler.dumpInfoTask.registerElementAst(element, proto);
-      compiler.dumpInfoTask.registerElementAst(element.library, proto);
+      ClassEntity element = cls.element;
+      registerEntityAst(element, proto, library: element.library);
       return proto;
     }).toList(growable: false);
 
-    return new js.Block(assignments);
+    return js.Block(assignments);
   }
 
   /// Emits the prototype of the given class [cls].
@@ -804,97 +1085,72 @@ class FragmentEmitter {
     Iterable<Method> isChecks = cls.isChecks;
     Iterable<Method> callStubs = cls.callStubs;
     Iterable<Method> noSuchMethodStubs = cls.noSuchMethodStubs;
-    Iterable<Method> gettersSetters = generateGettersSetters(cls);
+    Iterable<Method> gettersSetters = cls.gettersSetters;
     Iterable<Method> allMethods = [
-      methods,
-      checkedSetters,
-      isChecks,
-      callStubs,
-      noSuchMethodStubs,
-      gettersSetters
-    ].expand((x) => x);
+      ...methods,
+      ...checkedSetters,
+      ...isChecks,
+      ...callStubs,
+      ...noSuchMethodStubs,
+      ...gettersSetters
+    ];
 
-    List<js.Property> properties = <js.Property>[];
+    List<js.Property> properties = [];
 
     if (cls.superclass == null) {
-      // TODO(sra): What is this doing? Document or remove.
-      properties
-          .add(new js.Property(js.string("constructor"), classReference(cls)));
-      properties
-          .add(new js.Property(namer.operatorIs(cls.element), js.number(1)));
+      // This is Dart `Object`. Add properties that are usually added by
+      // `inherit`.
+
+      // TODO(sra): Adding properties here appears to be redundant with the call
+      // to `inherit(P.Object, null)` in the generated code. See if we can
+      // remove that.
+
+      if (_options.features.legacyJavaScript.isEnabled) {
+        // IE11 might require us to set 'constructor' but we aren't 100% sure.
+        properties
+            .add(js.Property(js.string("constructor"), classReference(cls)));
+      }
+      properties.add(js.Property(_namer.operatorIs(cls.element), js.number(1)));
     }
 
     allMethods.forEach((Method method) {
       emitInstanceMethod(method)
           .forEach((js.Expression name, js.Expression code) {
-        var prop = new js.Property(name, code);
-        compiler.dumpInfoTask.registerElementAst(method.element, prop);
-        properties.add(prop);
+        js.Property property;
+        if (_options.features.legacyJavaScript.isEnabled) {
+          property = js.Property(name, code);
+        } else {
+          property = code is js.Fun
+              ? js.MethodDefinition(name, code)
+              : js.Property(name, code);
+        }
+        registerEntityAst(method.element, property);
+        properties.add(property);
       });
     });
 
+    // Closures have metadata that is often the same. We avoid repeated metadata
+    // by putting it on a shared superclass. It is overridden in the subclass if
+    // necessary.
+
+    int arity = cls.sharedClosureApplyMetadata;
+    if (arity != null) {
+      // This is a closure base class that has the specialized `Function.apply`
+      // metadata for functions taking exactly [arity] arguments.
+      properties.add(js.Property(js.string(_namer.fixedNames.callCatchAllName),
+          js.quoteName(callNamesByArity[arity])));
+      properties.add(js.Property(
+          js.string(_namer.fixedNames.requiredParameterField),
+          js.number(arity)));
+    }
+
     if (cls.isClosureBaseClass) {
-      // Closures extend a common base class, so we can put properties on the
-      // prototype for common values.
-
       // Most closures have no optional arguments.
-      properties.add(new js.Property(
-          js.string(namer.defaultValuesField), new js.LiteralNull()));
+      properties.add(js.Property(
+          js.string(_namer.fixedNames.defaultValuesField), js.LiteralNull()));
     }
 
-    return new js.ObjectInitializer(properties);
-  }
-
-  /// Generates a getter for the given [field].
-  Method generateGetter(Field field) {
-    assert(field.needsGetter);
-
-    String template;
-    if (field.needsInterceptedGetterOnReceiver) {
-      template = "function(receiver) { return receiver[#]; }";
-    } else if (field.needsInterceptedGetterOnThis) {
-      template = "function(receiver) { return this[#]; }";
-    } else {
-      assert(!field.needsInterceptedGetter);
-      template = "function() { return this[#]; }";
-    }
-    js.Expression fieldName = js.quoteName(field.name);
-    js.Expression code = js.js(template, fieldName);
-    js.Name getterName = namer.deriveGetterName(field.accessorName);
-    return new StubMethod(getterName, code);
-  }
-
-  /// Generates a setter for the given [field].
-  Method generateSetter(Field field) {
-    assert(field.needsUncheckedSetter);
-
-    String template;
-    if (field.needsInterceptedSetterOnReceiver) {
-      template = "function(receiver, val) { return receiver[#] = val; }";
-    } else if (field.needsInterceptedSetterOnThis) {
-      template = "function(receiver, val) { return this[#] = val; }";
-    } else {
-      assert(!field.needsInterceptedSetter);
-      template = "function(val) { return this[#] = val; }";
-    }
-
-    js.Expression fieldName = js.quoteName(field.name);
-    js.Expression code = js.js(template, fieldName);
-    js.Name setterName = namer.deriveSetterName(field.accessorName);
-    return new StubMethod(setterName, code);
-  }
-
-  /// Generates all getters and setters the given class [cls] needs.
-  Iterable<Method> generateGettersSetters(Class cls) {
-    Iterable<Method> getters = cls.fields
-        .where((Field field) => field.needsGetter)
-        .map(generateGetter);
-
-    Iterable<Method> setters = cls.fields
-        .where((Field field) => field.needsUncheckedSetter)
-        .map(generateSetter);
-
-    return [getters, setters].expand((x) => x);
+    return js.ObjectInitializer(properties);
   }
 
   /// Emits the given instance [method].
@@ -916,22 +1172,27 @@ class FragmentEmitter {
       }
 
       if (method.isClosureCallMethod && method.canBeApplied) {
-        // TODO(sra): We should also add these properties for the user-defined
-        // `call` method on classes. Function.apply is currently broken for
-        // complex cases. [forceAdd] might be true when this is fixed.
-        bool forceAdd = !method.isClosureCallMethod;
+        // The `call` method might flow to `Function.apply`, so the metadata for
+        // `Function.apply` is needed.
 
-        properties[js.string(namer.callCatchAllName)] =
-            js.quoteName(method.name);
-        properties[js.string(namer.requiredParameterField)] =
-            js.number(method.requiredParameterCount);
+        // Avoid adding the metadata if a superclass has the same metadata.
+        if (!method.inheritsApplyMetadata) {
+          js.Name applyName = method.applyIndex == 0
+              ? method.name
+              : method.parameterStubs[method.applyIndex - 1].name;
+          properties[js.string(_namer.fixedNames.callCatchAllName)] =
+              js.quoteName(applyName);
+          properties[js.string(_namer.fixedNames.requiredParameterField)] =
+              js.number(method.requiredParameterCount);
 
-        js.Expression defaultValues =
-            _encodeOptionalParameterDefaultValues(method);
-        // Default values property of `null` is stored on the common JS
-        // superclass.
-        if (defaultValues is! js.LiteralNull || forceAdd) {
-          properties[js.string(namer.defaultValuesField)] = defaultValues;
+          js.Expression defaultValues =
+              _encodeOptionalParameterDefaultValues(method);
+          // Default values property of `null` is stored on the common JS
+          // superclass.
+          if (defaultValues is! js.LiteralNull) {
+            properties[js.string(_namer.fixedNames.defaultValuesField)] =
+                defaultValues;
+          }
         }
       }
     }
@@ -943,18 +1204,19 @@ class FragmentEmitter {
   ///
   /// In this section prototype chains are updated and mixin functions are
   /// copied.
-  js.Statement emitInheritance(Fragment fragment, {bool softDeferred = false}) {
-    List<js.Statement> inheritCalls = <js.Statement>[];
-    List<js.Statement> mixinCalls = <js.Statement>[];
+  js.Statement emitInheritance(Fragment fragment) {
+    List<js.Statement> inheritCalls = [];
+    List<js.Statement> mixinCalls = [];
+    // local caches of functions to allow minifaction of function name in call.
+    LocalAliases locals = LocalAliases();
 
-    Set<Class> classesInFragment = new Set<Class>();
+    Set<Class> classesInFragment = Set();
     for (Library library in fragment.libraries) {
-      classesInFragment.addAll(library.classes
-          .where(((Class cls) => cls.isSoftDeferred == softDeferred)));
+      classesInFragment.addAll(library.classes);
     }
 
-    Map<Class, List<Class>> subclasses = <Class, List<Class>>{};
-    Set<Class> seen = new Set<Class>();
+    Map<Class, List<Class>> subclasses = {};
+    Set<Class> seen = Set();
 
     void collect(cls) {
       if (cls == null || seen.contains(cls)) return;
@@ -964,79 +1226,126 @@ class FragmentEmitter {
         collect(superclass);
       }
 
-      subclasses.putIfAbsent(superclass, () => <Class>[]).add(cls);
+      subclasses.putIfAbsent(superclass, () => []).add(cls);
 
       seen.add(cls);
     }
 
     for (Library library in fragment.libraries) {
       for (Class cls in library.classes) {
-        if (cls.isSoftDeferred != softDeferred) continue;
         collect(cls);
-
-        if (cls.isMixinApplication) {
-          MixinApplication mixin = cls;
-          mixinCalls.add(js.js.statement('mixin(#, #)',
-              [classReference(cls), classReference(mixin.mixinClass)]));
+        if (cls.mixinClass != null) {
+          js.Statement statement = js.js.statement('#(#, #)', [
+            _hasSimpleMixin(cls)
+                ? locals.find('_mixin', 'hunkHelpers.mixin')
+                : locals.find('_mixinHard', 'hunkHelpers.mixinHard'),
+            classReference(cls),
+            classReference(cls.mixinClass),
+          ]);
+          registerEntityAst(cls.element, statement, library: library.element);
+          mixinCalls.add(statement);
         }
       }
     }
 
-    js.Expression temp = null;
     for (Class superclass in subclasses.keys) {
       List<Class> list = subclasses[superclass];
-      js.Expression superclassReference = (superclass == null)
-          ? new js.LiteralNull()
-          : classReference(superclass);
+      js.Expression superclassReference =
+          (superclass == null) ? js.LiteralNull() : classReference(superclass);
       if (list.length == 1) {
-        inheritCalls.add(js.js.statement('inherit(#, #)',
-            [classReference(list.single), superclassReference]));
+        Class cls = list.single;
+        var statement = js.js.statement('#(#, #)', [
+          locals.find('_inherit', 'hunkHelpers.inherit'),
+          classReference(cls),
+          superclassReference
+        ]);
+        registerEntityAst(cls.element, statement, library: cls.element.library);
+        inheritCalls.add(statement);
       } else {
-        // Hold common superclass in temporary for sequence of calls.
-        if (temp == null) {
-          String tempName = '_';
-          temp = new js.VariableUse(tempName);
-          var declaration = new js.VariableDeclaration(tempName);
-          inheritCalls.add(
-              js.js.statement('var # = #', [declaration, superclassReference]));
-        } else {
-          inheritCalls
-              .add(js.js.statement('# = #', [temp, superclassReference]));
-        }
+        List<js.Expression> listElements = [];
+        // Since inheritMany shares the superclass reference, we attribute it
+        // only to the first subclass.
+        ClassEntity firstClass = list.first.element;
+        registerEntityAst(firstClass, superclassReference,
+            library: firstClass.library);
         for (Class cls in list) {
-          inheritCalls.add(
-              js.js.statement('inherit(#, #)', [classReference(cls), temp]));
+          js.Expression reference = classReference(cls);
+          registerEntityAst(cls.element, reference,
+              library: cls.element.library);
+          listElements.add(reference);
         }
+        inheritCalls.add(js.js.statement('#(#, #)', [
+          locals.find('_inheritMany', 'hunkHelpers.inheritMany'),
+          superclassReference,
+          js.ArrayInitializer(listElements)
+        ]));
       }
     }
 
-    return wrapPhase('inheritance', inheritCalls.toList()..addAll(mixinCalls));
+    List<js.Statement> statements = [];
+    if (locals.isNotEmpty) {
+      statements.add(locals.toStatement());
+    }
+    statements.addAll(inheritCalls);
+    statements.addAll(mixinCalls);
+    return wrapPhase('inheritance', statements);
+  }
+
+  /// Determines if the mixin methods can be applied to a mixin application
+  /// class by a simple copy, or whether the class defines properties that would
+  /// be clobbered by block-copying the mixin's properties, so a slower checking
+  /// copy is needed.
+  bool _hasSimpleMixin(Class cls) {
+    List<Method> allMethods(Class cls) {
+      return [
+        ...cls.methods,
+        ...cls.checkedSetters,
+        ...cls.isChecks,
+        ...cls.callStubs,
+        ...cls.noSuchMethodStubs,
+        ...cls.gettersSetters
+      ];
+    }
+
+    final clsMethods = allMethods(cls);
+    if (clsMethods.isEmpty) return true;
+    // TODO(sra): Compare methods with those of `cls.mixinClass` to see if the
+    // methods (and hence properties) will actually clash. If they are
+    // non-overlapping, a simple copy might still be possible.
+    return false;
   }
 
   /// Emits the setup of method aliases.
   ///
   /// This step consists of simply copying JavaScript functions to their
   /// aliased names so they point to the same function.
-  js.Statement emitInstanceMethodAliases(Fragment fragment,
-      {bool softDeferred = false}) {
-    List<js.Statement> assignments = <js.Statement>[];
+  js.Statement emitInstanceMethodAliases(Fragment fragment) {
+    List<js.Statement> assignments = [];
 
     for (Library library in fragment.libraries) {
       for (Class cls in library.classes) {
-        if (cls.isSoftDeferred != softDeferred) continue;
+        bool firstAlias = true;
         for (InstanceMethod method in cls.methods) {
           if (method.aliasName != null) {
-            assignments.add(js.js.statement('#.prototype.# = #.prototype.#', [
-              classReference(cls),
-              js.quoteName(method.aliasName),
-              classReference(cls),
-              js.quoteName(method.name)
-            ]));
+            if (firstAlias) {
+              firstAlias = false;
+              js.Statement statement = js.js.statement(
+                  assignments.isEmpty
+                      ? 'var _ = #.prototype;'
+                      : '_ = #.prototype',
+                  classReference(cls));
+              registerEntityAst(method.element, statement);
+              assignments.add(statement);
+            }
+            js.Statement statement = js.js.statement('_.# = _.#',
+                [js.quoteName(method.aliasName), js.quoteName(method.name)]);
+            registerEntityAst(method.element, statement);
+            assignments.add(statement);
           }
         }
       }
     }
-    return new js.Block(assignments);
+    return wrapPhase('aliases', assignments);
   }
 
   /// Encodes the optional default values so that the runtime Function.apply
@@ -1046,16 +1355,16 @@ class FragmentEmitter {
     if (method.optionalParameterDefaultValues is List) {
       List<ConstantValue> defaultValues = method.optionalParameterDefaultValues;
       if (defaultValues.isEmpty) {
-        return new js.LiteralNull();
+        return js.LiteralNull();
       }
       Iterable<js.Expression> elements =
           defaultValues.map(generateConstantReference);
-      return js.js('function() { return #; }',
-          new js.ArrayInitializer(elements.toList()));
+      return js.js(
+          'function() { return #; }', js.ArrayInitializer(elements.toList()));
     } else {
       Map<String, ConstantValue> defaultValues =
           method.optionalParameterDefaultValues;
-      List<js.Property> properties = <js.Property>[];
+      List<js.Property> properties = [];
       List<String> names = defaultValues.keys.toList(growable: false);
       // Sort the names the same way we sort them for the named-argument calling
       // convention.
@@ -1064,95 +1373,181 @@ class FragmentEmitter {
       for (String name in names) {
         ConstantValue value = defaultValues[name];
         properties.add(
-            new js.Property(js.string(name), generateConstantReference(value)));
+            js.Property(js.string(name), generateConstantReference(value)));
       }
       return js.js(
-          'function() { return #; }', new js.ObjectInitializer(properties));
+          'function() { return #; }', js.ObjectInitializer(properties));
     }
-  }
-
-  /// Emits the statement that installs a tear off for a method.
-  ///
-  /// Tear-offs might be passed to `Function.apply` which means that all
-  /// calling-conventions (with or without optional positional/named arguments)
-  /// are possible. As such, the tear-off needs enough information to fill in
-  /// missing parameters.
-  js.Statement emitInstallTearOff(js.Expression container, DartMethod method) {
-    List<js.Name> callNames = <js.Name>[];
-    List<js.Expression> funsOrNames = <js.Expression>[];
-
-    /// Adds the stub-method's code or name to the [funsOrNames] array.
-    ///
-    /// Static methods don't need stub-methods except for tear-offs. As such,
-    /// they are not emitted in the prototype, but directly passed here.
-    ///
-    /// Instance-methods install the stub-methods in their prototype, and we
-    /// use string-based redirections to find them there.
-    void addFunOrName(StubMethod stubMethod) {
-      if (method.isStatic) {
-        funsOrNames.add(stubMethod.code);
-      } else {
-        funsOrNames.add(js.quoteName(stubMethod.name));
-      }
-    }
-
-    callNames.add(method.callName);
-    // The first entry in the funsOrNames-array must be a string.
-    funsOrNames.add(js.quoteName(method.name));
-    for (ParameterStubMethod stubMethod in method.parameterStubs) {
-      callNames.add(stubMethod.callName);
-      addFunOrName(stubMethod);
-    }
-
-    js.ArrayInitializer callNameArray =
-        new js.ArrayInitializer(callNames.map(js.quoteName).toList());
-    js.ArrayInitializer funsOrNamesArray = new js.ArrayInitializer(funsOrNames);
-
-    bool isIntercepted = false;
-    if (method is InstanceMethod) {
-      MethodElement element = method.element;
-      isIntercepted = _interceptorData.isInterceptedMethod(element);
-    }
-    int requiredParameterCount = 0;
-    js.Expression optionalParameterDefaultValues = new js.LiteralNull();
-    if (method.canBeApplied) {
-      requiredParameterCount = method.requiredParameterCount;
-      optionalParameterDefaultValues =
-          _encodeOptionalParameterDefaultValues(method);
-    }
-
-    return js.js.statement(
-        '''
-        installTearOff(#container, #getterName, #isStatic, #isIntercepted,
-                       #requiredParameterCount, #optionalParameterDefaultValues,
-                       #callNames, #funsOrNames, #funType)''',
-        {
-          "container": container,
-          "getterName": js.quoteName(method.tearOffName),
-          // 'Truthy' values are ok for `isStatic` and `isIntercepted`.
-          "isStatic": js.number(method.isStatic ? 1 : 0),
-          "isIntercepted": js.number(isIntercepted ? 1 : 0),
-          "requiredParameterCount": js.number(requiredParameterCount),
-          "optionalParameterDefaultValues": optionalParameterDefaultValues,
-          "callNames": callNameArray,
-          "funsOrNames": funsOrNamesArray,
-          "funType": method.functionType,
-        });
   }
 
   /// Wraps the statement in a named function to that it shows up as a unit in
   /// profiles.
   // TODO(sra): Should this be conditional?
   js.Statement wrapPhase(String name, List<js.Statement> statements) {
-    js.Block block = new js.Block(statements);
+    js.Block block = js.Block(statements);
     if (statements.isEmpty) return block;
     return js.js.statement('(function #(){#})();', [name, block]);
   }
 
   /// Emits the section that installs tear-off getters.
-  js.Statement emitInstallTearOffs(Fragment fragment,
-      {bool softDeferred = false}) {
-    List<js.Statement> inits = <js.Statement>[];
+  js.Statement emitInstallTearOffs(Fragment fragment) {
+    LocalAliases locals = LocalAliases();
+
+    /// Emits the statement that installs a tear off for a method.
+    ///
+    /// Tear-offs might be passed to `Function.apply` which means that all
+    /// calling-conventions (with or without optional positional/named
+    /// arguments) are possible. As such, the tear-off needs enough information
+    /// to fill in missing parameters.
+    js.Statement emitInstallTearOff(
+        js.Expression container, DartMethod method) {
+      List<js.Name> callNames = [];
+      List<js.Expression> funsOrNames = [];
+
+      /// Adds the stub-method's code or name to the [funsOrNames] array.
+      ///
+      /// Static methods don't need stub-methods except for tear-offs. As such,
+      /// they are not emitted in the prototype, but directly passed here.
+      ///
+      /// Instance-methods install the stub-methods in their prototype, and we
+      /// use string-based redirections to find them there.
+      void addFunOrName(StubMethod stubMethod) {
+        if (method.isStatic) {
+          funsOrNames.add(stubMethod.code);
+        } else {
+          funsOrNames.add(js.quoteName(stubMethod.name));
+        }
+      }
+
+      callNames.add(method.callName);
+      // The first entry in the funsOrNames-array must be a string.
+      funsOrNames.add(js.quoteName(method.name));
+      for (ParameterStubMethod stubMethod in method.parameterStubs) {
+        js.Name callName = stubMethod.callName;
+        // `callName` might be `null` if the method is called directly with some
+        // CallStructure but it can be proven that the tearoff not called with
+        // with that CallStructure, e.g. the closure does no need the defaulting
+        // of arguments but some direct call does.
+        if (callName != null) {
+          callNames.add(callName);
+          addFunOrName(stubMethod);
+        }
+      }
+
+      final callNameArray =
+          js.ArrayInitializer([...callNames.map(js.quoteName)]);
+      final funsOrNamesArray = js.ArrayInitializer(funsOrNames);
+
+      bool isIntercepted = false;
+      if (method is InstanceMethod) {
+        isIntercepted = method.isIntercepted;
+      }
+
+      int requiredParameterCount = method.requiredParameterCount;
+      js.Expression optionalParameterDefaultValues = js.LiteralNull();
+      if (method.canBeApplied) {
+        optionalParameterDefaultValues =
+            _encodeOptionalParameterDefaultValues(method);
+      }
+
+      var applyIndex = js.number(method.applyIndex);
+
+      if (method.isStatic) {
+        if (requiredParameterCount <= 2 &&
+            callNames.length == 1 &&
+            optionalParameterDefaultValues is js.LiteralNull &&
+            method.applyIndex == 0) {
+          js.Statement finish(int arity) {
+            // Short form for exactly 0/1/2 arguments.
+            var install =
+                locals.find('_static_${arity}', 'hunkHelpers._static_${arity}');
+            return js.js.statement('''
+                #install(#container, #getterName, #name, #funType)''', {
+              "install": install,
+              "container": container,
+              "getterName": js.quoteName(method.tearOffName),
+              "name": funsOrNames.single,
+              "funType": method.functionType,
+            });
+          }
+
+          var installedName = callNames.single;
+          if (installedName == call0Name) return finish(0);
+          if (installedName == call1Name) return finish(1);
+          if (installedName == call2Name) return finish(2);
+        }
+
+        var install =
+            locals.find('_static', 'hunkHelpers.installStaticTearOff');
+        return js.js.statement('''
+            #install(#container, #getterName,
+                     #requiredParameterCount, #optionalParameterDefaultValues,
+                      #callNames, #funsOrNames, #funType, #applyIndex)''', {
+          "install": install,
+          "container": container,
+          "getterName": js.quoteName(method.tearOffName),
+          "requiredParameterCount": js.number(requiredParameterCount),
+          "optionalParameterDefaultValues": optionalParameterDefaultValues,
+          "callNames": callNameArray,
+          "funsOrNames": funsOrNamesArray,
+          "funType": method.functionType,
+          "applyIndex": applyIndex,
+        });
+      } else {
+        bool tearOffNeedsDirectAccess =
+            (method as InstanceMethod).tearOffNeedsDirectAccess;
+        if (requiredParameterCount <= 2 &&
+            callNames.length == 1 &&
+            optionalParameterDefaultValues is js.LiteralNull &&
+            method.applyIndex == 0 &&
+            !tearOffNeedsDirectAccess) {
+          js.Statement finish(int arity) {
+            // Short form for exactly 0/1/2 arguments.
+            String isInterceptedTag = isIntercepted ? 'i' : 'u';
+            var install = locals.find('_instance_${arity}_${isInterceptedTag}',
+                'hunkHelpers._instance_${arity}${isInterceptedTag}');
+            return js.js.statement('''
+                #install(#container, #getterName, #name, #funType)''', {
+              "install": install,
+              "container": container,
+              "getterName": js.quoteName(method.tearOffName),
+              "name": funsOrNames.single,
+              "funType": method.functionType,
+            });
+          }
+
+          var installedName = callNames.single;
+          if (installedName == call0Name) return finish(0);
+          if (installedName == call1Name) return finish(1);
+          if (installedName == call2Name) return finish(2);
+        }
+
+        var install =
+            locals.find('_instance', 'hunkHelpers.installInstanceTearOff');
+        return js.js.statement('''
+            #install(#container, #getterName, #isIntercepted,
+                     #requiredParameterCount, #optionalParameterDefaultValues,
+                     #callNames, #funsOrNames, #funType, #applyIndex,
+                     #tearOffNeedsDirectAccess)''', {
+          "install": install,
+          "container": container,
+          "getterName": js.quoteName(method.tearOffName),
+          // 'Truthy' values are ok for `isIntercepted`.
+          "isIntercepted": js.number(isIntercepted ? 1 : 0),
+          "requiredParameterCount": js.number(requiredParameterCount),
+          "optionalParameterDefaultValues": optionalParameterDefaultValues,
+          "callNames": callNameArray,
+          "funsOrNames": funsOrNamesArray,
+          "funType": method.functionType,
+          "applyIndex": applyIndex,
+          // 'Truthy' values are ok for `tearOffNeedsDirectAccess`.
+          "tearOffNeedsDirectAccess":
+              js.number(tearOffNeedsDirectAccess ? 1 : 0),
+        });
+      }
+    }
+
+    List<js.Statement> inits = [];
     js.Expression temp;
 
     for (Library library in fragment.libraries) {
@@ -1160,15 +1555,16 @@ class FragmentEmitter {
         // TODO(floitsch): can there be anything else than a StaticDartMethod?
         if (method is StaticDartMethod) {
           if (method.needsTearOff) {
-            Holder holder = method.holder;
-            inits.add(
-                emitInstallTearOff(new js.VariableUse(holder.name), method));
+            js.Statement statement = emitInstallTearOff(
+                _namer.readGlobalObjectForMember(method.element), method);
+            registerEntityAst(method.element, statement,
+                library: library.element);
+            inits.add(statement);
           }
         }
       }
       for (Class cls in library.classes) {
-        if (cls.isSoftDeferred != softDeferred) continue;
-        var methods = cls.methods.where((m) => m.needsTearOff).toList();
+        var methods = cls.methods.where((dynamic m) => m.needsTearOff).toList();
         js.Expression container = js.js("#.prototype", classReference(cls));
         js.Expression reference = container;
         if (methods.length > 1) {
@@ -1180,29 +1576,40 @@ class FragmentEmitter {
           reference = js.js('# = #', [temp, container]);
         }
         for (InstanceMethod method in methods) {
-          inits.add(emitInstallTearOff(reference, method));
+          js.Statement statement = emitInstallTearOff(reference, method);
+          registerEntityAst(method.element, statement);
+          inits.add(statement);
           reference = temp; // Second and subsequent calls use temp.
         }
       }
     }
+
+    if (locals.isNotEmpty) {
+      inits.insert(0, locals.toStatement());
+    }
+
     return wrapPhase('installTearOffs', inits);
   }
 
   /// Emits the constants section.
   js.Statement emitConstants(Fragment fragment) {
-    List<js.Statement> assignments = <js.Statement>[];
+    List<js.Statement> assignments = [];
+    bool hasList = false;
     for (Constant constant in fragment.constants) {
-      // TODO(floitsch): instead of just updating the constant holder, we should
-      // find the constants that don't have any dependency on other constants
-      // and create an object-literal with them (and assign it to the
-      // constant-holder variable).
+      // TODO(25230): We only need to name constants that are used from function
+      // bodies or from other constants in a different part.
       var assignment = js.js.statement('#.# = #', [
-        constant.holder.name,
+        _namer.globalObjectForConstant(constant.value),
         constant.name,
-        constantEmitter.generate(constant.value)
+        _constantEmitter.generate(constant.value)
       ]);
-      compiler.dumpInfoTask.registerConstantAst(constant.value, assignment);
+      _dumpInfoTask.registerConstantAst(constant.value, assignment);
       assignments.add(assignment);
+      if (constant.value.isList) hasList = true;
+    }
+    if (hasList) {
+      assignments.insert(
+          0, js.js.statement('var makeConstList = hunkHelpers.makeConstList;'));
     }
     return wrapPhase('constants', assignments);
   }
@@ -1213,15 +1620,55 @@ class FragmentEmitter {
   /// an initializer.
   js.Statement emitStaticNonFinalFields(Fragment fragment) {
     List<StaticField> fields = fragment.staticNonFinalFields;
-    // TODO(floitsch): instead of assigning the fields one-by-one we should
-    // create a literal and assign it to the static-state holder.
-    // TODO(floitsch): if we don't make a literal we should at least initialize
-    // statics that have the same initial value in the same expression:
-    //    `$.x = $.y = $.z = null;`.
+    // TODO(sra): Chain assignments that have the same value, i.e.
+    //
+    //    $.x = null; $.y = null; $.z = null;
+    // -->
+    //    $.z = $.y = $.x = null;
+    //
     Iterable<js.Statement> statements = fields.map((StaticField field) {
-      assert(field.holder.isStaticStateHolder);
-      return js.js
-          .statement("#.# = #;", [field.holder.name, field.name, field.code]);
+      // TODO(joshualitt): Distribute fields into per-unit holders and use a
+      // deferred holder expression for the field assignment left-hand-side.
+      js.Expression location =
+          js.js('#.#', [_namer.globalObjectForStaticState(), field.name]);
+      js.Statement statement;
+      if (field.isInitializedByConstant) {
+        statement = js.js.statement("# = #;", [location, field.code]);
+      } else {
+        // This is a bit of a hack. Field initializers are generated as a
+        // function ending with a return statement. We replace the function
+        // with the body block and replace the return statement with an
+        // assignment to the field.
+        //
+        // Since unneeded blocks are not generated in the output,
+        // the statement(s) of the initializes are inlined in the emitted code.
+        //
+        // This is a cheap way of supporting eager fields (as opposed to
+        // generating one SSA graph for all eager fields) though it does not
+        // avoid redundant declaration of local variable, for instance for
+        // type arguments.
+        js.Fun code = field.code;
+        assert(code != null, "No code for $field");
+        if (code.params.isEmpty &&
+            code.body.statements.length == 1 &&
+            code.body.statements.last is js.Return) {
+          // For now we only support initializers of the form
+          //
+          //   function() { return e; }
+          //
+          // To avoid unforeseen consequences of having parameters and locals
+          // in the initializer code.
+          js.Return last = code.body.statements.last;
+          statement = js.js.statement("# = #;", [location, last.value]);
+        } else {
+          // Safe fallback in the event of a field initializer with no return
+          // statement as the last statement.
+          statement = js.js.statement("# = #();", [location, code]);
+        }
+      }
+      registerEntityAst(field.element, statement,
+          library: field.element.library);
+      return statement;
     });
     return wrapPhase('staticFields', statements.toList());
   }
@@ -1232,17 +1679,40 @@ class FragmentEmitter {
   /// require an initializer.
   js.Statement emitLazilyInitializedStatics(Fragment fragment) {
     List<StaticField> fields = fragment.staticLazilyInitializedFields;
-    Iterable<js.Statement> statements = fields.map((StaticField field) {
-      assert(field.holder.isStaticStateHolder);
-      return js.js.statement("lazy(#, #, #, #);", [
-        field.holder.name,
+    List<js.Statement> statements = [];
+    LocalAliases locals = LocalAliases();
+    for (StaticField field in fields) {
+      String helper = field.usesNonNullableInitialization
+          ? field.isFinal
+              ? locals.find('_lazyFinal', 'hunkHelpers.lazyFinal')
+              : locals.find('_lazy', 'hunkHelpers.lazy')
+          : locals.find('_lazyOld', 'hunkHelpers.lazyOld');
+      js.Expression staticFieldCode = field.code;
+      if (!_options.features.legacyJavaScript.isEnabled &&
+          staticFieldCode is js.Fun) {
+        js.Fun fun = staticFieldCode;
+        staticFieldCode = js.ArrowFunction(fun.params, fun.body,
+                asyncModifier: fun.asyncModifier)
+            .withSourceInformation(fun.sourceInformation);
+      }
+      js.Statement statement = js.js.statement("#(#, #, #, #);", [
+        helper,
+        _namer.globalObjectForStaticState(),
         js.quoteName(field.name),
-        js.quoteName(namer.deriveLazyInitializerName(field.name)),
-        field.code
+        js.quoteName(field.getterName),
+        staticFieldCode,
       ]);
-    });
 
-    return wrapPhase('lazyInitializers', statements.toList());
+      registerEntityAst(field.element, statement,
+          library: field.element.library);
+      statements.add(statement);
+    }
+
+    if (locals.isNotEmpty) {
+      statements.insert(0, locals.toStatement());
+    }
+
+    return wrapPhase('lazyInitializers', statements);
   }
 
   /// Emits the embedded globals that are needed for deferred loading.
@@ -1253,71 +1723,100 @@ class FragmentEmitter {
   /// to the list of generated fragments that must be installed when the
   /// deferred library is loaded.
   Iterable<js.Property> emitEmbeddedGlobalsForDeferredLoading(
-      Map<String, List<Fragment>> loadMap,
-      Map<DeferredFragment, _DeferredFragmentHash> deferredLoadHashes) {
-    if (loadMap.isEmpty) return [];
+      DeferredLoadingState deferredLoadingState) {
+    List<js.Property> globals = [];
 
-    List<js.Property> globals = <js.Property>[];
-
-    js.ArrayInitializer fragmentUris(List<Fragment> fragments) {
-      return js.stringArray(fragments.map((DeferredFragment fragment) =>
-          "${fragment.outputFileName}.${ModelEmitter.deferredExtension}"));
-    }
-
-    js.ArrayInitializer fragmentHashes(List<Fragment> fragments) {
-      return new js.ArrayInitializer(fragments
-          .map((fragment) => deferredLoadHashes[fragment])
-          .toList(growable: false));
-    }
-
-    List<js.Property> uris = new List<js.Property>(loadMap.length);
-    List<js.Property> hashes = new List<js.Property>(loadMap.length);
-    int count = 0;
-    loadMap.forEach((String loadId, List<Fragment> fragmentList) {
-      uris[count] =
-          new js.Property(js.string(loadId), fragmentUris(fragmentList));
-      hashes[count] =
-          new js.Property(js.string(loadId), fragmentHashes(fragmentList));
-      count++;
-    });
-
-    globals.add(new js.Property(
-        js.string(DEFERRED_LIBRARY_URIS), new js.ObjectInitializer(uris)));
-    globals.add(new js.Property(
-        js.string(DEFERRED_LIBRARY_HASHES), new js.ObjectInitializer(hashes)));
-    globals.add(new js.Property(
+    globals.add(js.Property(
         js.string(DEFERRED_INITIALIZED), js.js("Object.create(null)")));
 
     String deferredGlobal = ModelEmitter.deferredInitializersGlobal;
     js.Expression isHunkLoadedFunction =
         js.js("function(hash) { return !!$deferredGlobal[hash]; }");
-    globals
-        .add(new js.Property(js.string(IS_HUNK_LOADED), isHunkLoadedFunction));
+    globals.add(js.Property(js.string(IS_HUNK_LOADED), isHunkLoadedFunction));
 
     js.Expression isHunkInitializedFunction = js.js(
         "function(hash) { return !!#deferredInitialized[hash]; }", {
       'deferredInitialized': generateEmbeddedGlobalAccess(DEFERRED_INITIALIZED)
     });
-    globals.add(new js.Property(
-        js.string(IS_HUNK_INITIALIZED), isHunkInitializedFunction));
+    globals.add(
+        js.Property(js.string(IS_HUNK_INITIALIZED), isHunkInitializedFunction));
 
-    /// See [emitEmbeddedGlobalsForDeferredLoading] for the format of the
-    /// deferred hunk.
-    js.Expression initializeLoadedHunkFunction = js.js(
-        """
+    /// See [finalizeDeferredLoadingData] for the format of the deferred hunk.
+    js.Expression initializeLoadedHunkFunction = js.js("""
             function(hash) {
-              initializeDeferredHunk($deferredGlobal[hash]);
+              var hunk = $deferredGlobal[hash];
+              if (hunk == null) {
+                throw "DeferredLoading state error: code with hash '" +
+                    hash + "' was not loaded";
+              }
+              initializeDeferredHunk(hunk);
               #deferredInitialized[hash] = true;
-            }""",
-        {
-          'deferredInitialized':
-              generateEmbeddedGlobalAccess(DEFERRED_INITIALIZED)
-        });
+            }""", {
+      'deferredInitialized': generateEmbeddedGlobalAccess(DEFERRED_INITIALIZED)
+    });
 
-    globals.add(new js.Property(
+    globals.add(js.Property(
         js.string(INITIALIZE_LOADED_HUNK), initializeLoadedHunkFunction));
 
+    globals.add(js.Property(js.string(DEFERRED_LIBRARY_PARTS),
+        deferredLoadingState.deferredLibraryParts));
+    globals.add(js.Property(
+        js.string(DEFERRED_PART_URIS), deferredLoadingState.deferredPartUris));
+    globals.add(js.Property(js.string(DEFERRED_PART_HASHES),
+        deferredLoadingState.deferredPartHashes));
+
     return globals;
+  }
+
+  // Create data used for loading and initializing the hunks for a deferred
+  // import. There are three parts: a map from loadId to list of parts, where
+  // parts are represented as an index; an array of uris indexed by part; and an
+  // array of hashes indexed by part.
+  // [deferredLoadHashes] may have missing entries to indicate empty parts.
+  void finalizeDeferredLoadingData(
+      Map<String, List<CodeFragment>> codeFragmentsToLoad,
+      Map<CodeFragment, FinalizedFragment> codeFragmentMap,
+      Map<CodeFragment, String> deferredLoadHashes,
+      DeferredLoadingState deferredLoadingState) {
+    if (codeFragmentsToLoad.isEmpty) return;
+
+    // We store a map of indices to uris and hashes. Because multiple
+    // [CodeFragments] can map to a single file, a uri may appear multiple times
+    // in [fragmentUris] once per [CodeFragment] reference in that file.
+    // TODO(joshualitt): Use a string table to avoid duplicating part file
+    // names.
+    Map<CodeFragment, int> fragmentIndexes = {};
+    List<String> fragmentUris = [];
+    List<String> fragmentHashes = [];
+
+    List<js.Property> libraryPartsMapEntries = [];
+
+    codeFragmentsToLoad
+        .forEach((String loadId, List<CodeFragment> codeFragments) {
+      List<js.Expression> indexes = [];
+      for (var codeFragment in codeFragments) {
+        var fragment = codeFragmentMap[codeFragment];
+        String codeFragmentHash = deferredLoadHashes[codeFragment];
+        if (codeFragmentHash == null) continue;
+        int index = fragmentIndexes[codeFragment];
+        if (index == null) {
+          index = fragmentIndexes[codeFragment] = fragmentIndexes.length;
+          fragmentUris.add(
+              "${fragment.outputFileName}.${ModelEmitter.deferredExtension}");
+          fragmentHashes.add(codeFragmentHash);
+        }
+        indexes.add(js.number(index));
+      }
+      libraryPartsMapEntries
+          .add(js.Property(js.string(loadId), js.ArrayInitializer(indexes)));
+    });
+
+    deferredLoadingState.deferredLibraryParts.setValue(
+        js.ObjectInitializer(libraryPartsMapEntries, isOneLiner: false));
+    deferredLoadingState.deferredPartUris
+        .setValue(js.stringArray(fragmentUris));
+    deferredLoadingState.deferredPartHashes
+        .setValue(js.stringArray(fragmentHashes));
   }
 
   /// Emits the [MANGLED_GLOBAL_NAMES] embedded global.
@@ -1325,12 +1824,12 @@ class FragmentEmitter {
   /// This global maps minified names for selected classes (some important
   /// core classes, and some native classes) to their unminified names.
   js.Property emitMangledGlobalNames() {
-    List<js.Property> names = <js.Property>[];
+    List<js.Property> names = [];
 
-    CommonElements commonElements = compiler.commonElements;
+    CommonElements commonElements = _closedWorld.commonElements;
     // We want to keep the original names for the most common core classes when
     // calling toString on them.
-    List<ClassElement> nativeClassesNeedingUnmangledName = [
+    List<ClassEntity> nativeClassesNeedingUnmangledName = [
       commonElements.intClass,
       commonElements.doubleClass,
       commonElements.numClass,
@@ -1341,21 +1840,12 @@ class FragmentEmitter {
     ];
     // TODO(floitsch): this should probably be on a per-fragment basis.
     nativeClassesNeedingUnmangledName.forEach((element) {
-      names.add(new js.Property(
-          js.quoteName(namer.className(element)), js.string(element.name)));
+      names.add(js.Property(
+          js.quoteName(_namer.className(element)), js.string(element.name)));
     });
 
-    return new js.Property(
-        js.string(MANGLED_GLOBAL_NAMES), new js.ObjectInitializer(names));
-  }
-
-  /// Emits the [GET_TYPE_FROM_NAME] embedded global.
-  ///
-  /// This embedded global provides a way to go from a class name (which is
-  /// also the constructor's name) to the constructor itself.
-  js.Property emitGetTypeFromName() {
-    js.Expression function = js.js("getGlobalFromName");
-    return new js.Property(js.string(GET_TYPE_FROM_NAME), function);
+    return js.Property(
+        js.string(MANGLED_GLOBAL_NAMES), js.ObjectInitializer(names));
   }
 
   /// Emits the [METADATA] embedded global.
@@ -1363,178 +1853,264 @@ class FragmentEmitter {
   /// The metadata itself has already been computed earlier and is stored in
   /// the [program].
   List<js.Property> emitMetadata(Program program) {
-    List<js.Property> metadataGlobals = <js.Property>[];
+    List<js.Property> metadataGlobals = [];
 
     js.Property createGlobal(js.Expression metadata, String global) {
-      return new js.Property(js.string(global), metadata);
+      return js.Property(js.string(global), metadata);
     }
 
-    metadataGlobals.add(createGlobal(program.metadata, METADATA));
-    js.Expression types =
-        program.metadataTypesForOutputUnit(program.mainFragment.outputUnit);
+    var mainUnit = program.mainFragment.outputUnit;
+    js.Expression types = program.metadataTypesForOutputUnit(mainUnit);
     metadataGlobals.add(createGlobal(types, TYPES));
 
     return metadataGlobals;
   }
 
   /// Emits all embedded globals.
-  js.Statement emitEmbeddedGlobals(Program program,
-      Map<DeferredFragment, _DeferredFragmentHash> deferredLoadHashes) {
-    List<js.Property> globals = <js.Property>[];
+  js.Statement emitEmbeddedGlobalsPart1(
+      Program program,
+      Map<String, List<FinalizedFragment>> fragmentsToLoad,
+      DeferredLoadingState deferredLoadingState) {
+    List<js.Property> globals = [];
 
-    if (program.loadMap.isNotEmpty) {
-      globals.addAll(emitEmbeddedGlobalsForDeferredLoading(
-          program.loadMap, deferredLoadHashes));
+    if (fragmentsToLoad.isNotEmpty) {
+      globals
+          .addAll(emitEmbeddedGlobalsForDeferredLoading(deferredLoadingState));
     }
 
     if (program.typeToInterceptorMap != null) {
-      globals.add(new js.Property(
-          js.string(TYPE_TO_INTERCEPTOR_MAP), program.typeToInterceptorMap));
+      // This property is assigned later.
+      // Initialize property to avoid map transitions.
+      globals.add(
+          js.Property(js.string(TYPE_TO_INTERCEPTOR_MAP), js.LiteralNull()));
     }
 
-    if (program.hasIsolateSupport) {
-      String staticStateName = namer.staticStateHolder;
-      // TODO(floitsch): this doesn't create a new isolate, but just reuses
-      // the current static state. Since we don't run multiple isolates in the
-      // same JavaScript context (except for testing) this shouldn't have any
-      // impact on real-world programs, though.
-      globals.add(new js.Property(js.string(CREATE_NEW_ISOLATE),
-          js.js('function () { return $staticStateName; }')));
-
-      js.Expression nameToClosureFunction = js.js('''
-        // First fetch the static function. From there we can execute its
-        // getter function which builds a Dart closure.
-        function(name) {
-           var staticFunction = getGlobalFromName(name);
-           var getterFunction = staticFunction.$tearOffPropertyName;
-           return getterFunction();
-         }''');
-      globals.add(new js.Property(
-          js.string(STATIC_FUNCTION_NAME_TO_CLOSURE), nameToClosureFunction));
-
-      globals.add(new js.Property(js.string(CLASS_ID_EXTRACTOR),
-          js.js('function(o) { return o.constructor.name; }')));
-
-      js.Expression extractFieldsFunction = js.js('''
-      function(o) {
-        var constructor = o.constructor;
-        var fieldNames = constructor.$cachedClassFieldNames;
-        if (!fieldNames) {
-          // Extract the fields from an empty unmodified object.
-          var empty = new constructor();
-          // This gives us the keys that the constructor sets.
-          fieldNames = constructor.$cachedClassFieldNames = Object.keys(empty);
-        }
-        var result = new Array(fieldNames.length);
-        for (var i = 0; i < fieldNames.length; i++) {
-          result[i] = o[fieldNames[i]];
-        }
-        return result;
-      }''');
-      globals.add(new js.Property(
-          js.string(CLASS_FIELDS_EXTRACTOR), extractFieldsFunction));
-
-      js.Expression createInstanceFromClassIdFunction = js.js('''
-        function(name) {
-          var constructor = getGlobalFromName(name);
-          return new constructor();
-        }
-      ''');
-      globals.add(new js.Property(js.string(INSTANCE_FROM_CLASS_ID),
-          createInstanceFromClassIdFunction));
-
-      js.Expression initializeEmptyInstanceFunction = js.js('''
-      function(name, o, fields) {
-        var constructor = o.constructor;
-        // By construction the object `o` is an empty object with the same
-        // keys as the one we used in the extract-fields function.
-        var fieldNames = Object.keys(o);
-        if (fieldNames.length != fields.length) {
-          throw new Error("Mismatch during deserialization.");
-        }
-        for (var i = 0; i < fields.length; i++) {
-          o[fieldNames[i]] = fields[i];
-        }
-        return o;
-      }''');
-      globals.add(new js.Property(js.string(INITIALIZE_EMPTY_INSTANCE),
-          initializeEmptyInstanceFunction));
-    }
+    globals.add(js.Property(js.string(RTI_UNIVERSE), createRtiUniverse()));
 
     globals.add(emitMangledGlobalNames());
 
     // The [MANGLED_NAMES] table must contain the mapping for const symbols.
     // Without const symbols, the table is only relevant for reflection and
     // therefore unused in this emitter.
-    List<js.Property> mangledNamesProperties = <js.Property>[];
-    program.symbolsMap.forEach((js.Name mangledName, String unmangledName) {
-      mangledNamesProperties
-          .add(new js.Property(mangledName, js.string(unmangledName)));
-    });
-    globals.add(new js.Property(js.string(MANGLED_NAMES),
-        new js.ObjectInitializer(mangledNamesProperties)));
-
-    globals.add(emitGetTypeFromName());
+    // TODO(johnniwinther): Remove the need for adding an empty list of
+    // mangled names.
+    globals
+        .add(js.Property(js.string(MANGLED_NAMES), js.ObjectInitializer([])));
 
     globals.addAll(emitMetadata(program));
 
     if (program.needsNativeSupport) {
-      globals.add(new js.Property(
-          js.string(INTERCEPTORS_BY_TAG), new js.LiteralNull()));
-      globals.add(new js.Property(js.string(LEAF_TAGS), new js.LiteralNull()));
+      globals
+          .add(js.Property(js.string(INTERCEPTORS_BY_TAG), js.LiteralNull()));
+      globals.add(js.Property(js.string(LEAF_TAGS), js.LiteralNull()));
     }
 
-    js.ObjectInitializer globalsObject = new js.ObjectInitializer(globals);
+    globals.add(js.Property(
+        js.string(ARRAY_RTI_PROPERTY),
+        _options.features.legacyJavaScript.isEnabled
+            ? js.js(
+                r'typeof Symbol == "function" && typeof Symbol() == "symbol"'
+                r'    ? Symbol("$ti")'
+                r'    : "$ti"')
+            : js.js(r'Symbol("$ti")')));
+
+    if (_closedWorld.backendUsage.requiresStartupMetrics) {
+      // Copy the metrics object that was stored on the main unit IIFE.
+      globals.add(js.Property(
+          js.string(STARTUP_METRICS), js.js('dartProgram.$STARTUP_METRICS')));
+    }
+
+    js.ObjectInitializer globalsObject =
+        js.ObjectInitializer(globals, isOneLiner: false);
 
     return js.js.statement('var init = #;', globalsObject);
   }
 
+  /// Finish setting up embedded globals.
+  js.Statement emitEmbeddedGlobalsPart2(
+      Program program, DeferredLoadingState deferredLoadingState) {
+    List<js.Statement> statements = [];
+    if (program.typeToInterceptorMap != null) {
+      statements.add(js.js.statement('init.# = #;',
+          [js.string(TYPE_TO_INTERCEPTOR_MAP), program.typeToInterceptorMap]));
+    }
+    return js.Block(statements);
+  }
+
+  js.Block emitTypeRules(Fragment fragment) {
+    List<js.Statement> statements = [];
+
+    ClassEntity legacyJsObjectClass =
+        _commonElements.jsLegacyJavaScriptObjectClass;
+
+    Map<ClassTypeData, List<ClassTypeData>> nativeRedirections =
+        _nativeEmitter.typeRedirections;
+
+    Ruleset ruleset = Ruleset.empty();
+    Map<ClassEntity, int> erasedTypes = {};
+    Iterable<ClassTypeData> classTypeData =
+        fragment.libraries.expand((Library library) => library.classTypeData);
+    classTypeData.forEach((ClassTypeData typeData) {
+      ClassEntity element = typeData.element;
+      InterfaceType targetType = _elementEnvironment.getThisType(element);
+
+      // TODO(fishythefish): Prune uninstantiated classes.
+      if (_rtiNeed.classHasErasedTypeArguments(element)) {
+        erasedTypes[element] = targetType.typeArguments.length;
+      }
+
+      bool isInterop =
+          _classHierarchy.isSubclassOf(element, legacyJsObjectClass);
+
+      if (isInterop && element != legacyJsObjectClass) {
+        ruleset.addRedirection(element, legacyJsObjectClass);
+      } else {
+        Iterable<TypeCheck> checks = typeData.classChecks?.checks ?? const [];
+        Iterable<InterfaceType> supertypes = isInterop
+            ? checks
+                .map((check) => _elementEnvironment.getJsInteropType(check.cls))
+            : checks
+                .map((check) => _dartTypes.asInstanceOf(targetType, check.cls));
+
+        Map<TypeVariableType, DartType> typeVariables = {};
+        Set<TypeVariableType> namedTypeVariables = typeData.namedTypeVariables;
+        nativeRedirections[typeData]?.forEach((ClassTypeData redirectee) {
+          namedTypeVariables.addAll(redirectee.namedTypeVariables);
+        });
+        for (TypeVariableType typeVariable in typeData.namedTypeVariables) {
+          TypeVariableEntity element = typeVariable.element;
+          InterfaceType supertype = isInterop
+              ? _elementEnvironment.getJsInteropType(element.typeDeclaration)
+              : _dartTypes.asInstanceOf(targetType, element.typeDeclaration);
+          List<DartType> supertypeArguments = supertype.typeArguments;
+          typeVariables[typeVariable] = supertypeArguments[element.index];
+        }
+        ruleset.addEntry(targetType, supertypes, typeVariables);
+      }
+    });
+
+    // We add native redirections only to the main fragment in order to avoid
+    // duplicating them in multiple deferred units.
+    if (fragment.outputUnit.isMainOutput) {
+      nativeRedirections
+          .forEach((ClassTypeData target, List<ClassTypeData> redirectees) {
+        for (ClassTypeData redirectee in redirectees) {
+          ruleset.addRedirection(redirectee.element, target.element);
+        }
+      });
+    }
+
+    if (ruleset.isNotEmpty) {
+      FunctionEntity addRules = _closedWorld.commonElements.rtiAddRulesMethod;
+      statements.add(js.js.statement('#(init.#,JSON.parse(#));', [
+        _emitter.staticFunctionAccess(addRules),
+        RTI_UNIVERSE,
+        _rulesetEncoder.encodeRuleset(ruleset),
+      ]));
+    }
+
+    if (erasedTypes.isNotEmpty) {
+      FunctionEntity addErasedTypes =
+          _closedWorld.commonElements.rtiAddErasedTypesMethod;
+      statements.add(js.js.statement('#(init.#,JSON.parse(#));', [
+        _emitter.staticFunctionAccess(addErasedTypes),
+        RTI_UNIVERSE,
+        _rulesetEncoder.encodeErasedTypes(erasedTypes),
+      ]));
+    }
+
+    return js.Block(statements);
+  }
+
+  js.Statement emitVariances(Fragment fragment) {
+    if (!_options.enableVariance) {
+      return js.EmptyStatement();
+    }
+
+    Map<ClassEntity, List<Variance>> typeParameterVariances = {};
+    Iterable<Class> classes =
+        fragment.libraries.expand((Library library) => library.classes);
+    classes.forEach((Class cls) {
+      ClassEntity element = cls.element;
+      List<Variance> classVariances =
+          _elementEnvironment.getTypeVariableVariances(element);
+
+      // Emit variances for a class only if there is at least one explicit
+      // variance defined.
+      bool hasOnlyLegacyVariance = classVariances
+          .every((variance) => variance == Variance.legacyCovariant);
+      if (!hasOnlyLegacyVariance) {
+        typeParameterVariances[element] = classVariances;
+      }
+    });
+
+    if (typeParameterVariances.isNotEmpty) {
+      FunctionEntity addVariances =
+          _closedWorld.commonElements.rtiAddTypeParameterVariancesMethod;
+      return js.js.statement('#(init.#,JSON.parse(#));', [
+        _emitter.staticFunctionAccess(addVariances),
+        RTI_UNIVERSE,
+        _rulesetEncoder.encodeTypeParameterVariances(typeParameterVariances),
+      ]);
+    }
+
+    return js.EmptyStatement();
+  }
+
+  /// Returns an expression that creates the initial Rti Universe.
+  ///
+  /// This needs to be kept in sync with `_Universe.create` in `dart:_rti`.
+  js.Expression createRtiUniverse() {
+    List<js.Property> universeFields = [];
+    void initField(String name, String value) {
+      universeFields.add(js.Property(js.string(name), js.js(value)));
+    }
+
+    initField(RtiUniverseFieldNames.evalCache, 'new Map()');
+    initField(RtiUniverseFieldNames.typeRules, '{}');
+    initField(RtiUniverseFieldNames.erasedTypes, '{}');
+    initField(RtiUniverseFieldNames.typeParameterVariances, '{}');
+    initField(RtiUniverseFieldNames.sharedEmptyArray, '[]');
+
+    return js.ObjectInitializer(universeFields);
+  }
+
   /// Emits data needed for native classes.
-  ///
-  /// We don't try to reduce the size of the native data, but rather build
-  /// JavaScript object literals that contain all the information directly.
-  /// This means that the output size is bigger, but that the startup is faster.
-  ///
-  /// This function is the static equivalent of
-  /// [NativeGenerator.buildNativeInfoHandler].
   js.Statement emitNativeSupport(Fragment fragment) {
-    List<js.Statement> statements = <js.Statement>[];
+    List<js.Statement> statements = [];
 
     // The isolate-affinity tag must only be initialized once per program.
     if (fragment.isMainFragment &&
-        NativeGenerator
-            .needsIsolateAffinityTagInitialization(_closedWorld.backendUsage)) {
+        NativeGenerator.needsIsolateAffinityTagInitialization(
+            _closedWorld.backendUsage)) {
       statements.add(NativeGenerator.generateIsolateAffinityTagInitialization(
-          _closedWorld.backendUsage,
-          generateEmbeddedGlobalAccess,
-          js.js(
-              """
+          _closedWorld.backendUsage, generateEmbeddedGlobalAccess, js.js("""
         // On V8, the 'intern' function converts a string to a symbol, which
         // makes property access much faster.
+        // TODO(sra): Use Symbol on non-IE11 browsers.
         function (s) {
           var o = {};
           o[s] = 1;
-          return Object.keys(convertToFastObject(o))[0];
-        }""",
-              [])));
+          return Object.keys(hunkHelpers.convertToFastObject(o))[0];
+        }""", [])));
     }
 
-    Map<String, js.Expression> interceptorsByTag = <String, js.Expression>{};
-    Map<String, js.Expression> leafTags = <String, js.Expression>{};
-    List<js.Statement> subclassAssignments = <js.Statement>[];
+    Map<String, js.Expression> interceptorsByTag = {};
+    Map<String, js.Expression> leafTags = {};
+    List<js.Statement> subclassAssignments = [];
 
     for (Library library in fragment.libraries) {
       for (Class cls in library.classes) {
         if (cls.nativeLeafTags != null) {
           for (String tag in cls.nativeLeafTags) {
             interceptorsByTag[tag] = classReference(cls);
-            leafTags[tag] = new js.LiteralBool(true);
+            leafTags[tag] = js.LiteralBool(true);
           }
         }
         if (cls.nativeNonLeafTags != null) {
           for (String tag in cls.nativeNonLeafTags) {
             interceptorsByTag[tag] = classReference(cls);
-            leafTags[tag] = new js.LiteralBool(false);
+            leafTags[tag] = js.LiteralBool(false);
           }
           if (cls.nativeExtensions != null) {
             List<Class> subclasses = cls.nativeExtensions;
@@ -1551,12 +2127,68 @@ class FragmentEmitter {
         }
       }
     }
-    statements.add(js.js.statement("setOrUpdateInterceptorsByTag(#);",
-        js.objectLiteral(interceptorsByTag)));
-    statements.add(
-        js.js.statement("setOrUpdateLeafTags(#);", js.objectLiteral(leafTags)));
+
+    // Emit the empty objects for main fragment in case we emit
+    // getNativeInterceptor.
+    // TODO(sra): Refine the impacts to accuratley predict whether we need this
+    // at all, and delete 'setOrUpdateInterceptorsByTag' if it is not called.
+    if (fragment.isMainFragment || interceptorsByTag.isNotEmpty) {
+      statements.add(js.js.statement(
+          "hunkHelpers.setOrUpdateInterceptorsByTag(#);",
+          js.objectLiteral(interceptorsByTag)));
+    }
+    if (fragment.isMainFragment || leafTags.isNotEmpty) {
+      statements.add(js.js.statement(
+          "hunkHelpers.setOrUpdateLeafTags(#);", js.objectLiteral(leafTags)));
+    }
     statements.addAll(subclassAssignments);
 
     return wrapPhase('nativeSupport', statements);
   }
+}
+
+class LocalAliases {
+  final Map<String, js.Expression> _locals = {};
+
+  bool get isEmpty => _locals.isEmpty;
+  bool get isNotEmpty => !isEmpty;
+
+  String find(String alias, String expression) {
+    _locals[alias] ??= js.js(expression);
+    return alias;
+  }
+
+  js.Statement toStatement() {
+    List<js.VariableInitialization> initializations = [];
+    _locals.forEach((local, value) {
+      initializations
+          .add(js.VariableInitialization(js.VariableDeclaration(local), value));
+    });
+    return js.ExpressionStatement(js.VariableDeclarationList(initializations));
+  }
+}
+
+class DeferredLoadingState {
+  final deferredLibraryParts = DeferredPrimaryExpression();
+  final deferredPartUris = DeferredPrimaryExpression();
+  final deferredPartHashes = DeferredPrimaryExpression();
+}
+
+class DeferredPrimaryExpression extends js.DeferredExpression {
+  js.Expression _value;
+
+  void setValue(js.Expression value) {
+    assert(_value == null);
+    assert(value.precedenceLevel == this.precedenceLevel);
+    _value = value;
+  }
+
+  @override
+  js.Expression get value {
+    assert(_value != null);
+    return _value;
+  }
+
+  @override
+  int get precedenceLevel => js_precedence.PRIMARY;
 }

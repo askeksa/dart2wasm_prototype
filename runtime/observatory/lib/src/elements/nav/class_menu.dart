@@ -7,23 +7,21 @@ import 'dart:async';
 import 'package:observatory/models.dart' as M show IsolateRef, ClassRef;
 import 'package:observatory/src/elements/helpers/nav_menu.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 
-class NavClassMenuElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<NavClassMenuElement>('nav-class-menu');
-
-  RenderingScheduler _r;
+class NavClassMenuElement extends CustomElement implements Renderable {
+  late RenderingScheduler<NavClassMenuElement> _r;
 
   Stream<RenderedEvent<NavClassMenuElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.ClassRef _cls;
-  Iterable<Element> _content = const [];
+  late M.IsolateRef _isolate;
+  late M.ClassRef _cls;
+  List<Element> _content = const [];
 
   M.IsolateRef get isolate => _isolate;
   M.ClassRef get cls => _cls;
-  Iterable<Element> get content => _content;
+  List<Element> get content => _content;
 
   set content(Iterable<Element> value) {
     _content = value.toList();
@@ -31,17 +29,17 @@ class NavClassMenuElement extends HtmlElement implements Renderable {
   }
 
   factory NavClassMenuElement(M.IsolateRef isolate, M.ClassRef cls,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(cls != null);
-    NavClassMenuElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    NavClassMenuElement e = new NavClassMenuElement.created();
+    e._r = new RenderingScheduler<NavClassMenuElement>(e, queue: queue);
     e._isolate = isolate;
     e._cls = cls;
     return e;
   }
 
-  NavClassMenuElement.created() : super.created();
+  NavClassMenuElement.created() : super.created('nav-class-menu');
 
   @override
   void attached() {
@@ -52,13 +50,13 @@ class NavClassMenuElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [
-      navMenu(cls.name,
+    children = <Element>[
+      navMenu(cls.name!,
           content: _content, link: Uris.inspect(isolate, object: cls))
     ];
   }

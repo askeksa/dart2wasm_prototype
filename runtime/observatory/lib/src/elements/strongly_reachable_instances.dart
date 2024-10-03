@@ -9,24 +9,20 @@ import 'package:observatory/src/elements/curly_block.dart';
 import 'package:observatory/src/elements/instance_ref.dart';
 import 'package:observatory/src/elements/helpers/any_ref.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 
-class StronglyReachableInstancesElement extends HtmlElement
+class StronglyReachableInstancesElement extends CustomElement
     implements Renderable {
-  static const tag = const Tag<StronglyReachableInstancesElement>(
-      'strongly-reachable-instances',
-      dependencies: const [CurlyBlockElement.tag, InstanceRefElement.tag]);
-
-  RenderingScheduler<StronglyReachableInstancesElement> _r;
+  late RenderingScheduler<StronglyReachableInstancesElement> _r;
 
   Stream<RenderedEvent<StronglyReachableInstancesElement>> get onRendered =>
       _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.ClassRef _cls;
-  M.StronglyReachableInstancesRepository _stronglyReachableInstances;
-  M.ObjectRepository _objects;
-  M.InstanceSet _result;
+  late M.IsolateRef _isolate;
+  late M.ClassRef _cls;
+  late M.StronglyReachableInstancesRepository _stronglyReachableInstances;
+  late M.ObjectRepository _objects;
+  M.InstanceSet? _result;
   bool _expanded = false;
 
   M.IsolateRef get isolate => _isolate;
@@ -37,13 +33,15 @@ class StronglyReachableInstancesElement extends HtmlElement
       M.ClassRef cls,
       M.StronglyReachableInstancesRepository stronglyReachable,
       M.ObjectRepository objects,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(cls != null);
     assert(stronglyReachable != null);
     assert(objects != null);
-    StronglyReachableInstancesElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    StronglyReachableInstancesElement e =
+        new StronglyReachableInstancesElement.created();
+    e._r = new RenderingScheduler<StronglyReachableInstancesElement>(e,
+        queue: queue);
     e._isolate = isolate;
     e._cls = cls;
     e._stronglyReachableInstances = stronglyReachable;
@@ -51,7 +49,8 @@ class StronglyReachableInstancesElement extends HtmlElement
     return e;
   }
 
-  StronglyReachableInstancesElement.created() : super.created();
+  StronglyReachableInstancesElement.created()
+      : super.created('strongly-reachable-instances');
 
   @override
   void attached() {
@@ -62,20 +61,21 @@ class StronglyReachableInstancesElement extends HtmlElement
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [
-      new CurlyBlockElement(expanded: _expanded, queue: _r.queue)
-        ..content = _createContent()
-        ..onToggle.listen((e) async {
-          _expanded = e.control.expanded;
-          e.control.disabled = true;
-          await _refresh();
-          e.control.disabled = false;
-        })
+    children = <Element>[
+      (new CurlyBlockElement(expanded: _expanded, queue: _r.queue)
+            ..content = _createContent()
+            ..onToggle.listen((e) async {
+              _expanded = e.control.expanded;
+              e.control.disabled = true;
+              await _refresh();
+              e.control.disabled = false;
+            }))
+          .element
     ];
   }
 
@@ -89,20 +89,22 @@ class StronglyReachableInstancesElement extends HtmlElement
     if (_result == null) {
       return [new SpanElement()..text = 'Loading...'];
     }
-    final content = _result.samples
-        .map((sample) => new DivElement()
-          ..children = [anyRef(_isolate, sample, _objects, queue: _r.queue)])
+    final content = _result!.instances!
+        .map<Element>((sample) => new DivElement()
+          ..children = <Element>[
+            anyRef(_isolate, sample, _objects, queue: _r.queue)
+          ])
         .toList();
     content.add(new DivElement()
       ..children = ([]
         ..addAll(_createShowMoreButton())
-        ..add(new SpanElement()..text = ' of total ${_result.count}')));
+        ..add(new SpanElement()..text = ' of total ${_result!.count}')));
     return content;
   }
 
   List<Element> _createShowMoreButton() {
-    final samples = _result.samples.toList();
-    if (samples.length == _result.count) {
+    final samples = _result!.instances!.toList();
+    if (samples.length == _result!.count) {
       return [];
     }
     final count = samples.length;

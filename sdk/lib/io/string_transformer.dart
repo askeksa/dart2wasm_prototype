@@ -6,18 +6,21 @@ part of dart.io;
 
 /// The current system encoding.
 ///
-/// This us used for converting from bytes to/from String when
+/// This is used for converting from bytes to and from Strings when
 /// communicating on stdin, stdout and stderr.
 ///
-/// On Windows this will use the currently active code page for the
-/// conversion. On all other systems it will always use UTF-8.
+/// On Windows this will use the currently active code page for the conversion.
+/// On all other systems it will always use UTF-8.
+const SystemEncoding systemEncoding = const SystemEncoding();
+@Deprecated("Use systemEncoding instead")
 const SystemEncoding SYSTEM_ENCODING = const SystemEncoding();
 
-/**
- * The system encoding is the current code page on Windows and UTF-8 on
- * Linux and Mac.
- */
+/// The system encoding is the current code page on Windows and UTF-8 on Linux
+/// and Mac.
 class SystemEncoding extends Encoding {
+  /// Creates a const SystemEncoding.
+  ///
+  /// Users should use the top-level constant, [systemEncoding].
   const SystemEncoding();
 
   String get name => 'system';
@@ -53,9 +56,7 @@ class _WindowsCodePageEncoder extends Converter<String, List<int>> {
     return encoded;
   }
 
-  /**
-   * Starts a chunked conversion.
-   */
+  /// Starts a chunked conversion.
   StringConversionSink startChunkedConversion(Sink<List<int>> sink) {
     return new _WindowsCodePageEncoderSink(sink);
   }
@@ -99,9 +100,7 @@ class _WindowsCodePageDecoder extends Converter<List<int>, String> {
     return _decodeBytes(input);
   }
 
-  /**
-   * Starts a chunked conversion.
-   */
+  /// Starts a chunked conversion.
   ByteConversionSink startChunkedConversion(Sink<String> sink) {
     return new _WindowsCodePageDecoderSink(sink);
   }

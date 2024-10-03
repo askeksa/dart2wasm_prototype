@@ -6,25 +6,30 @@ library service_test_common;
 
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'package:dds/dds.dart';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/service_common.dart';
-import 'package:unittest/unittest.dart';
+import 'package:observatory/service_io.dart';
+import 'package:test/test.dart';
 
 typedef Future IsolateTest(Isolate isolate);
 typedef Future VMTest(VM vm);
+typedef Future DDSTest(VM vm, DartDevelopmentService dds);
+typedef void ServiceEventHandler(ServiceEvent event);
 
 Map<String, StreamSubscription> streamSubscriptions = {};
 
-Future subscribeToStream(VM vm, String streamName, onEvent) async {
+Future subscribeToStream(
+    VM vm, String streamName, ServiceEventHandler onEvent) async {
   assert(streamSubscriptions[streamName] == null);
 
-  Stream stream = await vm.getEventStream(streamName);
+  Stream<ServiceEvent> stream = await vm.getEventStream(streamName);
   StreamSubscription subscription = stream.listen(onEvent);
   streamSubscriptions[streamName] = subscription;
 }
 
 Future cancelStreamSubscription(String streamName) async {
-  StreamSubscription subscription = streamSubscriptions[streamName];
+  StreamSubscription subscription = streamSubscriptions[streamName]!;
   subscription.cancel();
   streamSubscriptions.remove(streamName);
 }
@@ -32,7 +37,7 @@ Future cancelStreamSubscription(String streamName) async {
 Future smartNext(Isolate isolate) async {
   print('smartNext');
   if (isolate.status == M.IsolateStatus.paused) {
-    var event = isolate.pauseEvent;
+    dynamic event = isolate.pauseEvent;
     if (event.atAsyncSuspension) {
       return asyncNext(isolate);
     } else {
@@ -46,7 +51,7 @@ Future smartNext(Isolate isolate) async {
 Future asyncNext(Isolate isolate) async {
   print('asyncNext');
   if (isolate.status == M.IsolateStatus.paused) {
-    var event = isolate.pauseEvent;
+    dynamic event = isolate.pauseEvent;
     if (!event.atAsyncSuspension) {
       throw 'No async continuation at this location';
     } else {
@@ -68,12 +73,12 @@ Future syncNext(Isolate isolate) async {
 
 Future asyncStepOver(Isolate isolate) async {
   final Completer pausedAtSyntheticBreakpoint = new Completer();
-  StreamSubscription subscription;
+  StreamSubscription? subscription;
 
   // Cancel the subscription.
   cancelSubscription() {
     if (subscription != null) {
-      subscription.cancel();
+      subscription!.cancel();
       subscription = null;
     }
   }
@@ -86,7 +91,7 @@ Future asyncStepOver(Isolate isolate) async {
   }
 
   // Subscribe to the debugger event stream.
-  Stream stream;
+  Stream<ServiceEvent> stream;
   try {
     stream = await isolate.vm.getEventStream(VM.kDebugStream);
   } catch (e) {
@@ -94,13 +99,13 @@ Future asyncStepOver(Isolate isolate) async {
     return pausedAtSyntheticBreakpoint.future;
   }
 
-  Breakpoint syntheticBreakpoint;
+  Breakpoint? syntheticBreakpoint;
 
   subscription = stream.listen((ServiceEvent event) async {
     // Synthetic breakpoint add event. This is the first event we will
     // receive.
     bool isAdd = (event.kind == ServiceEvent.kBreakpointAdded) &&
-        (event.breakpoint.isSyntheticAsyncContinuation) &&
+        (event.breakpoint!.isSyntheticAsyncContinuation!) &&
         (event.owner == isolate);
     // Resume after synthetic breakpoint added. This is the second event
     // we will receive.
@@ -114,7 +119,8 @@ Future asyncStepOver(Isolate isolate) async {
         (event.breakpoint == syntheticBreakpoint);
     if (isAdd) {
       syntheticBreakpoint = event.breakpoint;
-    } else if (isResume) {} else if (isPaused) {
+    } else if (isResume) {
+    } else if (isPaused) {
       pausedAtSyntheticBreakpoint.complete(isolate);
       syntheticBreakpoint = null;
       cancelSubscription();
@@ -134,7 +140,7 @@ Future asyncStepOver(Isolate isolate) async {
   return pausedAtSyntheticBreakpoint.future;
 }
 
-bool isEventOfKind(M.Event event, String kind) {
+bool isEventOfKind(M.Event? event, String kind) {
   switch (kind) {
     case ServiceEvent.kPauseBreakpoint:
       return event is M.PauseBreakpointEvent;
@@ -151,9 +157,9 @@ bool isEventOfKind(M.Event event, String kind) {
   }
 }
 
-Future<Isolate> hasPausedFor(Isolate isolate, String kind) {
+Future hasPausedFor(Isolate isolate, String kind) {
   // Set up a listener to wait for breakpoint events.
-  Completer completer = new Completer();
+  Completer? completer = new Completer();
   isolate.vm.getEventStream(VM.kDebugStream).then((stream) {
     var subscription;
     subscription = stream.listen((ServiceEvent event) {
@@ -162,7 +168,7 @@ Future<Isolate> hasPausedFor(Isolate isolate, String kind) {
           // Reload to update isolate.pauseEvent.
           print('Paused with $kind');
           subscription.cancel();
-          completer.complete(isolate.reload());
+          completer!.complete(isolate.reload());
           completer = null;
         }
       }
@@ -171,52 +177,51 @@ Future<Isolate> hasPausedFor(Isolate isolate, String kind) {
     // Pause may have happened before we subscribed.
     isolate.reload().then((_) {
       if ((isolate.pauseEvent != null) &&
-          isEventOfKind(isolate.pauseEvent, kind)) {
+          isEventOfKind(isolate.pauseEvent!, kind)) {
         // Already waiting at a breakpoint.
         if (completer != null) {
           print('Paused with $kind');
           subscription.cancel();
-          completer.complete(isolate);
+          completer!.complete(isolate);
           completer = null;
         }
       }
     });
   });
 
-  return completer.future; // Will complete when breakpoint hit.
+  return completer!.future; // Will complete when breakpoint hit.
 }
 
-Future<Isolate> hasStoppedAtBreakpoint(Isolate isolate) {
+Future hasStoppedAtBreakpoint(Isolate isolate) {
   return hasPausedFor(isolate, ServiceEvent.kPauseBreakpoint);
 }
 
-Future<Isolate> hasStoppedPostRequest(Isolate isolate) {
+Future hasStoppedPostRequest(Isolate isolate) {
   return hasPausedFor(isolate, ServiceEvent.kPausePostRequest);
 }
 
-Future<Isolate> hasStoppedWithUnhandledException(Isolate isolate) {
+Future hasStoppedWithUnhandledException(Isolate isolate) {
   return hasPausedFor(isolate, ServiceEvent.kPauseException);
 }
 
-Future<Isolate> hasStoppedAtExit(Isolate isolate) {
+Future hasStoppedAtExit(Isolate isolate) {
   return hasPausedFor(isolate, ServiceEvent.kPauseExit);
 }
 
-Future<Isolate> hasPausedAtStart(Isolate isolate) {
+Future hasPausedAtStart(Isolate isolate) {
   return hasPausedFor(isolate, ServiceEvent.kPauseStart);
 }
 
-Future<Isolate> markDartColonLibrariesDebuggable(Isolate isolate) async {
+Future markDartColonLibrariesDebuggable(Isolate isolate) async {
   await isolate.reload();
   for (Library lib in isolate.libraries) {
     await lib.load();
-    if (lib.uri.startsWith('dart:') && !lib.uri.startsWith('dart:_')) {
+    if (lib.uri!.startsWith('dart:') && !lib.uri!.startsWith('dart:_')) {
       var setDebugParams = {
         'libraryId': lib.id,
         'isDebuggable': true,
       };
-      Map<String, dynamic> result = await isolate.invokeRpcNoUpgrade(
-          'setLibraryDebuggable', setDebugParams);
+      await isolate.invokeRpcNoUpgrade('setLibraryDebuggable', setDebugParams);
     }
   }
   return isolate;
@@ -225,7 +230,7 @@ Future<Isolate> markDartColonLibrariesDebuggable(Isolate isolate) async {
 IsolateTest reloadSources([bool pause = false]) {
   return (Isolate isolate) async {
     Map<String, dynamic> params = <String, dynamic>{};
-    if (pause == true) {
+    if (pause) {
       params['pause'] = pause;
     }
     return isolate.invokeRpc('reloadSources', params);
@@ -236,10 +241,33 @@ IsolateTest reloadSources([bool pause = false]) {
 IsolateTest setBreakpointAtLine(int line) {
   return (Isolate isolate) async {
     print("Setting breakpoint for line $line");
-    Library lib = await isolate.rootLibrary.load();
-    Script script = lib.scripts.single;
+    Library lib = await isolate.rootLibrary.load() as Library;
+    Script script = lib.scripts.firstWhere((s) => s.uri == lib.uri);
 
     Breakpoint bpt = await isolate.addBreakpoint(script, line);
+    print("Breakpoint is $bpt");
+    expect(bpt, isNotNull);
+    expect(bpt is Breakpoint, isTrue);
+  };
+}
+
+IsolateTest setBreakpointAtLineColumn(int line, int column) {
+  return (Isolate isolate) async {
+    print("Setting breakpoint for line $line column $column");
+    Library lib = await isolate.rootLibrary.load() as Library;
+    Script script = lib.scripts.firstWhere((s) => s.uri == lib.uri);
+
+    Breakpoint bpt = await isolate.addBreakpoint(script, line, column);
+    print("Breakpoint is $bpt");
+    expect(bpt, isNotNull);
+    expect(bpt is Breakpoint, isTrue);
+  };
+}
+
+IsolateTest setBreakpointAtUriAndLine(String uri, int line) {
+  return (Isolate isolate) async {
+    print("Setting breakpoint for line $line in $uri");
+    Breakpoint bpt = await isolate.addBreakpointByScriptUri(uri, line);
     print("Breakpoint is $bpt");
     expect(bpt, isNotNull);
     expect(bpt is Breakpoint, isTrue);
@@ -251,24 +279,24 @@ IsolateTest stoppedAtLine(int line) {
     print("Checking we are at line $line");
 
     // Make sure that the isolate has stopped.
-    isolate.reload();
+    await isolate.reload();
     expect(isolate.pauseEvent is! M.ResumeEvent, isTrue);
 
     ServiceMap stack = await isolate.getStack();
     expect(stack.type, equals('Stack'));
 
-    List<Frame> frames = stack['frames'];
+    List frames = stack['frames'];
     expect(frames.length, greaterThanOrEqualTo(1));
 
     Frame top = frames[0];
-    Script script = await top.location.script.load();
-    int actualLine = script.tokenToLine(top.location.tokenPos);
+    Script script = await top.location!.script.load() as Script;
+    int? actualLine = script.tokenToLine(top.location!.tokenPos);
     if (actualLine != line) {
       StringBuffer sb = new StringBuffer();
       sb.write("Expected to be at line $line but actually at line $actualLine");
       sb.write("\nFull stack trace:\n");
       for (Frame f in stack['frames']) {
-        sb.write(" $f [${await f.location.getLine()}]\n");
+        sb.write(" $f [${await f.location!.getLine()}]\n");
       }
       throw sb.toString();
     } else {
@@ -285,15 +313,16 @@ IsolateTest stoppedInFunction(String functionName,
     ServiceMap stack = await isolate.getStack();
     expect(stack.type, equals('Stack'));
 
-    List<Frame> frames = stack['frames'];
+    List frames = stack['frames'];
     expect(frames.length, greaterThanOrEqualTo(1));
 
-    Frame topFrame = stack['frames'][0];
-    ServiceFunction function = await topFrame.function.load();
-    String name = function.name;
+    Frame topFrame = frames[0];
+    ServiceFunction function =
+        await topFrame.function!.load() as ServiceFunction;
+    String name = function.name!;
     if (includeOwner) {
       ServiceFunction owner =
-          await (function.dartOwner as ServiceObject).load();
+          await (function.dartOwner as ServiceObject).load() as ServiceFunction;
       name = '${owner.name}.$name';
     }
     final bool matches =
@@ -303,11 +332,11 @@ IsolateTest stoppedInFunction(String functionName,
       sb.write("Expected to be in function $functionName but "
           "actually in function $name");
       sb.write("\nFull stack trace:\n");
-      for (Frame f in stack['frames']) {
-        await f.function.load();
-        await (f.function.dartOwner as ServiceObject).load();
-        String name = f.function.name;
-        String ownerName = (f.function.dartOwner as ServiceObject).name;
+      for (Frame f in frames) {
+        await f.function!.load();
+        await (f.function!.dartOwner as ServiceObject).load();
+        String name = f.function!.name!;
+        String ownerName = (f.function!.dartOwner as ServiceObject).name!;
         sb.write(" $f [$name] [$ownerName]\n");
       }
       throw sb.toString();
@@ -317,7 +346,41 @@ IsolateTest stoppedInFunction(String functionName,
   };
 }
 
-Future<Isolate> resumeIsolate(Isolate isolate) {
+IsolateTest hasLocalVarInTopAwaiterStackFrame(String varName) {
+  return (Isolate isolate) async {
+    print("Checking we have variable '$varName' in the top frame");
+
+    // Make sure that the isolate has stopped.
+    await isolate.reload();
+    expect(isolate.pauseEvent is! M.ResumeEvent, isTrue);
+
+    final ServiceMap stack = await isolate.getStack();
+    expect(stack.type, equals('Stack'));
+
+    final List frames = stack['awaiterFrames'];
+    expect(frames.length, greaterThanOrEqualTo(1));
+
+    final Frame top = frames[0];
+    for (final variable in top.variables) {
+      if (variable.name == varName) {
+        return;
+      }
+    }
+    final sb = StringBuffer();
+    sb.write("Expected to find $varName in top awaiter stack frame, found ");
+    if (top.variables.isEmpty) {
+      sb.write("no variables\n");
+    } else {
+      sb.write("these instead:\n");
+      for (var variable in top.variables) {
+        sb.write("\t${variable.name}\n");
+      }
+    }
+    throw sb.toString();
+  };
+}
+
+Future resumeIsolate(Isolate isolate) {
   Completer completer = new Completer();
   isolate.vm.getEventStream(VM.kDebugStream).then((stream) {
     var subscription;
@@ -353,17 +416,17 @@ IsolateTest resumeIsolateAndAwaitEvent(stream, onEvent) {
       resumeAndAwaitEvent(isolate, stream, onEvent);
 }
 
-Future<Isolate> stepOver(Isolate isolate) async {
+Future stepOver(Isolate isolate) async {
   await isolate.stepOver();
   return hasStoppedAtBreakpoint(isolate);
 }
 
-Future<Isolate> stepInto(Isolate isolate) async {
+Future stepInto(Isolate isolate) async {
   await isolate.stepInto();
   return hasStoppedAtBreakpoint(isolate);
 }
 
-Future<Isolate> stepOut(Isolate isolate) async {
+Future stepOut(Isolate isolate) async {
   await isolate.stepOut();
   return hasStoppedAtBreakpoint(isolate);
 }
@@ -373,10 +436,9 @@ Future isolateIsRunning(Isolate isolate) async {
   expect(isolate.running, true);
 }
 
-Future<Class> getClassFromRootLib(Isolate isolate, String className) async {
-  Library rootLib = await isolate.rootLibrary.load();
-  for (var i = 0; i < rootLib.classes.length; i++) {
-    Class cls = rootLib.classes[i];
+Future<Class?> getClassFromRootLib(Isolate isolate, String className) async {
+  Library rootLib = await isolate.rootLibrary.load() as Library;
+  for (Class cls in rootLib.classes) {
     if (cls.name == className) {
       return cls;
     }
@@ -386,10 +448,10 @@ Future<Class> getClassFromRootLib(Isolate isolate, String className) async {
 
 Future<Instance> rootLibraryFieldValue(
     Isolate isolate, String fieldName) async {
-  Library rootLib = await isolate.rootLibrary.load();
+  Library rootLib = await isolate.rootLibrary.load() as Library;
   Field field = rootLib.variables.singleWhere((v) => v.name == fieldName);
   await field.load();
-  Instance value = field.staticValue;
+  Instance value = field.staticValue as Instance;
   await value.load();
   return value;
 }
@@ -403,9 +465,9 @@ IsolateTest runStepThroughProgramRecordingStops(List<String> recordStops) {
       if (event.kind == ServiceEvent.kPauseBreakpoint) {
         await isolate.reload();
         // We are paused: Step further.
-        Frame frame = isolate.topFrame;
-        recordStops.add(await frame.location.toUserString());
-        if (event.atAsyncSuspension) {
+        Frame frame = isolate.topFrame!;
+        recordStops.add(await frame.location!.toUserString());
+        if (event.atAsyncSuspension!) {
           isolate.stepOverAsyncSuspension();
         } else {
           isolate.stepOver();
@@ -421,6 +483,43 @@ IsolateTest runStepThroughProgramRecordingStops(List<String> recordStops) {
   };
 }
 
+IsolateTest resumeProgramRecordingStops(
+    List<String> recordStops, bool includeCaller) {
+  return (Isolate isolate) async {
+    Completer completer = new Completer();
+
+    await subscribeToStream(isolate.vm, VM.kDebugStream,
+        (ServiceEvent event) async {
+      if (event.kind == ServiceEvent.kPauseBreakpoint) {
+        await isolate.reload();
+        // We are paused: Resume after recording.
+        ServiceMap stack = await isolate.getStack();
+        expect(stack.type, equals('Stack'));
+        List frames = stack['frames'];
+        expect(frames.length, greaterThanOrEqualTo(2));
+        Frame frame = frames[0];
+        String brokeAt = await frame.location!.toUserString();
+        if (includeCaller) {
+          frame = frames[1];
+          String calledFrom = await frame.location!.toUserString();
+          recordStops.add("$brokeAt ($calledFrom)");
+        } else {
+          recordStops.add(brokeAt);
+        }
+
+        isolate.resume();
+      } else if (event.kind == ServiceEvent.kPauseExit) {
+        // We are at the exit: The test is done.
+        await cancelStreamSubscription(VM.kDebugStream);
+        completer.complete();
+      }
+    });
+    print("Resuming!");
+    isolate.resume();
+    return completer.future;
+  };
+}
+
 IsolateTest runStepIntoThroughProgramRecordingStops(List<String> recordStops) {
   return (Isolate isolate) async {
     Completer completer = new Completer();
@@ -430,8 +529,8 @@ IsolateTest runStepIntoThroughProgramRecordingStops(List<String> recordStops) {
       if (event.kind == ServiceEvent.kPauseBreakpoint) {
         await isolate.reload();
         // We are paused: Step into further.
-        Frame frame = isolate.topFrame;
-        recordStops.add(await frame.location.toUserString());
+        Frame frame = isolate.topFrame!;
+        recordStops.add(await frame.location!.toUserString());
         isolate.stepInto();
       } else if (event.kind == ServiceEvent.kPauseExit) {
         // We are at the exit: The test is done.
@@ -448,8 +547,8 @@ IsolateTest checkRecordedStops(
     List<String> recordStops, List<String> expectedStops,
     {bool removeDuplicates = false,
     bool debugPrint = false,
-    String debugPrintFile,
-    int debugPrintLine}) {
+    String? debugPrintFile,
+    int? debugPrintLine}) {
   return (Isolate isolate) async {
     if (debugPrint) {
       for (int i = 0; i < recordStops.length; i++) {
@@ -478,21 +577,38 @@ IsolateTest checkRecordedStops(
       expectedStops = removeAdjacentDuplicates(expectedStops);
     }
 
-    int end = recordStops.length < expectedStops.length
-        ? recordStops.length
-        : expectedStops.length;
-    for (int i = 0; i < end; ++i) {
-      expect(recordStops[i], expectedStops[i]);
+    // Single stepping may record extra stops.
+    // Allow the extra ones as long as the expected ones are recorded.
+    int i = 0;
+    int j = 0;
+    while (i < recordStops.length && j < expectedStops.length) {
+      if (recordStops[i] != expectedStops[j]) {
+        // Check if recordStops[i] is an extra stop.
+        int k = i + 1;
+        while (k < recordStops.length && recordStops[k] != expectedStops[j]) {
+          k++;
+        }
+        if (k < recordStops.length) {
+          // Allow and ignore extra recorded stops from i to k-1.
+          i = k;
+        } else {
+          // This will report an error.
+          expect(recordStops[i], expectedStops[j]);
+        }
+      }
+      i++;
+      j++;
     }
 
     expect(recordStops.length >= expectedStops.length, true,
-        reason: "Expects at least ${expectedStops.length} breaks.");
+        reason: "Expects at least ${expectedStops.length} breaks, "
+            "got ${recordStops.length}.");
   };
 }
 
 List<String> removeAdjacentDuplicates(List<String> fromList) {
   List<String> result = <String>[];
-  String latestLine;
+  String? latestLine;
   for (String s in fromList) {
     if (s == latestLine) continue;
     latestLine = s;
@@ -501,34 +617,4 @@ List<String> removeAdjacentDuplicates(List<String> fromList) {
   return result;
 }
 
-bool isKernel() {
-  for (String argument in Platform.executableArguments) {
-    if (argument.startsWith("--dfe=")) return true;
-  }
-  return false;
-}
-
-E ifKernel<E>(E then, E otherwise) {
-  if (isKernel()) return then;
-  return otherwise;
-}
-
-void ifKernelExecute(Function kernelFunction, Function nonKernelFunction) {
-  if (isKernel()) {
-    kernelFunction();
-  } else {
-    nonKernelFunction();
-  }
-}
-
-void nonKernelExecute(Function nonKernelFunction) {
-  if (!isKernel()) {
-    nonKernelFunction();
-  }
-}
-
-void kernelExecute(Function kernelFunction) {
-  if (isKernel()) {
-    kernelFunction();
-  }
-}
+Future<void> waitForTargetVMExit(VM vm) async => await vm.onDisconnect;

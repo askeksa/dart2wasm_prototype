@@ -1,6 +1,8 @@
 #!/usr/bin/make -f
 export DH_VERBOSE = 1
 
+AOT_SUPPORTED_ARCHS := amd64 arm
+
 # Use DEB_BUILD_OPTIONS's parallel=n option (see Policy 4.9.1)
 ifneq (,$(findstring parallel,$(DEB_BUILD_OPTIONS)))
 PARALLEL_JOBS := $(shell echo $(DEB_BUILD_OPTIONS) | \
@@ -11,17 +13,21 @@ endif
 
 ifeq (amd64,$(DEB_HOST_ARCH_CPU))
 BUILD_TYPE += ReleaseX64
+BUILD_TYPE_PRODUCT += ProductX64
 ARCH += x64
 else
 ifeq (i386,$(DEB_HOST_ARCH_CPU))
 BUILD_TYPE += ReleaseIA32
+BUILD_TYPE_PRODUCT += ProductIA32
 ARCH += ia32
 else
 ifeq (arm,$(DEB_HOST_ARCH_CPU))
 ifeq ($(DEB_BUILD_ARCH_CPU),$(DEB_HOST_ARCH_CPU))
 BUILD_TYPE += ReleaseARM
+BUILD_TYPE_PRODUCT += ProductARM
 else
 BUILD_TYPE += ReleaseXARM
+BUILD_TYPE_PRODUCT += ProductXARM
 endif
 ARCH += arm
 else
@@ -47,11 +53,12 @@ override_dh_auto_clean:
 	find . -name *.Makefile -execdir rm -f {} \;
 
 override_dh_auto_configure:
-	GYP_GENERATORS=make python dart/tools/gyp_dart.py all
+	python3 dart/tools/generate_buildfiles.py
 
 override_dh_auto_build:
 	cd dart; \
-	python tools/build.py -v -m release -a $(ARCH) $(TOOLCHAIN) create_sdk; \
+	python3 tools/build.py --no-goma --mode release \
+	  --arch $(ARCH) $(TOOLCHAIN) create_sdk; \
 	cd ..
 
 # Building the Dart SDK will already strip all binaries.

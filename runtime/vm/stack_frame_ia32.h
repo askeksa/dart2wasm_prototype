@@ -5,6 +5,10 @@
 #ifndef RUNTIME_VM_STACK_FRAME_IA32_H_
 #define RUNTIME_VM_STACK_FRAME_IA32_H_
 
+#if !defined(RUNTIME_VM_STACK_FRAME_H_)
+#error Do not include stack_frame_ia32.h directly; use stack_frame.h instead.
+#endif
+
 namespace dart {
 
 /* IA32 Dart Frame Layout
@@ -30,6 +34,7 @@ static const int kDartFrameFixedSize = 3;  // PC marker, EBP, PC.
 static const int kSavedPcSlotFromSp = -1;
 
 static const int kFirstObjectSlotFromFp = -1;  // Used by GC to traverse stack.
+static const int kLastFixedObjectSlotFromFp = -1;
 
 static const int kFirstLocalSlotFromFp = -2;
 static const int kPcMarkerSlotFromFp = -1;
@@ -37,12 +42,24 @@ static const int kSavedCallerFpSlotFromFp = 0;
 static const int kSavedCallerPcSlotFromFp = 1;
 static const int kParamEndSlotFromFp = 1;  // One slot past last parameter.
 static const int kCallerSpSlotFromFp = 2;
+static const int kLastParamSlotFromEntrySp = 1;  // Skip return address.
 
 // No pool pointer on IA32 (indicated by aliasing saved fp).
 static const int kSavedCallerPpSlotFromFp = kSavedCallerFpSlotFromFp;
 
 // Entry and exit frame layout.
-static const int kExitLinkSlotFromEntryFp = -7;
+static const int kExitLinkSlotFromEntryFp = -8;
+
+// All arguments are passed on the stack, so none need to be saved. Therefore
+// there is no frame for holding the saved arguments.
+//
+// If NativeCallbackTrampolines::Enabled(), then
+// kNativeCallbackTrampolineStackDelta must be added as well.
+constexpr intptr_t kCallbackSlotsBeforeSavedArguments = 0;
+
+// For FFI calls passing in TypedData, we save it on the stack before entering
+// a Dart frame. This denotes how to get to the backed up typed data.
+static const int kFfiCallerTypedDataSlotFromFp = kCallerSpSlotFromFp;
 
 }  // namespace dart
 

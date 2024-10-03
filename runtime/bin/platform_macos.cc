@@ -3,50 +3,71 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "platform/globals.h"
-#if defined(HOST_OS_MACOS)
+#if defined(DART_HOST_OS_MACOS)
 
 #include "bin/platform.h"
+#include "bin/platform_macos.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 
-#if !HOST_OS_IOS
+#if !DART_HOST_OS_IOS
 #include <crt_externs.h>  // NOLINT
-#endif                    // !HOST_OS_IOS
+#endif                    // !DART_HOST_OS_IOS
+#include <errno.h>        // NOLINT
 #include <mach-o/dyld.h>
-#include <signal.h>      // NOLINT
-#include <string.h>      // NOLINT
-#include <sys/sysctl.h>  // NOLINT
-#include <sys/types.h>   // NOLINT
-#include <unistd.h>      // NOLINT
+#include <signal.h>        // NOLINT
+#include <sys/resource.h>  // NOLINT
+#include <sys/sysctl.h>    // NOLINT
+#include <sys/types.h>     // NOLINT
+#include <sys/utsname.h>   // NOLINT
+#include <unistd.h>        // NOLINT
 
-#include "bin/fdutils.h"
+#include <string>
+
+#include "bin/console.h"
 #include "bin/file.h"
+#include "bin/platform_macos_cocoa.h"
 
 namespace dart {
 namespace bin {
 
 const char* Platform::executable_name_ = NULL;
-char* Platform::resolved_executable_name_ = NULL;
 int Platform::script_index_ = 1;
 char** Platform::argv_ = NULL;
 
 static void segv_handler(int signal, siginfo_t* siginfo, void* context) {
+  Syslog::PrintErr(
+      "\n===== CRASH =====\n"
+      "si_signo=%s(%d), si_code=%d, si_addr=%p\n",
+      strsignal(siginfo->si_signo), siginfo->si_signo, siginfo->si_code,
+      siginfo->si_addr);
   Dart_DumpNativeStackTrace(context);
+  Dart_PrepareToAbort();
   abort();
 }
-
 
 bool Platform::Initialize() {
   // Turn off the signal handler for SIGPIPE as it causes the process
   // to terminate on writing to a closed pipe. Without the signal
   // handler error EPIPE is set instead.
-  struct sigaction act;
-  bzero(&act, sizeof(act));
+  struct sigaction act = {};
   act.sa_handler = SIG_IGN;
   if (sigaction(SIGPIPE, &act, 0) != 0) {
     perror("Setting signal handler failed");
     return false;
   }
+
+  // tcsetattr raises SIGTTOU if we try to set console attributes when
+  // backgrounded, which suspends the process. Ignoring the signal prevents
+  // us from being suspended and lets us fail gracefully instead.
+  sigset_t signal_mask;
+  sigemptyset(&signal_mask);
+  sigaddset(&signal_mask, SIGTTOU);
+  if (sigprocmask(SIG_BLOCK, &signal_mask, NULL) < 0) {
+    perror("Setting signal handler failed");
+    return false;
+  }
+
   act.sa_flags = SA_SIGINFO;
   act.sa_sigaction = &segv_handler;
   if (sigemptyset(&act.sa_mask) != 0) {
@@ -61,13 +82,20 @@ bool Platform::Initialize() {
     perror("sigaction() failed.");
     return false;
   }
+  if (sigaction(SIGBUS, &act, NULL) != 0) {
+    perror("sigaction() failed.");
+    return false;
+  }
   if (sigaction(SIGTRAP, &act, NULL) != 0) {
+    perror("sigaction() failed.");
+    return false;
+  }
+  if (sigaction(SIGILL, &act, NULL) != 0) {
     perror("sigaction() failed.");
     return false;
   }
   return true;
 }
-
 
 int Platform::NumberOfProcessors() {
   int32_t cpus = -1;
@@ -80,25 +108,26 @@ int Platform::NumberOfProcessors() {
   }
 }
 
-
 const char* Platform::OperatingSystem() {
-#if HOST_OS_IOS
+#if DART_HOST_OS_IOS
   return "ios";
 #else
   return "macos";
 #endif
 }
 
+const char* Platform::OperatingSystemVersion() {
+  std::string version(NSProcessInfoOperatingSystemVersionString());
+  return DartUtils::ScopedCopyCString(version.c_str());
+}
 
 const char* Platform::LibraryPrefix() {
   return "lib";
 }
 
-
 const char* Platform::LibraryExtension() {
   return "dylib";
 }
-
 
 static const char* GetLocaleName() {
   CFLocaleRef locale = CFLocaleCopyCurrent();
@@ -116,7 +145,6 @@ static const char* GetLocaleName() {
   }
   return result;
 }
-
 
 static const char* GetPreferredLanguageName() {
   CFArrayRef languages = CFLocaleCopyPreferredLanguages();
@@ -144,22 +172,19 @@ static const char* GetPreferredLanguageName() {
   return result;
 }
 
-
 const char* Platform::LocaleName() {
   // First see if there is a preferred language. If not, return the
   // current locale name.
-  const char* preferred_langauge = GetPreferredLanguageName();
-  return (preferred_langauge != NULL) ? preferred_langauge : GetLocaleName();
+  const char* preferred_language = GetPreferredLanguageName();
+  return (preferred_language != NULL) ? preferred_language : GetLocaleName();
 }
-
 
 bool Platform::LocalHostname(char* buffer, intptr_t buffer_length) {
   return gethostname(buffer, buffer_length) == 0;
 }
 
-
 char** Platform::Environment(intptr_t* count) {
-#if HOST_OS_IOS
+#if DART_HOST_OS_IOS
   // TODO(zra,chinmaygarde): On iOS, environment variables are seldom used. Wire
   // this up if someone needs it. In the meantime, we return an empty array.
   char** result;
@@ -191,6 +216,9 @@ char** Platform::Environment(intptr_t* count) {
 #endif
 }
 
+const char* Platform::GetExecutableName() {
+  return executable_name_;
+}
 
 const char* Platform::ResolveExecutablePath() {
   // Get the required length of the buffer.
@@ -204,16 +232,39 @@ const char* Platform::ResolveExecutablePath() {
     return NULL;
   }
   // Return the canonical path as the returned path might contain symlinks.
-  const char* canon_path = File::GetCanonicalPath(path);
+  const char* canon_path = File::GetCanonicalPath(NULL, path);
   return canon_path;
 }
 
+intptr_t Platform::ResolveExecutablePathInto(char* result, size_t result_size) {
+  // Get the required length of the buffer.
+  uint32_t path_size = 0;
+  if (_NSGetExecutablePath(nullptr, &path_size) == 0) {
+    return -1;
+  }
+  if (path_size > result_size) {
+    return -1;
+  }
+  if (_NSGetExecutablePath(result, &path_size) != 0) {
+    return -1;
+  }
+  return path_size;
+}
+
+void Platform::SetProcessName(const char* name) {}
 
 void Platform::Exit(int exit_code) {
+  Console::RestoreConfig();
+  Dart_PrepareToAbort();
   exit(exit_code);
+}
+
+void Platform::SetCoreDumpResourceLimit(int value) {
+  rlimit limit = {static_cast<rlim_t>(value), static_cast<rlim_t>(value)};
+  setrlimit(RLIMIT_CORE, &limit);
 }
 
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_MACOS)
+#endif  // defined(DART_HOST_OS_MACOS)

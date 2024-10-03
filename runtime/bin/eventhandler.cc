@@ -2,8 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "bin/eventhandler.h"
 
 #include "bin/builtin.h"
@@ -17,50 +15,8 @@
 namespace dart {
 namespace bin {
 
-void TimeoutQueue::UpdateTimeout(Dart_Port port, int64_t timeout) {
-  // Find port if present.
-  Timeout* last = NULL;
-  Timeout* current = timeouts_;
-  while (current != NULL) {
-    if (current->port() == port) {
-      // Found.
-      if (timeout < 0) {
-        // Remove from list and delete existing.
-        if (last != NULL) {
-          last->set_next(current->next());
-        } else {
-          timeouts_ = current->next();
-        }
-        delete current;
-      } else {
-        // Update timeout.
-        current->set_timeout(timeout);
-      }
-      break;
-    }
-    last = current;
-    current = current->next();
-  }
-  if (current == NULL && timeout >= 0) {
-    // Not found, create a new.
-    timeouts_ = new Timeout(port, timeout, timeouts_);
-  }
-  // Clear and find next timeout.
-  next_timeout_ = NULL;
-  current = timeouts_;
-  while (current != NULL) {
-    if ((next_timeout_ == NULL) ||
-        (current->timeout() < next_timeout_->timeout())) {
-      next_timeout_ = current;
-    }
-    current = current->next();
-  }
-}
-
-
 static EventHandler* event_handler = NULL;
 static Monitor* shutdown_monitor = NULL;
-
 
 void EventHandler::Start() {
   // Initialize global socket registry.
@@ -70,14 +26,16 @@ void EventHandler::Start() {
   shutdown_monitor = new Monitor();
   event_handler = new EventHandler();
   event_handler->delegate_.Start(event_handler);
-}
 
+  if (!SocketBase::Initialize()) {
+    FATAL("Failed to initialize sockets");
+  }
+}
 
 void EventHandler::NotifyShutdownDone() {
   MonitorLocker ml(shutdown_monitor);
   ml.Notify();
 }
-
 
 void EventHandler::Stop() {
   if (event_handler == NULL) {
@@ -103,7 +61,6 @@ void EventHandler::Stop() {
   ListeningSocketRegistry::Cleanup();
 }
 
-
 EventHandlerImplementation* EventHandler::delegate() {
   if (event_handler == NULL) {
     return NULL;
@@ -111,11 +68,9 @@ EventHandlerImplementation* EventHandler::delegate() {
   return &event_handler->delegate_;
 }
 
-
 void EventHandler::SendFromNative(intptr_t id, Dart_Port port, int64_t data) {
   event_handler->SendData(id, port, data);
 }
-
 
 /*
  * Send data to the EventHandler thread to register for a given instance
@@ -146,7 +101,6 @@ void FUNCTION_NAME(EventHandler_SendData)(Dart_NativeArguments args) {
   event_handler->SendData(id, dart_port, data);
 }
 
-
 void FUNCTION_NAME(EventHandler_TimerMillisecondClock)(
     Dart_NativeArguments args) {
   int64_t now = TimerUtils::GetCurrentMonotonicMillis();
@@ -155,5 +109,3 @@ void FUNCTION_NAME(EventHandler_TimerMillisecondClock)(
 
 }  // namespace bin
 }  // namespace dart
-
-#endif  // !defined(DART_IO_DISABLED)

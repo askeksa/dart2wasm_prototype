@@ -15,10 +15,8 @@
 #include "vm/instructions_arm.h"
 #elif defined(TARGET_ARCH_ARM64)
 #include "vm/instructions_arm64.h"
-#elif defined(TARGET_ARCH_MIPS)
-#include "vm/instructions_mips.h"
-#elif defined(TARGET_ARCH_DBC)
-#include "vm/instructions_dbc.h"
+#elif defined(TARGET_ARCH_RISCV32) || defined(TARGET_ARCH_RISCV64)
+#include "vm/instructions_riscv.h"
 #else
 #error Unknown architecture.
 #endif
@@ -29,6 +27,20 @@ class Object;
 class Code;
 
 bool DecodeLoadObjectFromPoolOrThread(uword pc, const Code& code, Object* obj);
+
+#if !defined(TARGET_ARCH_IA32)
+
+class TypeTestingStubCallPattern : public ValueObject {
+ public:
+  explicit TypeTestingStubCallPattern(uword pc) : pc_(pc) {}
+
+  intptr_t GetSubtypeTestCachePoolIndex();
+
+ private:
+  const uword pc_;
+};
+
+#endif  // !defined(TARGET_ARCH_IA32)
 
 }  // namespace dart
 

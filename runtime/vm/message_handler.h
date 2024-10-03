@@ -5,10 +5,13 @@
 #ifndef RUNTIME_VM_MESSAGE_HANDLER_H_
 #define RUNTIME_VM_MESSAGE_HANDLER_H_
 
+#include <memory>
+
 #include "vm/isolate.h"
 #include "vm/lockers.h"
 #include "vm/message.h"
 #include "vm/os_thread.h"
+#include "vm/port_set.h"
 #include "vm/thread_pool.h"
 
 namespace dart {
@@ -45,7 +48,10 @@ class MessageHandler {
   // no longer has any live ports.  Abnormal termination occurs when
   // HandleMessage() indicates that an error has occurred during
   // message processing.
-  void Run(ThreadPool* pool,
+
+  // Returns false if the handler terminated abnormally, otherwise it
+  // returns true.
+  bool Run(ThreadPool* pool,
            StartCallback start_callback,
            EndCallback end_callback,
            CallbackData data);
@@ -57,29 +63,28 @@ class MessageHandler {
   // Returns true on success.
   MessageStatus HandleNextMessage();
 
-  // Handles all messages for this message handler.  Should only
-  // be used when not running the handler on the thread pool (via Run
-  // or RunBlocking).
-  //
-  // Returns true on success.
-  MessageStatus HandleAllMessages();
-
   // Handles any OOB messages for this message handler.  Can be used
   // even if the message handler is running on the thread pool.
   //
   // Returns true on success.
   MessageStatus HandleOOBMessages();
 
+  // Blocks the thread on a condition variable until a message arrives, and then
+  // handles all messages.
+  MessageStatus PauseAndHandleAllMessages(int64_t timeout_millis);
+
   // Returns true if there are pending OOB messages for this message
   // handler.
   bool HasOOBMessages();
+
+  // Returns true if there are pending normal messages for this message
+  // handler.
+  bool HasMessages();
 
   // A message handler tracks how many live ports it has.
   bool HasLivePorts() const { return live_ports_ > 0; }
 
   intptr_t live_ports() const { return live_ports_; }
-
-  void DebugDump();
 
   bool paused() const { return paused_ > 0; }
 
@@ -89,7 +94,9 @@ class MessageHandler {
     paused_--;
   }
 
-  bool ShouldPauseOnStart(MessageStatus status) const;
+#if !defined(PRODUCT)
+  void DebugDump();
+
   bool should_pause_on_start() const { return should_pause_on_start_; }
 
   void set_should_pause_on_start(bool should_pause_on_start) {
@@ -98,7 +105,6 @@ class MessageHandler {
 
   bool is_paused_on_start() const { return is_paused_on_start_; }
 
-  bool ShouldPauseOnExit(MessageStatus status) const;
   bool should_pause_on_exit() const { return should_pause_on_exit_; }
 
   void set_should_pause_on_exit(bool should_pause_on_exit) {
@@ -110,8 +116,11 @@ class MessageHandler {
   // Timestamp of the paused on start or paused on exit.
   int64_t paused_timestamp() const { return paused_timestamp_; }
 
+  bool ShouldPauseOnStart(MessageStatus status) const;
+  bool ShouldPauseOnExit(MessageStatus status) const;
   void PausedOnStart(bool paused);
   void PausedOnExit(bool paused);
+#endif
 
   // Gives temporary ownership of |queue| and |oob_queue|. Using this object
   // has the side effect that no OOB messages will be handled if a stack
@@ -165,7 +174,8 @@ class MessageHandler {
   // Posts a message on this handler's message queue.
   // If before_events is true, then the message is enqueued before any pending
   // events, but after any pending isolate library events.
-  void PostMessage(Message* message, bool before_events = false);
+  void PostMessage(std::unique_ptr<Message> message,
+                   bool before_events = false);
 
   // Notifies this handler that a port is being closed.
   void ClosePort(Dart_Port port);
@@ -192,7 +202,7 @@ class MessageHandler {
   // Handles a single message.  Provided by subclass.
   //
   // Returns true on success.
-  virtual MessageStatus HandleMessage(Message* message) = 0;
+  virtual MessageStatus HandleMessage(std::unique_ptr<Message> message) = 0;
 
   virtual void NotifyPauseOnStart() {}
   virtual void NotifyPauseOnExit() {}
@@ -205,8 +215,21 @@ class MessageHandler {
   friend class MessageHandlerTestPeer;
   friend class MessageHandlerTask;
 
+  struct PortSetEntry : public PortSet<PortSetEntry>::Entry {};
+
   // Called by MessageHandlerTask to process our task queue.
   void TaskCallback();
+
+  // Checks if we have a slot for idle task execution, if we have a slot
+  // for idle task execution it is scheduled immediately or we wait for
+  // idle expiration and then attempt to schedule the idle task.
+  // Returns true if their is scope for idle task execution so that we
+  // can loop back to handle more messages or false if idle tasks are not
+  // scheduled.
+  bool CheckIfIdleLocked(MonitorLocker* ml);
+
+  // Triggers a run of the idle task.
+  void RunIdleTaskLocked(MonitorLocker* ml);
 
   // NOTE: These two functions release and reacquire the monitor, you may
   // need to call HandleMessages to ensure all pending messages are handled.
@@ -215,7 +238,7 @@ class MessageHandler {
 
   // Dequeue the next message.  Prefer messages from the oob_queue_ to
   // messages from the queue_.
-  Message* DequeueMessage(Message::Priority min_priority);
+  std::unique_ptr<Message> DequeueMessage(Message::Priority min_priority);
 
   void ClearOOBQueue();
 
@@ -230,16 +253,21 @@ class MessageHandler {
   // This flag is not thread safe and can only reliably be accessed on a single
   // thread.
   bool oob_message_handling_allowed_;
+  bool paused_for_messages_;
+  PortSet<PortSetEntry>
+      ports_;  // Only accessed by [PortMap], protected by [PortMap]s lock.
   intptr_t live_ports_;  // The number of open ports, including control ports.
   intptr_t paused_;      // The number of pause messages received.
+#if !defined(PRODUCT)
   bool should_pause_on_start_;
   bool should_pause_on_exit_;
   bool is_paused_on_start_;
   bool is_paused_on_exit_;
-  bool delete_me_;
   int64_t paused_timestamp_;
+#endif
+  bool task_running_;
+  bool delete_me_;
   ThreadPool* pool_;
-  ThreadPool::Task* task_;
   StartCallback start_callback_;
   EndCallback end_callback_;
   CallbackData callback_data_;

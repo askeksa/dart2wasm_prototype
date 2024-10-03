@@ -8,34 +8,32 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' as M show IsolateRef, LibraryRef;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 
-class LibraryRefElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<LibraryRefElement>('library-ref');
-
-  RenderingScheduler<LibraryRefElement> _r;
+class LibraryRefElement extends CustomElement implements Renderable {
+  late RenderingScheduler<LibraryRefElement> _r;
 
   Stream<RenderedEvent<LibraryRefElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.LibraryRef _library;
+  late M.IsolateRef _isolate;
+  late M.LibraryRef _library;
 
   M.IsolateRef get isolate => _isolate;
   M.LibraryRef get library => _library;
 
   factory LibraryRefElement(M.IsolateRef isolate, M.LibraryRef library,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(library != null);
-    LibraryRefElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    LibraryRefElement e = new LibraryRefElement.created();
+    e._r = new RenderingScheduler<LibraryRefElement>(e, queue: queue);
     e._isolate = isolate;
     e._library = library;
     return e;
   }
 
-  LibraryRefElement.created() : super.created();
+  LibraryRefElement.created() : super.created('library-ref');
 
   @override
   void attached() {
@@ -47,12 +45,12 @@ class LibraryRefElement extends HtmlElement implements Renderable {
   void detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
   }
 
   void render() {
     final name = _library.name;
-    children = [
+    children = <Element>[
       new AnchorElement(href: Uris.inspect(_isolate, object: _library))
         ..text = (name == null || name.isEmpty) ? 'unnamed' : name
     ];

@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of swarmlib;
 
 /**
@@ -54,8 +56,7 @@ class SwarmState extends UIState {
   BiIterator<Section> _sectionIterator;
 
   SwarmState(this._dataModel)
-      : super(),
-        currentArticle = new ObservableValue<Article>(null),
+      : currentArticle = new ObservableValue<Article>(null),
         selectedArticle = new ObservableValue<Article>(null),
         storyMaximized = new ObservableValue<bool>(false),
         storyTextMode = new ObservableValue<bool>(true) {

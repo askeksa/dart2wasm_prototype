@@ -5,10 +5,30 @@
 #ifndef RUNTIME_VM_CONSTANTS_ARM_H_
 #define RUNTIME_VM_CONSTANTS_ARM_H_
 
-#include "platform/globals.h"
+#ifndef RUNTIME_VM_CONSTANTS_H_
+#error Do not include constants_arm.h directly; use constants.h instead.
+#endif
+
 #include "platform/assert.h"
+#include "platform/globals.h"
+
+#include "vm/constants_base.h"
 
 namespace dart {
+
+// LR register should not be used directly in handwritten assembly patterns,
+// because it might contain return address. Instead use macross CLOBBERS_LR,
+// SPILLS_RETURN_ADDRESS_FROM_LR_TO_REGISTER,
+// RESTORES_RETURN_ADDRESS_FROM_REGISTER_TO_LR, SPILLS_LR_TO_FRAME,
+// RESTORES_LR_FROM_FRAME, READS_RETURN_ADDRESS_FROM_LR,
+// WRITES_RETURN_ADDRESS_TO_LR to get access to LR constant in a checked way.
+//
+// To prevent accidental use of LR constant we rename it to
+// LR_DO_NOT_USE_DIRECTLY (while keeping the code in this file and other files
+// which are permitted to access LR constant the same by defining LR as
+// LR_DO_NOT_USE_DIRECTLY). You can also use LINK_REGISTER if you need
+// to compare LR register code.
+#define LR LR_DO_NOT_USE_DIRECTLY
 
 // We support both VFPv3-D16 and VFPv3-D32 profiles, but currently only one at
 // a time.
@@ -24,9 +44,8 @@ namespace dart {
 #error "Exactly one of VFPv3_D16 or VFPv3_D32 can be defined at a time."
 #endif
 
-
 // The Linux/Android ABI and the iOS ABI differ in their choice of frame
-// pointer, their treatment of R9, and the interproduceral stack alignment.
+// pointer, their treatment of R9, and the interprocedural stack alignment.
 
 // EABI (Linux, Android)
 // See "Procedure Call Standard for the ARM Architecture".
@@ -41,24 +60,23 @@ namespace dart {
 // Stack alignment: 4 bytes always, 8 bytes at public interfaces
 
 // Linux (Debian armhf) and Android also differ in whether floating point
-// arguments are passed in registers. Linux uses hardfp and Android uses
-// softfp. See TargetCPUFeatures::hardfp_supported().
+// arguments are passed in floating point registers. Linux uses hardfp and
+// Android uses softfp. See TargetCPUFeatures::hardfp_supported().
 
 // iOS ABI
 // See "iOS ABI Function Call Guide"
-// R0-R1: Argument / result / volatile
-// R2-R3: Argument / volatile
-// R4-R6: Preserved
-// R7:    Frame pointer
-// R8-R9: Preserved
-// R12:   Volatile
-// R13:   Stack pointer
-// R14:   Link register
-// R15:   Program counter
+// R0-R1:  Argument / result / volatile
+// R2-R3:  Argument / volatile
+// R4-R6:  Preserved
+// R7:     Frame pointer
+// R8-R11: Preserved
+// R12:    Volatile
+// R13:    Stack pointer
+// R14:    Link register
+// R15:    Program counter
 // Stack alignment: 4 bytes always, 4 bytes at public interfaces
 
-// iOS passes floating point arguments in registers (hardfp)
-
+// iOS passes floating point arguments in integer registers (softfp)
 
 enum Register {
   R0 = 0,
@@ -67,7 +85,7 @@ enum Register {
   R3 = 3,
   R4 = 4,
   R5 = 5,  // PP
-  R6 = 6,  // CTX
+  R6 = 6,  // CODE
   R7 = 7,  // iOS FP
   R8 = 8,
   R9 = 9,
@@ -81,7 +99,7 @@ enum Register {
   kNoRegister = -1,  // Signals an illegal register.
 
 // Aliases.
-#if defined(TARGET_OS_MACOS) || defined(TARGET_OS_MACOS_IOS)
+#if defined(DART_TARGET_OS_MACOS) || defined(DART_TARGET_OS_MACOS_IOS)
   FP = R7,
   NOTFP = R11,
 #else
@@ -90,10 +108,9 @@ enum Register {
 #endif
   IP = R12,
   SP = R13,
-  LR = R14,
+  LR = R14,  // Note: direct access to this constant is not allowed. See above.
   PC = R15,
 };
-
 
 // Values for single-precision floating point registers.
 enum SRegister {
@@ -132,7 +149,6 @@ enum SRegister {
   S31 = 31,
   kNumberOfSRegisters = 32,
 };
-
 
 // Values for double-precision floating point registers.
 enum DRegister {
@@ -196,7 +212,6 @@ enum DRegister {
   kNumberOfOverlappingDRegisters = 16,
 };
 
-
 enum QRegister {
   kNoQRegister = -1,
   Q0 = 0,
@@ -230,7 +245,6 @@ enum QRegister {
 #endif
 };
 
-
 static inline DRegister EvenDRegisterOf(QRegister q) {
   return static_cast<DRegister>(q * 2);
 }
@@ -238,7 +252,6 @@ static inline DRegister EvenDRegisterOf(QRegister q) {
 static inline DRegister OddDRegisterOf(QRegister q) {
   return static_cast<DRegister>((q * 2) + 1);
 }
-
 
 static inline SRegister EvenSRegisterOf(DRegister d) {
 #if defined(VFPv3_D32)
@@ -256,28 +269,42 @@ static inline SRegister OddSRegisterOf(DRegister d) {
   return static_cast<SRegister>((d * 2) + 1);
 }
 
+static inline QRegister QRegisterOf(DRegister d) {
+  return static_cast<QRegister>(d / 2);
+}
+static inline QRegister QRegisterOf(SRegister s) {
+  return static_cast<QRegister>(s / 4);
+}
+static inline DRegister DRegisterOf(SRegister s) {
+  return static_cast<DRegister>(s / 2);
+}
 
 // Register aliases for floating point scratch registers.
 const QRegister QTMP = Q7;                     // Overlaps with DTMP, STMP.
 const DRegister DTMP = EvenDRegisterOf(QTMP);  // Overlaps with STMP.
-const SRegister STMP = EvenSRegisterOf(DTMP);
+const SRegister STMP DART_USED = EvenSRegisterOf(DTMP);
 
 // Architecture independent aliases.
 typedef QRegister FpuRegister;
 
 const FpuRegister FpuTMP = QTMP;
+const int kFpuRegisterSize = 16;
+typedef simd128_value_t fpu_register_t;
 const int kNumberOfFpuRegisters = kNumberOfQRegisters;
 const FpuRegister kNoFpuRegister = kNoQRegister;
+
+extern const char* const cpu_reg_names[kNumberOfCpuRegisters];
+extern const char* const fpu_reg_names[kNumberOfFpuRegisters];
+extern const char* const fpu_s_reg_names[kNumberOfSRegisters];
+extern const char* const fpu_d_reg_names[kNumberOfDRegisters];
 
 // Register aliases.
 const Register TMP = IP;            // Used as scratch register by assembler.
 const Register TMP2 = kNoRegister;  // There is no second assembler temporary.
-const Register CTX = R6;    // Location of current context at method entry.
-const Register PP = R5;     // Caches object pool pointer in generated code.
-const Register SPREG = SP;  // Stack pointer register.
-const Register FPREG = FP;  // Frame pointer register.
-const Register LRREG = LR;  // Link register.
-const Register ICREG = R9;  // IC data register.
+const Register PP = R5;  // Caches object pool pointer in generated code.
+const Register DISPATCH_TABLE_REG = NOTFP;  // Dispatch table register.
+const Register SPREG = SP;                  // Stack pointer register.
+const Register FPREG = FP;                  // Frame pointer register.
 const Register ARGS_DESC_REG = R4;
 const Register CODE_REG = R6;
 const Register THR = R10;  // Caches current thread in generated code.
@@ -286,24 +313,231 @@ const Register CALLEE_SAVED_TEMP = R8;
 // R15 encodes APSR in the vmrs instruction.
 const Register APSR = R15;
 
-// Exception object is passed in this register to the catch handlers when an
-// exception is thrown.
+// ABI for catch-clause entry point.
 const Register kExceptionObjectReg = R0;
-
-// Stack trace object is passed in this register to the catch handlers when
-// an exception is thrown.
 const Register kStackTraceObjectReg = R1;
 
+// ABI for write barrier stub.
+const Register kWriteBarrierObjectReg = R1;
+const Register kWriteBarrierValueReg = R0;
+const Register kWriteBarrierSlotReg = R9;
+
+// Common ABI for shared slow path stubs.
+struct SharedSlowPathStubABI {
+  static const Register kResultReg = R0;
+};
+
+// ABI for instantiation stubs.
+struct InstantiationABI {
+  static const Register kUninstantiatedTypeArgumentsReg = R3;
+  static const Register kInstantiatorTypeArgumentsReg = R2;
+  static const Register kFunctionTypeArgumentsReg = R1;
+  static const Register kResultTypeArgumentsReg = R0;
+  static const Register kResultTypeReg = R0;
+};
+
+// Registers in addition to those listed in TypeTestABI used inside the
+// implementation of type testing stubs that are _not_ preserved.
+struct TTSInternalRegs {
+  static const Register kInstanceTypeArgumentsReg = R4;
+  static const Register kScratchReg = R9;
+  static const Register kSubTypeArgumentReg = R3;
+  static const Register kSuperTypeArgumentReg = R8;
+
+  // Must be pushed/popped whenever generic type arguments are being checked as
+  // they overlap with registers in TypeTestABI.
+  static const intptr_t kSavedTypeArgumentRegisters =
+      (1 << kSubTypeArgumentReg) | (1 << kSuperTypeArgumentReg);
+
+  static const intptr_t kInternalRegisters =
+      ((1 << kInstanceTypeArgumentsReg) | (1 << kScratchReg) |
+       (1 << kSubTypeArgumentReg) | (1 << kSuperTypeArgumentReg)) &
+      ~kSavedTypeArgumentRegisters;
+};
+
+// Registers in addition to those listed in TypeTestABI used inside the
+// implementation of subtype test cache stubs that are _not_ preserved.
+struct STCInternalRegs {
+  static const Register kInstanceCidOrSignatureReg = R9;
+
+  static const intptr_t kInternalRegisters = (1 << kInstanceCidOrSignatureReg);
+};
+
+// Calling convention when calling TypeTestingStub and SubtypeTestCacheStub.
+struct TypeTestABI {
+  static const Register kInstanceReg = R0;
+  static const Register kDstTypeReg = R8;
+  static const Register kInstantiatorTypeArgumentsReg = R2;
+  static const Register kFunctionTypeArgumentsReg = R1;
+  static const Register kSubtypeTestCacheReg = R3;
+  static const Register kScratchReg = R4;
+
+  // For calls to InstanceOfStub.
+  static const Register kInstanceOfResultReg = kInstanceReg;
+  // For calls to SubtypeNTestCacheStub. Must be saved by the caller if the
+  // original value is needed after the call.
+  static const Register kSubtypeTestCacheResultReg = kSubtypeTestCacheReg;
+
+  // Registers that need saving across SubtypeTestCacheStub calls.
+  static const intptr_t kSubtypeTestCacheStubCallerSavedRegisters =
+      1 << kSubtypeTestCacheReg;
+
+  static const intptr_t kPreservedAbiRegisters =
+      (1 << kInstanceReg) | (1 << kDstTypeReg) |
+      (1 << kInstantiatorTypeArgumentsReg) | (1 << kFunctionTypeArgumentsReg);
+
+  static const intptr_t kNonPreservedAbiRegisters =
+      TTSInternalRegs::kInternalRegisters |
+      STCInternalRegs::kInternalRegisters | (1 << kSubtypeTestCacheReg) |
+      (1 << kScratchReg) | (1 << kSubtypeTestCacheResultReg) | (1 << CODE_REG);
+
+  static const intptr_t kAbiRegisters =
+      kPreservedAbiRegisters | kNonPreservedAbiRegisters;
+};
+
+// Calling convention when calling AssertSubtypeStub.
+struct AssertSubtypeABI {
+  static const Register kSubTypeReg = R0;
+  static const Register kSuperTypeReg = R8;
+  static const Register kInstantiatorTypeArgumentsReg = R2;
+  static const Register kFunctionTypeArgumentsReg = R1;
+  static const Register kDstNameReg = R3;
+
+  static const intptr_t kAbiRegisters =
+      (1 << kSubTypeReg) | (1 << kSuperTypeReg) |
+      (1 << kInstantiatorTypeArgumentsReg) | (1 << kFunctionTypeArgumentsReg) |
+      (1 << kDstNameReg);
+
+  // No result register, as AssertSubtype is only run for side effect
+  // (throws if the subtype check fails).
+};
+
+// ABI for InitStaticFieldStub.
+struct InitStaticFieldABI {
+  static const Register kFieldReg = R2;
+  static const Register kResultReg = R0;
+};
+
+// Registers used inside the implementation of InitLateStaticFieldStub.
+struct InitLateStaticFieldInternalRegs {
+  static const Register kFunctionReg = R0;
+  static const Register kAddressReg = R3;
+  static const Register kScratchReg = R4;
+};
+
+// ABI for InitInstanceFieldStub.
+struct InitInstanceFieldABI {
+  static const Register kInstanceReg = R1;
+  static const Register kFieldReg = R2;
+  static const Register kResultReg = R0;
+};
+
+// Registers used inside the implementation of InitLateInstanceFieldStub.
+struct InitLateInstanceFieldInternalRegs {
+  static const Register kFunctionReg = R0;
+  static const Register kAddressReg = R3;
+  static const Register kScratchReg = R4;
+};
+
+// ABI for LateInitializationError stubs.
+struct LateInitializationErrorABI {
+  static const Register kFieldReg = R9;
+};
+
+// ABI for ThrowStub.
+struct ThrowABI {
+  static const Register kExceptionReg = R0;
+};
+
+// ABI for ReThrowStub.
+struct ReThrowABI {
+  static const Register kExceptionReg = R0;
+  static const Register kStackTraceReg = R1;
+};
+
+// ABI for AssertBooleanStub.
+struct AssertBooleanABI {
+  static const Register kObjectReg = R0;
+};
+
+// ABI for RangeErrorStub.
+struct RangeErrorABI {
+  static const Register kLengthReg = R0;
+  static const Register kIndexReg = R1;
+};
+
+// ABI for AllocateObjectStub.
+struct AllocateObjectABI {
+  static const Register kResultReg = R0;
+  static const Register kTypeArgumentsReg = R3;
+};
+
+// ABI for AllocateClosureStub.
+struct AllocateClosureABI {
+  static const Register kResultReg = AllocateObjectABI::kResultReg;
+  static const Register kFunctionReg = R1;
+  static const Register kContextReg = R2;
+  static const Register kScratchReg = R4;
+};
+
+// ABI for AllocateMintShared*Stub.
+struct AllocateMintABI {
+  static const Register kResultReg = AllocateObjectABI::kResultReg;
+  static const Register kTempReg = R1;
+};
+
+// ABI for Allocate{Mint,Double,Float32x4,Float64x2}Stub.
+struct AllocateBoxABI {
+  static const Register kResultReg = AllocateObjectABI::kResultReg;
+  static const Register kTempReg = R1;
+};
+
+// ABI for AllocateArrayStub.
+struct AllocateArrayABI {
+  static const Register kResultReg = AllocateObjectABI::kResultReg;
+  static const Register kLengthReg = R2;
+  static const Register kTypeArgumentsReg = R1;
+};
+
+// ABI for AllocateTypedDataArrayStub.
+struct AllocateTypedDataArrayABI {
+  static const Register kResultReg = AllocateObjectABI::kResultReg;
+  static const Register kLengthReg = R4;
+};
+
+// ABI for BoxDoubleStub.
+struct BoxDoubleStubABI {
+  static const FpuRegister kValueReg = Q0;
+  static const Register kTempReg = R1;
+  static const Register kResultReg = R0;
+};
+
+// ABI for DoubleToIntegerStub.
+struct DoubleToIntegerStubABI {
+  static const FpuRegister kInputReg = Q0;
+  static const Register kRecognizedKindReg = R0;
+  static const Register kResultReg = R0;
+};
+
+// ABI for DispatchTableNullErrorStub and consequently for all dispatch
+// table calls (though normal functions will not expect or use this
+// register). This ABI is added to distinguish memory corruption errors from
+// null errors.
+struct DispatchTableNullErrorABI {
+  static const Register kClassIdReg = R0;
+};
+
+// TODO(regis): Add ABIs for type testing stubs and is-type test stubs instead
+// of reusing the constants of the instantiation stubs ABI.
 
 // List of registers used in load/store multiple.
 typedef uint16_t RegList;
 const RegList kAllCpuRegistersList = 0xFFFF;
 
-
 // C++ ABI call registers.
 const RegList kAbiArgumentCpuRegs =
     (1 << R0) | (1 << R1) | (1 << R2) | (1 << R3);
-#if defined(TARGET_OS_MACOS) || defined(TARGET_OS_MACOS_IOS)
+#if defined(DART_TARGET_OS_MACOS) || defined(DART_TARGET_OS_MACOS_IOS)
 const RegList kAbiPreservedCpuRegs =
     (1 << R4) | (1 << R5) | (1 << R6) | (1 << R8) | (1 << R10) | (1 << R11);
 const int kAbiPreservedCpuRegCount = 6;
@@ -318,14 +552,19 @@ const QRegister kAbiLastPreservedFpuReg = Q7;
 const int kAbiPreservedFpuRegCount = 4;
 
 const RegList kReservedCpuRegisters = (1 << SPREG) | (1 << FPREG) | (1 << TMP) |
-                                      (1 << PP) | (1 << THR) | (1 << PC);
+                                      (1 << PP) | (1 << THR) | (1 << LR) |
+                                      (1 << PC) | (1 << NOTFP);
+constexpr intptr_t kNumberOfReservedCpuRegisters = 8;
 // CPU registers available to Dart allocator.
-const RegList kDartAvailableCpuRegs =
+constexpr RegList kDartAvailableCpuRegs =
     kAllCpuRegistersList & ~kReservedCpuRegisters;
+constexpr int kNumberOfDartAvailableCpuRegs =
+    kNumberOfCpuRegisters - kNumberOfReservedCpuRegisters;
+const intptr_t kStoreBufferWrapperSize = 24;
 // Registers available to Dart that are not preserved by runtime calls.
 const RegList kDartVolatileCpuRegs =
     kDartAvailableCpuRegs & ~kAbiPreservedCpuRegs;
-#if defined(TARGET_OS_MACOS) || defined(TARGET_OS_MACOS_IOS)
+#if defined(DART_TARGET_OS_MACOS) || defined(DART_TARGET_OS_MACOS_IOS)
 const int kDartVolatileCpuRegCount = 6;
 #else
 const int kDartVolatileCpuRegCount = 5;
@@ -334,6 +573,67 @@ const QRegister kDartFirstVolatileFpuReg = Q0;
 const QRegister kDartLastVolatileFpuReg = Q3;
 const int kDartVolatileFpuRegCount = 4;
 
+#define R(REG) (1 << REG)
+
+class CallingConventions {
+ public:
+  static const intptr_t kArgumentRegisters = kAbiArgumentCpuRegs;
+  static const Register ArgumentRegisters[];
+  static const intptr_t kNumArgRegs = 4;
+  static const Register kPointerToReturnStructRegisterCall = R0;
+
+  static const intptr_t kFpuArgumentRegisters = 0;
+
+  static const FpuRegister FpuArgumentRegisters[];
+  static const intptr_t kNumFpuArgRegs = 4;
+  static const DRegister FpuDArgumentRegisters[];
+  static const intptr_t kNumDFpuArgRegs = 8;
+  static const SRegister FpuSArgumentRegisters[];
+  static const intptr_t kNumSFpuArgRegs = 16;
+
+  static constexpr bool kArgumentIntRegXorFpuReg = false;
+
+  static constexpr intptr_t kCalleeSaveCpuRegisters = kAbiPreservedCpuRegs;
+
+  // Whether larger than wordsize arguments are aligned to even registers.
+  static constexpr AlignmentStrategy kArgumentRegisterAlignment =
+      kAlignedToWordSizeBut8AlignedTo8;
+
+  // How stack arguments are aligned.
+  static constexpr AlignmentStrategy kArgumentStackAlignment =
+      kAlignedToWordSizeBut8AlignedTo8;
+
+  // How fields in compounds are aligned.
+#if defined(DART_TARGET_OS_MACOS_IOS)
+  static constexpr AlignmentStrategy kFieldAlignment =
+      kAlignedToValueSizeBut8AlignedTo4;
+#else
+  static constexpr AlignmentStrategy kFieldAlignment = kAlignedToValueSize;
+#endif
+
+  // Whether 1 or 2 byte-sized arguments or return values are passed extended
+  // to 4 bytes.
+  static constexpr ExtensionStrategy kReturnRegisterExtension = kExtendedTo4;
+  static constexpr ExtensionStrategy kArgumentRegisterExtension = kExtendedTo4;
+  static constexpr ExtensionStrategy kArgumentStackExtension = kExtendedTo4;
+
+  static constexpr Register kReturnReg = R0;
+  static constexpr Register kSecondReturnReg = R1;
+  static constexpr FpuRegister kReturnFpuReg = Q0;
+  static constexpr Register kPointerToReturnStructRegisterReturn = kReturnReg;
+
+  // We choose these to avoid overlap between themselves and reserved registers.
+  static constexpr Register kFirstNonArgumentRegister = R8;
+  static constexpr Register kSecondNonArgumentRegister = R9;
+  static constexpr Register kFfiAnyNonAbiRegister = R4;
+  static constexpr Register kStackPointerRegister = SPREG;
+
+  COMPILE_ASSERT(
+      ((R(kFirstNonArgumentRegister) | R(kSecondNonArgumentRegister)) &
+       (kArgumentRegisters | R(kPointerToReturnStructRegisterCall))) == 0);
+};
+
+#undef R
 
 // Values for the condition field as defined in section A3.2.
 enum Condition {
@@ -354,9 +654,40 @@ enum Condition {
   LE = 13,                 // signed less than or equal
   AL = 14,                 // always (unconditional)
   kSpecialCondition = 15,  // special condition (refer to section A3.2.1)
-  kMaxCondition = 16,
+  kNumberOfConditions = 16,
+
+  // Platform-independent variants declared for all platforms
+  EQUAL = EQ,
+  ZERO = EQUAL,
+  NOT_EQUAL = NE,
+  NOT_ZERO = NOT_EQUAL,
+  LESS = LT,
+  LESS_EQUAL = LE,
+  GREATER_EQUAL = GE,
+  GREATER = GT,
+  UNSIGNED_LESS = CC,
+  UNSIGNED_LESS_EQUAL = LS,
+  UNSIGNED_GREATER = HI,
+  UNSIGNED_GREATER_EQUAL = CS,
+  OVERFLOW = VS,
+  NO_OVERFLOW = VC,
+
+  kInvalidCondition = 16
 };
 
+static inline Condition InvertCondition(Condition c) {
+  COMPILE_ASSERT((EQ ^ NE) == 1);
+  COMPILE_ASSERT((CS ^ CC) == 1);
+  COMPILE_ASSERT((MI ^ PL) == 1);
+  COMPILE_ASSERT((VS ^ VC) == 1);
+  COMPILE_ASSERT((HI ^ LS) == 1);
+  COMPILE_ASSERT((GE ^ LT) == 1);
+  COMPILE_ASSERT((GT ^ LE) == 1);
+  ASSERT(c != AL);
+  ASSERT(c != kSpecialCondition);
+  ASSERT(c != kInvalidCondition);
+  return static_cast<Condition>(c ^ 1);
+}
 
 // Opcodes for Data-processing instructions (instructions with a type 0 and 1)
 // as defined in section A3.4
@@ -381,7 +712,6 @@ enum Opcode {
   kMaxOperand = 16
 };
 
-
 // Shifter types for Data-processing operands as defined in section A5.1.2.
 enum Shift {
   kNoShift = -1,
@@ -391,7 +721,6 @@ enum Shift {
   ROR = 3,  // Rotate right
   kMaxShift = 4
 };
-
 
 // Constants used for the decoding or encoding of the individual fields of
 // instructions. Based on the "Figure 3-1 ARM instruction set summary".
@@ -441,7 +770,20 @@ enum InstructionFields {
   kMulRnShift = 12,
   kMulRnBits = 4,
 
-  // Div instruction register field encodings.
+  // ldrex/strex register field encodings.
+  kLdrExRnShift = 16,
+  kLdrExRtShift = 12,
+  kStrExRnShift = 16,
+  kStrExRdShift = 12,
+  kStrExRtShift = 0,
+
+  // Media operation field encodings.
+  kMediaOp1Shift = 20,
+  kMediaOp1Bits = 5,
+  kMediaOp2Shift = 5,
+  kMediaOp2Bits = 3,
+
+  // udiv/sdiv instruction register field encodings.
   kDivRdShift = 16,
   kDivRdBits = 4,
   kDivRmShift = 8,
@@ -449,12 +791,13 @@ enum InstructionFields {
   kDivRnShift = 0,
   kDivRnBits = 4,
 
-  // ldrex/strex register field encodings.
-  kLdExRnShift = 16,
-  kLdExRtShift = 12,
-  kStrExRnShift = 16,
-  kStrExRdShift = 12,
-  kStrExRtShift = 0,
+  // sbfx/ubfx instruction register and immediate field encodings.
+  kBitFieldExtractWidthShift = 16,
+  kBitFieldExtractWidthBits = 5,
+  kBitFieldExtractLSBShift = 7,
+  kBitFieldExtractLSBBits = 5,
+  kBitFieldExtractRnShift = 0,
+  kBitFieldExtractRnBits = 4,
 
   // MRC instruction offset field encoding.
   kCRmShift = 0,
@@ -471,6 +814,28 @@ enum InstructionFields {
   kBranchOffsetMask = 0x00ffffff
 };
 
+enum ScaleFactor {
+  TIMES_1 = 0,
+  TIMES_2 = 1,
+  TIMES_4 = 2,
+  TIMES_8 = 3,
+  TIMES_16 = 4,
+// Don't use (dart::)kWordSizeLog2, as this needs to work for crossword as
+// well. If this is included, we know the target is 32 bit.
+#if defined(TARGET_ARCH_IS_32_BIT)
+  // Used for Smi-boxed indices.
+  TIMES_HALF_WORD_SIZE = kInt32SizeLog2 - 1,
+  // Used for unboxed indices.
+  TIMES_WORD_SIZE = kInt32SizeLog2,
+#else
+#error "Unexpected word size"
+#endif
+#if !defined(DART_COMPRESSED_POINTERS)
+  TIMES_COMPRESSED_WORD_SIZE = TIMES_WORD_SIZE,
+#else
+#error Cannot compress ARM32
+#endif
+};
 
 // The class Instr enables access to individual fields defined in the ARM
 // architecture instruction set encoding as described in figure A3-1.
@@ -491,7 +856,6 @@ class Instr {
       ((AL << kConditionShift) | (0x32 << 20) | (0xf << 12));
 
   static const int32_t kBreakPointCode = 0xdeb0;      // For breakpoint.
-  static const int32_t kStopMessageCode = 0xdeb1;     // For Stop(message).
   static const int32_t kSimulatorBreakCode = 0xdeb2;  // For breakpoint in sim.
   static const int32_t kSimulatorRedirectCode = 0xca11;  // For redirection.
 
@@ -528,7 +892,6 @@ class Instr {
     return (InstructionBits() >> shift) & ((1 << count) - 1);
   }
 
-
   // Accessors for the different named fields used in the ARM encoding.
   // The naming of these accessor corresponds to figure A3-1.
   // Generally applicable fields
@@ -536,6 +899,7 @@ class Instr {
     return static_cast<Condition>(Bits(kConditionShift, kConditionBits));
   }
   inline int TypeField() const { return Bits(kTypeShift, kTypeBits); }
+  inline int SubtypeField() const { return Bit(4); }
 
   inline Register RnField() const {
     return static_cast<Register>(Bits(kRnShift, kRnBits));
@@ -587,7 +951,10 @@ class Instr {
 
   // Fields used in Branch instructions
   inline int LinkField() const { return Bits(kLinkShift, kLinkBits); }
-  inline int SImmed24Field() const { return ((InstructionBits() << 8) >> 8); }
+  inline int32_t SImmed24Field() const {
+    uint32_t bits = InstructionBits();
+    return static_cast<int32_t>(bits << 8) >> 8;
+  }
 
   // Fields used in Supervisor Call instructions
   inline uint32_t SvcField() const { return Bits(0, 24); }
@@ -616,6 +983,16 @@ class Instr {
     return bit_cast<double, uint64_t>(imm64);
   }
 
+  // Shared fields used in media instructions.
+  inline int MediaOp1Field() const {
+    return static_cast<Register>(Bits(kMediaOp1Shift, kMediaOp1Bits));
+  }
+  inline int MediaOp2Field() const {
+    return static_cast<Register>(Bits(kMediaOp2Shift, kMediaOp2Bits));
+  }
+
+  // Fields used in division instructions.
+  inline bool IsDivUnsigned() const { return Bit(21) == 0b1; }
   inline Register DivRdField() const {
     return static_cast<Register>(Bits(kDivRdShift, kDivRdBits));
   }
@@ -624,6 +1001,19 @@ class Instr {
   }
   inline Register DivRnField() const {
     return static_cast<Register>(Bits(kDivRnShift, kDivRnBits));
+  }
+
+  // Fields used in bit field extract instructions.
+  inline bool IsBitFieldExtractSignExtended() const { return Bit(22) == 0; }
+  inline uint8_t BitFieldExtractWidthField() const {
+    return Bits(kBitFieldExtractWidthShift, kBitFieldExtractWidthBits);
+  }
+  inline uint8_t BitFieldExtractLSBField() const {
+    return Bits(kBitFieldExtractLSBShift, kBitFieldExtractLSBBits);
+  }
+  inline Register BitFieldExtractRnField() const {
+    return static_cast<Register>(
+        Bits(kBitFieldExtractRnShift, kBitFieldExtractRnBits));
   }
 
   // Test for data processing instructions of type 0 or 1.
@@ -692,13 +1082,6 @@ class Instr {
     return static_cast<QRegister>(bits >> 1);
   }
 
-  inline bool IsDivision() const {
-    ASSERT(ConditionField() != kSpecialCondition);
-    ASSERT(TypeField() == 3);
-    return ((Bit(4) == 1) && (Bits(5, 3) == 0) && (Bit(20) == 1) &&
-            (Bits(22, 3) == 4));
-  }
-
   // Test for VFP data processing or single transfer instructions of type 7.
   inline bool IsVFPDataProcessingOrSingleTransfer() const {
     ASSERT(ConditionField() != kSpecialCondition);
@@ -741,6 +1124,37 @@ class Instr {
     return (Bits(24, 4) == 4) && (Bit(20) == 0);
   }
 
+  // Tests for media instructions of type 3.
+  inline bool IsMedia() const {
+    ASSERT_EQUAL(TypeField(), 3);
+    return SubtypeField() == 1;
+  }
+
+  inline bool IsDivision() const {
+    ASSERT(ConditionField() != kSpecialCondition);
+    ASSERT(IsMedia());
+    // B21 determines whether the division is signed or unsigned.
+    return (((MediaOp1Field() & 0b11101) == 0b10001) &&
+            (MediaOp2Field() == 0b000));
+  }
+
+  inline bool IsRbit() const {
+    ASSERT(ConditionField() != kSpecialCondition);
+    ASSERT(IsMedia());
+    // B19-B16 and B11-B8 are always set for rbit.
+    return ((MediaOp1Field() == 0b01111) && (MediaOp2Field() == 0b001) &&
+            (Bits(8, 4) == 0b1111) && (Bits(16, 4) == 0b1111));
+  }
+
+  inline bool IsBitFieldExtract() const {
+    ASSERT(ConditionField() != kSpecialCondition);
+    ASSERT(IsMedia());
+    // B22 determines whether extracted value is sign extended or not, and
+    // op bits B20 and B7 are part of the width and LSB fields, respectively.
+    return ((MediaOp1Field() & 0b11010) == 0b11010) &&
+           ((MediaOp2Field() & 0b011) == 0b10);
+  }
+
   // Special accessors that test for existence of a value.
   inline bool HasS() const { return SField() == 1; }
   inline bool HasB() const { return BField() == 1; }
@@ -760,6 +1174,39 @@ class Instr {
   DISALLOW_ALLOCATION();
   DISALLOW_IMPLICIT_CONSTRUCTORS(Instr);
 };
+
+// Floating-point reciprocal estimate and step (see pages A2-85 and A2-86 of
+// ARM Architecture Reference Manual ARMv7-A edition).
+float ReciprocalEstimate(float op);
+float ReciprocalStep(float op1, float op2);
+
+// Floating-point reciprocal square root estimate and step (see pages A2-87 to
+// A2-90 of ARM Architecture Reference Manual ARMv7-A edition).
+float ReciprocalSqrtEstimate(float op);
+float ReciprocalSqrtStep(float op1, float op2);
+
+constexpr uword kBreakInstructionFiller = 0xE1200070;   // bkpt #0
+constexpr uword kDataMemoryBarrier = 0xf57ff050 | 0xb;  // dmb ish
+
+struct LinkRegister {
+  const int32_t code = LR;
+};
+
+constexpr bool operator==(Register r, LinkRegister) {
+  return r == LR;
+}
+
+constexpr bool operator!=(Register r, LinkRegister lr) {
+  return !(r == lr);
+}
+
+inline Register ConcreteRegister(LinkRegister) {
+  return LR;
+}
+
+#undef LR
+
+#define LINK_REGISTER (LinkRegister())
 
 }  // namespace dart
 

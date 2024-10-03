@@ -25,12 +25,13 @@ enum Operator {
   modulo,
   multiply,
   rightShift,
+  tripleShift,
   subtract,
   truncatingDivide,
   unaryMinus,
 }
 
-Operator operatorFromString(String string) {
+Operator? operatorFromString(String string) {
   if (identical("+", string)) return Operator.add;
   if (identical("&", string)) return Operator.bitwiseAnd;
   if (identical("~", string)) return Operator.bitwiseNot;
@@ -48,6 +49,7 @@ Operator operatorFromString(String string) {
   if (identical("%", string)) return Operator.modulo;
   if (identical("*", string)) return Operator.multiply;
   if (identical(">>", string)) return Operator.rightShift;
+  if (identical(">>>", string)) return Operator.tripleShift;
   if (identical("-", string)) return Operator.subtract;
   if (identical("~/", string)) return Operator.truncatingDivide;
   if (identical("unary-", string)) return Operator.unaryMinus;
@@ -90,6 +92,8 @@ String operatorToString(Operator operator) {
       return "*";
     case Operator.rightShift:
       return ">>";
+    case Operator.tripleShift:
+      return ">>>";
     case Operator.subtract:
       return "-";
     case Operator.truncatingDivide:
@@ -97,7 +101,6 @@ String operatorToString(Operator operator) {
     case Operator.unaryMinus:
       return "unary-";
   }
-  return null;
 }
 
 int operatorRequiredArgumentCount(Operator operator) {
@@ -121,6 +124,7 @@ int operatorRequiredArgumentCount(Operator operator) {
     case Operator.modulo:
     case Operator.multiply:
     case Operator.rightShift:
+    case Operator.tripleShift:
     case Operator.subtract:
     case Operator.truncatingDivide:
       return 1;
@@ -128,5 +132,4 @@ int operatorRequiredArgumentCount(Operator operator) {
     case Operator.indexSet:
       return 2;
   }
-  return -1;
 }

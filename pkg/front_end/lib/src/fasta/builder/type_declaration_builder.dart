@@ -4,41 +4,91 @@
 
 library fasta.type_declaration_builder;
 
-import 'builder.dart'
-    show Builder, LibraryBuilder, MetadataBuilder, ModifierBuilder, TypeBuilder;
+import 'package:kernel/ast.dart' show DartType, Nullability;
 
-import '../util/relativize.dart' show relativizeUri;
+import 'builder.dart';
+import 'library_builder.dart';
+import 'metadata_builder.dart';
+import 'modifier_builder.dart';
+import 'nullability_builder.dart';
+import 'type_builder.dart';
 
-abstract class TypeDeclarationBuilder<T extends TypeBuilder, R>
-    extends ModifierBuilder {
-  final List<MetadataBuilder> metadata;
+abstract class TypeDeclarationBuilder implements ModifierBuilder {
+  @override
+  String get name;
 
-  final int modifiers;
+  bool get isNamedMixinApplication;
 
-  final String name;
+  void set parent(Builder? value);
 
-  Builder parent;
+  List<MetadataBuilder>? get metadata;
 
-  final Uri fileUri;
-  final String relativeFileUri;
+  int get typeVariablesCount => 0;
 
-  TypeDeclarationBuilder(
-      this.metadata, this.modifiers, this.name, this.parent, int charOffset,
-      [Uri fileUri])
-      : fileUri = fileUri ?? parent?.fileUri,
-        relativeFileUri =
-            fileUri != null ? relativizeUri(fileUri) : parent?.relativeFileUri,
-        super(parent, charOffset, fileUri ?? parent?.fileUri);
+  @override
+  TypeDeclarationBuilder get origin;
 
-  bool get isTypeDeclaration => true;
+  /// Return `true` if this type declaration is an enum.
+  bool get isEnum;
 
-  bool get isMixinApplication => false;
+  /// Creates the [DartType] corresponding to this declaration applied with
+  /// [arguments] in [library] with the syntactical nullability defined by
+  /// [nullabilityBuilder].
+  ///
+  /// For instance, if this declaration is a class declaration `C`, then
+  /// an occurrence of `C<int>?` in a null safe library `lib1` would call
+  /// `buildType(<lib1>, <?>, [<int>])` to create `C<int>?`, or `C<int>` in a
+  /// legacy library `lib2` call `buildType(<lib2>, <> [<int>]` to create
+  /// `C<int*>*`.
+  DartType buildType(LibraryBuilder library,
+      NullabilityBuilder nullabilityBuilder, List<TypeBuilder>? arguments);
 
-  R buildType(LibraryBuilder library, List<T> arguments);
+  DartType buildTypeLiteralType(LibraryBuilder library,
+      NullabilityBuilder nullabilityBuilder, List<TypeBuilder>? arguments);
 
   /// [arguments] have already been built.
-  R buildTypesWithBuiltArguments(LibraryBuilder library, List<R> arguments);
+  DartType buildTypeWithBuiltArguments(LibraryBuilder library,
+      Nullability nullability, List<DartType> arguments);
+}
+
+abstract class TypeDeclarationBuilderImpl extends ModifierBuilderImpl
+    implements TypeDeclarationBuilder {
+  @override
+  final List<MetadataBuilder>? metadata;
+
+  @override
+  final int modifiers;
+
+  @override
+  final String name;
+
+  TypeDeclarationBuilderImpl(
+      this.metadata, this.modifiers, this.name, Builder? parent, int charOffset)
+      // ignore: unnecessary_null_comparison
+      : assert(modifiers != null),
+        super(parent, charOffset);
+
+  @override
+  TypeDeclarationBuilder get origin => this;
+
+  @override
+  bool get isNamedMixinApplication => false;
+
+  @override
+  bool get isTypeDeclaration => true;
+
+  @override
+  bool get isEnum => false;
 
   @override
   String get fullNameForErrors => name;
+
+  @override
+  int get typeVariablesCount => 0;
+
+  @override
+  DartType buildTypeLiteralType(LibraryBuilder library,
+      NullabilityBuilder nullabilityBuilder, List<TypeBuilder>? arguments) {
+    return buildType(library, nullabilityBuilder, arguments);
+  }
 }

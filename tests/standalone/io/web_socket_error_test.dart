@@ -9,18 +9,18 @@
 // OtherResources=certificates/server_chain.pem
 // OtherResources=certificates/server_key.pem
 
-library dart.io;
+library dart._http;
 
 import "dart:async";
+import "dart:convert";
 import "dart:io";
 import "dart:math";
 import "dart:typed_data";
 
 import "package:async_helper/async_helper.dart";
 import "package:expect/expect.dart";
-import "package:path/path.dart";
 
-part "../../../sdk/lib/io/crypto.dart";
+part "../../../sdk/lib/_http/crypto.dart";
 
 const String webSocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const String CERT_NAME = 'localhost_cert';
@@ -42,27 +42,27 @@ SecurityContext clientContext = new SecurityContext()
 class SecurityConfiguration {
   final bool secure;
 
-  SecurityConfiguration({bool this.secure});
+  SecurityConfiguration({required bool this.secure});
 
   Future<HttpServer> createServer({int backlog: 0}) => secure
       ? HttpServer.bindSecure(HOST_NAME, 0, serverContext, backlog: backlog)
       : HttpServer.bind(HOST_NAME, 0, backlog: backlog);
 
   Future<WebSocket> createClient(int port) =>
-      // TODO(whesse): Add a client context argument to WebSocket.connect.
-      WebSocket.connect('${secure ? "wss" : "ws"}://$HOST_NAME:$port/');
+      WebSocket.connect('${secure ? "wss" : "ws"}://$HOST_NAME:$port/',
+          customClient: secure ? HttpClient(context: clientContext) : null);
 
   void testForceCloseServerEnd(int totalConnections) {
     createServer().then((server) {
       server.listen((request) {
         var response = request.response;
-        response.statusCode = HttpStatus.SWITCHING_PROTOCOLS;
-        response.headers.set(HttpHeaders.CONNECTION, "upgrade");
-        response.headers.set(HttpHeaders.UPGRADE, "websocket");
-        String key = request.headers.value("Sec-WebSocket-Key");
+        response.statusCode = HttpStatus.switchingProtocols;
+        response.headers.set(HttpHeaders.connectionHeader, "upgrade");
+        response.headers.set(HttpHeaders.upgradeHeader, "websocket");
+        String? key = request.headers.value("Sec-WebSocket-Key");
         _SHA1 sha1 = new _SHA1();
         sha1.add("$key$webSocketGUID".codeUnits);
-        String accept = _CryptoUtils.bytesToBase64(sha1.close());
+        String accept = base64Encode(sha1.close());
         response.headers.add("Sec-WebSocket-Accept", accept);
         response.headers.contentLength = 0;
         response.detachSocket().then((socket) {
@@ -95,7 +95,6 @@ class SecurityConfiguration {
 main() {
   asyncStart();
   new SecurityConfiguration(secure: false).runTests();
-  // TODO(whesse): WebSocket.connect needs an optional context: parameter
-  // new SecurityConfiguration(secure: true).runTests();
+  new SecurityConfiguration(secure: true).runTests();
   asyncEnd();
 }

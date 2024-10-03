@@ -5,21 +5,17 @@
 #ifndef RUNTIME_BIN_SOCKET_BASE_H_
 #define RUNTIME_BIN_SOCKET_BASE_H_
 
-#if defined(DART_IO_DISABLED)
-#error "socket_base.h can only be included on builds with IO enabled"
-#endif
-
 #include "platform/globals.h"
 // Declare the OS-specific types ahead of defining the generic class.
-#if defined(HOST_OS_ANDROID)
+#if defined(DART_HOST_OS_ANDROID)
 #include "bin/socket_base_android.h"
-#elif defined(HOST_OS_FUCHSIA)
+#elif defined(DART_HOST_OS_FUCHSIA)
 #include "bin/socket_base_fuchsia.h"
-#elif defined(HOST_OS_LINUX)
+#elif defined(DART_HOST_OS_LINUX)
 #include "bin/socket_base_linux.h"
-#elif defined(HOST_OS_MACOS)
+#elif defined(DART_HOST_OS_MACOS)
 #include "bin/socket_base_macos.h"
-#elif defined(HOST_OS_WINDOWS)
+#elif defined(DART_HOST_OS_WINDOWS)
 #include "bin/socket_base_win.h"
 #else
 #error Unknown target os.
@@ -27,6 +23,7 @@
 
 #include "bin/builtin.h"
 #include "bin/dartutils.h"
+#include "bin/file.h"
 #include "bin/thread.h"
 #include "bin/utils.h"
 #include "platform/allocation.h"
@@ -38,6 +35,7 @@ namespace bin {
 union RawAddr {
   struct sockaddr_in in;
   struct sockaddr_in6 in6;
+  struct sockaddr_un un;
   struct sockaddr_storage ss;
   struct sockaddr addr;
 };
@@ -48,6 +46,7 @@ class SocketAddress {
     TYPE_ANY = -1,
     TYPE_IPV4,
     TYPE_IPV6,
+    TYPE_UNIX,
   };
 
   enum {
@@ -59,7 +58,9 @@ class SocketAddress {
     ADDRESS_LAST = ADDRESS_ANY_IP_V6,
   };
 
-  explicit SocketAddress(struct sockaddr* sa);
+  // Unix domain socket may be unnamed. In this case addr_.un.sun_path contains
+  // garbage and should not be inspected.
+  explicit SocketAddress(struct sockaddr* sa, bool unnamed_unix_socket = false);
 
   ~SocketAddress() {}
 
@@ -68,18 +69,35 @@ class SocketAddress {
   const char* as_string() const { return as_string_; }
   const RawAddr& addr() const { return addr_; }
 
-  static intptr_t GetAddrLength(const RawAddr& addr);
+  static intptr_t GetAddrLength(const RawAddr& addr,
+                                bool unnamed_unix_socket = false);
   static intptr_t GetInAddrLength(const RawAddr& addr);
   static bool AreAddressesEqual(const RawAddr& a, const RawAddr& b);
   static void GetSockAddr(Dart_Handle obj, RawAddr* addr);
+  static Dart_Handle GetUnixDomainSockAddr(const char* path,
+                                           Namespace* namespc,
+                                           RawAddr* addr);
   static int16_t FromType(int type);
   static void SetAddrPort(RawAddr* addr, intptr_t port);
   static intptr_t GetAddrPort(const RawAddr& addr);
   static Dart_Handle ToTypedData(const RawAddr& addr);
   static CObjectUint8Array* ToCObject(const RawAddr& addr);
+  static void SetAddrScope(RawAddr* addr, intptr_t scope_id);
+  static intptr_t GetAddrScope(const RawAddr& addr);
 
  private:
+#if defined(DART_HOST_OS_LINUX) || defined(DART_HOST_OS_MACOS) ||              \
+    defined(DART_HOST_OS_ANDROID)
+  // Unix domain address is only on Linux, Mac OS and Android now.
+  // unix(7) require sun_path to be 108 bytes on Linux and Android, 104 bytes on
+  // Mac OS.
+  static const intptr_t kMaxUnixPathLength =
+      sizeof(((struct sockaddr_un*)0)->sun_path);
+  char as_string_[kMaxUnixPathLength];
+#else
   char as_string_[INET6_ADDRSTRLEN];
+#endif  // defined(DART_HOST_OS_LINUX) || defined(DART_HOST_OS_MACOS) ||       \
+        // defined(DART_HOST_OS_ANDROID)
   RawAddr addr_;
 
   DISALLOW_COPY_AND_ASSIGN(SocketAddress);
@@ -132,6 +150,30 @@ class AddressList {
   DISALLOW_COPY_AND_ASSIGN(AddressList);
 };
 
+class SocketControlMessage {
+ public:
+  SocketControlMessage(intptr_t level,
+                       intptr_t type,
+                       void* data,
+                       size_t data_length)
+      : level_(level), type_(type), data_(data), data_length_(data_length) {}
+
+  intptr_t level() const { return level_; }
+  intptr_t type() const { return type_; }
+  void* data() const { return data_; }
+  size_t data_length() const { return data_length_; }
+
+  inline bool is_file_descriptors_control_message();
+
+ private:
+  const intptr_t level_;
+  const intptr_t type_;
+  void* data_;
+  const size_t data_length_;
+
+  DISALLOW_COPY_AND_ASSIGN(SocketControlMessage);
+};
+
 class SocketBase : public AllStatic {
  public:
   enum SocketRequest {
@@ -164,15 +206,30 @@ class SocketBase : public AllStatic {
                          intptr_t num_bytes,
                          const RawAddr& addr,
                          SocketOpKind sync);
+  static intptr_t SendMessage(intptr_t fd,
+                              void* buffer,
+                              size_t buffer_num_bytes,
+                              SocketControlMessage* messages,
+                              intptr_t num_messages,
+                              SocketOpKind sync,
+                              OSError* p_oserror);
   static intptr_t RecvFrom(intptr_t fd,
                            void* buffer,
                            intptr_t num_bytes,
                            RawAddr* addr,
                            SocketOpKind sync);
+  static intptr_t ReceiveMessage(intptr_t fd,
+                                 void* buffer,
+                                 int64_t* p_buffer_num_bytes,
+                                 SocketControlMessage** p_messages,
+                                 SocketOpKind sync,
+                                 OSError* p_oserror);
+  static bool AvailableDatagram(intptr_t fd, void* buffer, intptr_t num_bytes);
   // Returns true if the given error-number is because the system was not able
   // to bind the socket to a specific IP.
   static bool IsBindError(intptr_t error_number);
   static intptr_t GetPort(intptr_t fd);
+  static bool GetSocketName(intptr_t fd, SocketAddress* p_sa);
   static SocketAddress* GetRemotePeer(intptr_t fd, intptr_t* port);
   static void GetError(intptr_t fd, OSError* os_error);
   static int GetType(intptr_t fd);
@@ -186,6 +243,16 @@ class SocketBase : public AllStatic {
   static bool SetMulticastHops(intptr_t fd, intptr_t protocol, int value);
   static bool GetBroadcast(intptr_t fd, bool* value);
   static bool SetBroadcast(intptr_t fd, bool value);
+  static bool GetOption(intptr_t fd,
+                        int level,
+                        int option,
+                        char* data,
+                        unsigned int* length);
+  static bool SetOption(intptr_t fd,
+                        int level,
+                        int option,
+                        const char* data,
+                        int length);
   static bool JoinMulticast(intptr_t fd,
                             const RawAddr& addr,
                             const RawAddr& interface,
@@ -206,6 +273,9 @@ class SocketBase : public AllStatic {
                             OSError** os_error);
 
   static bool ParseAddress(int type, const char* address, RawAddr* addr);
+
+  // Convert address from byte representation to human readable string.
+  static bool RawAddrToString(RawAddr* addr, char* str);
   static bool FormatNumericAddress(const RawAddr& addr, char* address, int len);
 
   // Whether ListInterfaces is supported.

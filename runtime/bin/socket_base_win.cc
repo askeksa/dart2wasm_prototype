@@ -2,10 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "platform/globals.h"
-#if defined(HOST_OS_WINDOWS)
+#if defined(DART_HOST_OS_WINDOWS)
 
 #include "bin/socket_base.h"
 
@@ -13,16 +11,19 @@
 #include "bin/eventhandler.h"
 #include "bin/file.h"
 #include "bin/lockers.h"
-#include "bin/log.h"
 #include "bin/socket_base_win.h"
 #include "bin/thread.h"
 #include "bin/utils.h"
 #include "bin/utils_win.h"
+#include "platform/syslog.h"
 
 namespace dart {
 namespace bin {
 
-SocketAddress::SocketAddress(struct sockaddr* sockaddr) {
+SocketAddress::SocketAddress(struct sockaddr* sockaddr,
+                             bool unnamed_unix_socket) {
+  // Unix domain sockets not supported on Win. Remove this assert if enabled.
+  ASSERT(!unnamed_unix_socket);
   ASSERT(INET6_ADDRSTRLEN >= INET_ADDRSTRLEN);
   RawAddr* raw = reinterpret_cast<RawAddr*>(sockaddr);
 
@@ -37,7 +38,6 @@ SocketAddress::SocketAddress(struct sockaddr* sockaddr) {
   memmove(reinterpret_cast<void*>(&addr_), sockaddr,
           SocketAddress::GetAddrLength(*raw));
 }
-
 
 static Mutex* init_mutex = new Mutex();
 static bool socket_initialized = false;
@@ -54,11 +54,10 @@ bool SocketBase::Initialize() {
   if (err == 0) {
     socket_initialized = true;
   } else {
-    Log::PrintErr("Unable to initialize Winsock: %d\n", WSAGetLastError());
+    Syslog::PrintErr("Unable to initialize Winsock: %d\n", WSAGetLastError());
   }
   return (err == 0);
 }
-
 
 bool SocketBase::FormatNumericAddress(const RawAddr& addr,
                                       char* address,
@@ -66,15 +65,21 @@ bool SocketBase::FormatNumericAddress(const RawAddr& addr,
   socklen_t salen = SocketAddress::GetAddrLength(addr);
   DWORD l = len;
   RawAddr& raw = const_cast<RawAddr&>(addr);
-  return WSAAddressToStringA(&raw.addr, salen, NULL, address, &l) != 0;
+  wchar_t* waddress = reinterpret_cast<wchar_t*>(
+      Dart_ScopeAllocate((salen + 1) * sizeof(wchar_t)));
+  intptr_t result = WSAAddressToStringW(&raw.addr, salen, NULL, waddress, &l);
+  if (result != 0) {
+    return true;
+  }
+  WideToUtf8Scope wide_name(waddress);
+  strncpy(address, wide_name.utf8(), l);
+  return false;
 }
-
 
 intptr_t SocketBase::Available(intptr_t fd) {
   ClientSocket* client_socket = reinterpret_cast<ClientSocket*>(fd);
   return client_socket->Available();
 }
-
 
 intptr_t SocketBase::Read(intptr_t fd,
                           void* buffer,
@@ -83,7 +88,6 @@ intptr_t SocketBase::Read(intptr_t fd,
   Handle* handle = reinterpret_cast<Handle*>(fd);
   return handle->Read(buffer, num_bytes);
 }
-
 
 intptr_t SocketBase::RecvFrom(intptr_t fd,
                               void* buffer,
@@ -95,6 +99,26 @@ intptr_t SocketBase::RecvFrom(intptr_t fd,
   return handle->RecvFrom(buffer, num_bytes, &addr->addr, addr_len);
 }
 
+bool SocketControlMessage::is_file_descriptors_control_message() {
+  return false;
+}
+
+intptr_t SocketBase::ReceiveMessage(intptr_t fd,
+                                    void* buffer,
+                                    int64_t* p_buffer_num_bytes,
+                                    SocketControlMessage** p_messages,
+                                    SocketOpKind sync,
+                                    OSError* p_oserror) {
+  errno = ENOSYS;
+  return -1;
+}
+
+bool SocketBase::AvailableDatagram(intptr_t fd,
+                                   void* buffer,
+                                   intptr_t num_bytes) {
+  ClientSocket* client_socket = reinterpret_cast<ClientSocket*>(fd);
+  return client_socket->DataReady();
+}
 
 intptr_t SocketBase::Write(intptr_t fd,
                            const void* buffer,
@@ -103,7 +127,6 @@ intptr_t SocketBase::Write(intptr_t fd,
   Handle* handle = reinterpret_cast<Handle*>(fd);
   return handle->Write(buffer, num_bytes);
 }
-
 
 intptr_t SocketBase::SendTo(intptr_t fd,
                             const void* buffer,
@@ -116,6 +139,33 @@ intptr_t SocketBase::SendTo(intptr_t fd,
                         SocketAddress::GetAddrLength(addr));
 }
 
+intptr_t SocketBase::SendMessage(intptr_t fd,
+                                 void* buffer,
+                                 size_t num_bytes,
+                                 SocketControlMessage* messages,
+                                 intptr_t num_messages,
+                                 SocketOpKind sync,
+                                 OSError* p_oserror) {
+  errno = ENOSYS;
+  return -1;
+}
+
+bool SocketBase::GetSocketName(intptr_t fd, SocketAddress* p_sa) {
+  ASSERT(fd >= 0);
+  ASSERT(p_sa != nullptr);
+  RawAddr raw;
+  socklen_t size = sizeof(raw);
+  if (getsockname(fd, &raw.addr, &size) == SOCKET_ERROR) {
+    return false;
+  }
+
+  // sockaddr_un contains sa_family_t sun_family and char[] sun_path.
+  // If size is the size of sa_family_t, this is an unnamed socket and
+  // sun_path contains garbage.
+  new (p_sa) SocketAddress(&raw.addr,
+                           /*unnamed_unix_socket=*/size == sizeof(u_short));
+  return true;
+}
 
 intptr_t SocketBase::GetPort(intptr_t fd) {
   ASSERT(reinterpret_cast<Handle*>(fd)->is_socket());
@@ -127,7 +177,6 @@ intptr_t SocketBase::GetPort(intptr_t fd) {
   }
   return SocketAddress::GetAddrPort(raw);
 }
-
 
 SocketAddress* SocketBase::GetRemotePeer(intptr_t fd, intptr_t* port) {
   ASSERT(reinterpret_cast<Handle*>(fd)->is_socket());
@@ -144,18 +193,15 @@ SocketAddress* SocketBase::GetRemotePeer(intptr_t fd, intptr_t* port) {
   return new SocketAddress(&raw.addr);
 }
 
-
 bool SocketBase::IsBindError(intptr_t error_number) {
   return error_number == WSAEADDRINUSE || error_number == WSAEADDRNOTAVAIL ||
          error_number == WSAEINVAL;
 }
 
-
 void SocketBase::GetError(intptr_t fd, OSError* os_error) {
   Handle* handle = reinterpret_cast<Handle*>(fd);
   os_error->SetCodeAndMessage(OSError::kSystem, handle->last_error());
 }
-
 
 int SocketBase::GetType(intptr_t fd) {
   Handle* handle = reinterpret_cast<Handle*>(fd);
@@ -167,10 +213,9 @@ int SocketBase::GetType(intptr_t fd) {
     case FILE_TYPE_DISK:
       return File::kFile;
     default:
-      return GetLastError == NO_ERROR ? File::kOther : -1;
+      return GetLastError() == NO_ERROR ? File::kOther : -1;
   }
 }
-
 
 intptr_t SocketBase::GetStdioHandle(intptr_t num) {
   if (num != 0) {
@@ -186,7 +231,6 @@ intptr_t SocketBase::GetStdioHandle(intptr_t num) {
   std_handle->EnsureInitialized(EventHandler::delegate());
   return reinterpret_cast<intptr_t>(std_handle);
 }
-
 
 AddressList<SocketAddress>* SocketBase::LookupAddress(const char* host,
                                                       int type,
@@ -233,7 +277,6 @@ AddressList<SocketAddress>* SocketBase::LookupAddress(const char* host,
   return addresses;
 }
 
-
 bool SocketBase::ReverseLookup(const RawAddr& addr,
                                char* host,
                                intptr_t host_len,
@@ -251,7 +294,6 @@ bool SocketBase::ReverseLookup(const RawAddr& addr,
   return true;
 }
 
-
 bool SocketBase::ParseAddress(int type, const char* address, RawAddr* addr) {
   int result;
   Utf8ToWideScope system_address(address);
@@ -264,11 +306,34 @@ bool SocketBase::ParseAddress(int type, const char* address, RawAddr* addr) {
   return result == 1;
 }
 
+bool SocketBase::RawAddrToString(RawAddr* addr, char* str) {
+  // According to InetNtopW(), buffer should be large enough for at least 46
+  // characters for IPv6 and 16 for IPv4.
+  COMPILE_ASSERT(INET6_ADDRSTRLEN >= 46);
+  wchar_t tmp_buffer[INET6_ADDRSTRLEN];
+  if (addr->addr.sa_family == AF_INET) {
+    if (InetNtop(AF_INET, &addr->in.sin_addr, tmp_buffer, INET_ADDRSTRLEN) ==
+        NULL) {
+      return false;
+    }
+  } else {
+    ASSERT(addr->addr.sa_family == AF_INET6);
+    if (InetNtop(AF_INET6, &addr->in6.sin6_addr, tmp_buffer,
+                 INET6_ADDRSTRLEN) == NULL) {
+      return false;
+    }
+  }
+  WideToUtf8Scope wide_to_utf8_scope(tmp_buffer);
+  if (wide_to_utf8_scope.length() <= INET6_ADDRSTRLEN) {
+    strncpy(str, wide_to_utf8_scope.utf8(), INET6_ADDRSTRLEN);
+    return true;
+  }
+  return false;
+}
 
 bool SocketBase::ListInterfacesSupported() {
   return true;
 }
-
 
 AddressList<InterfaceSocketAddress>* SocketBase::ListInterfaces(
     int type,
@@ -319,12 +384,10 @@ AddressList<InterfaceSocketAddress>* SocketBase::ListInterfaces(
   return addresses;
 }
 
-
 void SocketBase::Close(intptr_t fd) {
   ClientSocket* client_socket = reinterpret_cast<ClientSocket*>(fd);
   client_socket->Close();
 }
-
 
 bool SocketBase::GetNoDelay(intptr_t fd, bool* enabled) {
   SocketHandle* handle = reinterpret_cast<SocketHandle*>(fd);
@@ -338,14 +401,12 @@ bool SocketBase::GetNoDelay(intptr_t fd, bool* enabled) {
   return (err == 0);
 }
 
-
 bool SocketBase::SetNoDelay(intptr_t fd, bool enabled) {
   SocketHandle* handle = reinterpret_cast<SocketHandle*>(fd);
   int on = enabled ? 1 : 0;
   return setsockopt(handle->socket(), IPPROTO_TCP, TCP_NODELAY,
                     reinterpret_cast<char*>(&on), sizeof(on)) == 0;
 }
-
 
 bool SocketBase::GetMulticastLoop(intptr_t fd,
                                   intptr_t protocol,
@@ -364,7 +425,6 @@ bool SocketBase::GetMulticastLoop(intptr_t fd,
   return false;
 }
 
-
 bool SocketBase::SetMulticastLoop(intptr_t fd,
                                   intptr_t protocol,
                                   bool enabled) {
@@ -376,7 +436,6 @@ bool SocketBase::SetMulticastLoop(intptr_t fd,
   return setsockopt(handle->socket(), level, optname,
                     reinterpret_cast<char*>(&on), sizeof(on)) == 0;
 }
-
 
 bool SocketBase::GetMulticastHops(intptr_t fd, intptr_t protocol, int* value) {
   SocketHandle* handle = reinterpret_cast<SocketHandle*>(fd);
@@ -393,7 +452,6 @@ bool SocketBase::GetMulticastHops(intptr_t fd, intptr_t protocol, int* value) {
   return false;
 }
 
-
 bool SocketBase::SetMulticastHops(intptr_t fd, intptr_t protocol, int value) {
   SocketHandle* handle = reinterpret_cast<SocketHandle*>(fd);
   int v = value;
@@ -403,7 +461,6 @@ bool SocketBase::SetMulticastHops(intptr_t fd, intptr_t protocol, int value) {
   return setsockopt(handle->socket(), level, optname,
                     reinterpret_cast<char*>(&v), sizeof(v)) == 0;
 }
-
 
 bool SocketBase::GetBroadcast(intptr_t fd, bool* enabled) {
   SocketHandle* handle = reinterpret_cast<SocketHandle*>(fd);
@@ -417,7 +474,6 @@ bool SocketBase::GetBroadcast(intptr_t fd, bool* enabled) {
   return (err == 0);
 }
 
-
 bool SocketBase::SetBroadcast(intptr_t fd, bool enabled) {
   SocketHandle* handle = reinterpret_cast<SocketHandle*>(fd);
   int on = enabled ? 1 : 0;
@@ -425,6 +481,26 @@ bool SocketBase::SetBroadcast(intptr_t fd, bool enabled) {
                     reinterpret_cast<char*>(&on), sizeof(on)) == 0;
 }
 
+bool SocketBase::SetOption(intptr_t fd,
+                           int level,
+                           int option,
+                           const char* data,
+                           int length) {
+  SocketHandle* handle = reinterpret_cast<SocketHandle*>(fd);
+  return setsockopt(handle->socket(), level, option, data, length) == 0;
+}
+
+bool SocketBase::GetOption(intptr_t fd,
+                           int level,
+                           int option,
+                           char* data,
+                           unsigned int* length) {
+  SocketHandle* handle = reinterpret_cast<SocketHandle*>(fd);
+  int optlen = static_cast<int>(*length);
+  auto result = getsockopt(handle->socket(), level, option, data, &optlen);
+  *length = static_cast<unsigned int>(optlen);
+  return result == 0;
+}
 
 bool SocketBase::JoinMulticast(intptr_t fd,
                                const RawAddr& addr,
@@ -438,7 +514,6 @@ bool SocketBase::JoinMulticast(intptr_t fd,
   return setsockopt(handle->socket(), proto, MCAST_JOIN_GROUP,
                     reinterpret_cast<char*>(&mreq), sizeof(mreq)) == 0;
 }
-
 
 bool SocketBase::LeaveMulticast(intptr_t fd,
                                 const RawAddr& addr,
@@ -456,6 +531,4 @@ bool SocketBase::LeaveMulticast(intptr_t fd,
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_WINDOWS)
-
-#endif  // !defined(DART_IO_DISABLED)
+#endif  // defined(DART_HOST_OS_WINDOWS)

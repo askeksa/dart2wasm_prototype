@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of view;
 
 /**
@@ -26,8 +28,8 @@ class ConveyorView extends CompositeView {
   Timer animationTimer;
 
   ConveyorView()
-      : super('conveyor-view', true),
-        animationTimer = null {}
+      : animationTimer = null,
+        super('conveyor-view', true) {}
 
   Element render() {
     final result = super.render();

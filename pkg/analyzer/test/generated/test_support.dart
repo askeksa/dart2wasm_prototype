@@ -1,260 +1,276 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer.test.generated.test_support;
+import 'dart:convert';
 
-import 'dart:collection';
-
-import 'package:analyzer/dart/ast/ast.dart' show AstNode, SimpleIdentifier;
-import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/dart/element/type.dart';
+import 'package:analyzer/diagnostic/diagnostic.dart';
 import 'package:analyzer/error/error.dart';
 import 'package:analyzer/error/listener.dart';
-import 'package:analyzer/exception/exception.dart';
-import 'package:analyzer/src/dart/ast/utilities.dart';
+import 'package:analyzer/instrumentation/instrumentation.dart';
 import 'package:analyzer/src/generated/engine.dart';
-import 'package:analyzer/src/generated/java_engine.dart';
 import 'package:analyzer/src/generated/source.dart';
-import 'package:plugin/manager.dart';
-import 'package:plugin/plugin.dart';
 import 'package:test/test.dart';
 
-import 'analysis_context_factory.dart';
+/// A description of a message that is expected to be reported with an error.
+class ExpectedContextMessage {
+  /// The path of the file with which the message is associated.
+  final String filePath;
 
-/**
- * The class `EngineTestCase` defines utility methods for making assertions.
- */
-class EngineTestCase {
-  /**
-   * Assert that the given collection has the same number of elements as the number of specified
-   * names, and that for each specified name, a corresponding element can be found in the given
-   * collection with that name.
-   *
-   * @param elements the elements
-   * @param names the names
-   */
-  void assertNamedElements(List<Element> elements, List<String> names) {
-    for (String elemName in names) {
-      bool found = false;
-      for (Element elem in elements) {
-        if (elem.name == elemName) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        StringBuffer buffer = new StringBuffer();
-        buffer.write("Expected element named: ");
-        buffer.write(elemName);
-        buffer.write("\n  but found: ");
-        for (Element elem in elements) {
-          buffer.write(elem.name);
-          buffer.write(", ");
-        }
-        fail(buffer.toString());
-      }
-    }
-    expect(elements, hasLength(names.length));
-  }
+  /// The offset of the beginning of the error's region.
+  final int offset;
 
-  AnalysisContext createAnalysisContext() {
-    return AnalysisContextFactory.contextWithCore();
-  }
+  /// The offset of the beginning of the error's region.
+  final int length;
 
-  /**
-   * Return the getter in the given type with the given name. Inherited getters are ignored.
-   *
-   * @param type the type in which the getter is declared
-   * @param getterName the name of the getter to be returned
-   * @return the property accessor element representing the getter with the given name
-   */
-  PropertyAccessorElement getGetter(InterfaceType type, String getterName) {
-    for (PropertyAccessorElement accessor in type.element.accessors) {
-      if (accessor.isGetter && accessor.name == getterName) {
-        return accessor;
-      }
-    }
-    fail("Could not find getter named $getterName in ${type.displayName}");
-    return null;
-  }
+  /// The message text for the error.
+  final String? text;
 
-  /**
-   * Return the method in the given type with the given name. Inherited methods are ignored.
-   *
-   * @param type the type in which the method is declared
-   * @param methodName the name of the method to be returned
-   * @return the method element representing the method with the given name
-   */
-  MethodElement getMethod(InterfaceType type, String methodName) {
-    for (MethodElement method in type.element.methods) {
-      if (method.name == methodName) {
-        return method;
-      }
-    }
-    fail("Could not find method named $methodName in ${type.displayName}");
-    return null;
-  }
+  ExpectedContextMessage(this.filePath, this.offset, this.length, {this.text});
 
-  void setUp() {
-    List<Plugin> plugins = <Plugin>[];
-    plugins.addAll(AnalysisEngine.instance.requiredPlugins);
-    new ExtensionManager().processPlugins(plugins);
-  }
-
-  void tearDown() {}
-
-  /**
-   * Assert that the given object is an instance of the expected class.
-   *
-   * @param expectedClass the class that the object is expected to be an instance of
-   * @param object the object being tested
-   * @return the object that was being tested
-   * @throws Exception if the object is not an instance of the expected class
-   */
-  static Object assertInstanceOf(
-      Predicate<Object> predicate, Type expectedClass, Object object) {
-    if (!predicate(object)) {
-      fail(
-          "Expected instance of $expectedClass, found ${object == null ? "null" : object.runtimeType}");
-    }
-    return object;
-  }
-
-  /**
-   * @return the [AstNode] with requested type at offset of the "prefix".
-   */
-  static AstNode findNode(
-      AstNode root, String code, String prefix, Predicate<AstNode> predicate) {
-    int offset = code.indexOf(prefix);
-    if (offset == -1) {
-      throw new ArgumentError("Not found '$prefix'.");
-    }
-    AstNode node = new NodeLocator(offset).searchWithin(root);
-    return node.getAncestor(predicate);
-  }
-
-  /**
-   * Find the [SimpleIdentifier] with at offset of the "prefix".
-   */
-  static SimpleIdentifier findSimpleIdentifier(
-      AstNode root, String code, String prefix) {
-    int offset = code.indexOf(prefix);
-    if (offset == -1) {
-      throw new ArgumentError("Not found '$prefix'.");
-    }
-    return new NodeLocator(offset).searchWithin(root);
+  /// Return `true` if the [message] matches this description of what it's
+  /// expected to be.
+  bool matches(DiagnosticMessage message) {
+    return message.filePath == filePath &&
+        message.offset == offset &&
+        message.length == length &&
+        (text == null || message.messageText(includeUrl: true) == text);
   }
 }
 
-/**
- * Instances of the class `GatheringErrorListener` implement an error listener that collects
- * all of the errors passed to it for later examination.
- */
+/// A description of an error that is expected to be reported.
+class ExpectedError {
+  /// An empty array of error descriptors used when no errors are expected.
+  static List<ExpectedError> NO_ERRORS = <ExpectedError>[];
+
+  /// The error code associated with the error.
+  final ErrorCode code;
+
+  // A pattern that should be contained in the error's correction message, or
+  // `null` if the correction message contents should not be checked.
+  final Pattern? correctionContains;
+
+  /// The offset of the beginning of the error's region.
+  final int offset;
+
+  /// The offset of the beginning of the error's region.
+  final int length;
+
+  /// The message text of the error or `null` if the message should not be checked.
+  final String? message;
+
+  /// A list of patterns that should be contained in the error message; empty if
+  /// the message contents should not be checked.
+  final List<Pattern> messageContains;
+
+  /// The list of context messages that are expected to be associated with the
+  /// error.
+  final List<ExpectedContextMessage> expectedContextMessages;
+
+  /// Initialize a newly created error description.
+  ExpectedError(this.code, this.offset, this.length,
+      {this.correctionContains,
+      this.message,
+      this.messageContains = const [],
+      this.expectedContextMessages = const <ExpectedContextMessage>[]});
+
+  /// Return `true` if the [error] matches this description of what it's
+  /// expected to be.
+  bool matches(AnalysisError error) {
+    if (error.offset != offset ||
+        error.length != length ||
+        error.errorCode != code) {
+      return false;
+    }
+    if (message != null && error.message != message) {
+      return false;
+    }
+    for (var pattern in messageContains) {
+      if (!error.message.contains(pattern)) {
+        return false;
+      }
+    }
+    if (correctionContains != null &&
+        !(error.correctionMessage ?? '').contains(correctionContains!)) {
+      return false;
+    }
+    List<DiagnosticMessage> contextMessages = error.contextMessages.toList();
+    contextMessages.sort((first, second) {
+      int result = first.filePath.compareTo(second.filePath);
+      if (result != 0) {
+        return result;
+      }
+      return second.offset - first.offset;
+    });
+    if (contextMessages.length != expectedContextMessages.length) {
+      return false;
+    }
+    for (int i = 0; i < expectedContextMessages.length; i++) {
+      if (!expectedContextMessages[i].matches(contextMessages[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
+/// An error listener that collects all of the errors passed to it for later
+/// examination.
 class GatheringErrorListener implements AnalysisErrorListener {
-  /**
-   * An empty array of errors used when no errors are expected.
-   */
-  static List<AnalysisError> _NO_ERRORS = new List<AnalysisError>(0);
+  /// A flag indicating whether error ranges are to be compared when comparing
+  /// expected and actual errors.
+  final bool checkRanges;
 
-  /**
-   * A list containing the errors that were collected.
-   */
-  List<AnalysisError> _errors = new List<AnalysisError>();
+  /// A list containing the errors that were collected.
+  final List<AnalysisError> _errors = <AnalysisError>[];
 
-  /**
-   * A table mapping sources to the line information for the source.
-   */
-  HashMap<Source, LineInfo> _lineInfoMap = new HashMap<Source, LineInfo>();
+  /// A table mapping sources to the line information for the source.
+  final Map<Source, LineInfo> _lineInfoMap = <Source, LineInfo>{};
 
-  /**
-   * Initialize a newly created error listener to collect errors.
-   */
-  GatheringErrorListener();
+  /// Initialize a newly created error listener to collect errors.
+  GatheringErrorListener({this.checkRanges = true});
 
-  /**
-   * Return the errors that were collected.
-   *
-   * @return the errors that were collected
-   */
+  /// Return the errors that were collected.
   List<AnalysisError> get errors => _errors;
 
-  /**
-   * Return `true` if at least one error has been gathered.
-   *
-   * @return `true` if at least one error has been gathered
-   */
-  bool get hasErrors => _errors.length > 0;
+  /// Return `true` if at least one error has been gathered.
+  bool get hasErrors => _errors.isNotEmpty;
 
-  /**
-   * Add all of the given errors to this listener.
-   *
-   * @param the errors to be added
-   */
+  /// Add the given [errors] to this listener.
   void addAll(List<AnalysisError> errors) {
     for (AnalysisError error in errors) {
       onError(error);
     }
   }
 
-  /**
-   * Add all of the errors recorded by the given listener to this listener.
-   *
-   * @param listener the listener that has recorded the errors to be added
-   */
+  /// Add all of the errors recorded by the given [listener] to this listener.
   void addAll2(RecordingErrorListener listener) {
     addAll(listener.errors);
   }
 
-  /**
-   * Assert that the number of errors that have been gathered matches the number of errors that are
-   * given and that they have the expected error codes and locations. The order in which the errors
-   * were gathered is ignored.
-   *
-   * @param errorCodes the errors that should have been gathered
-   * @throws AssertionFailedError if a different number of errors have been gathered than were
-   *           expected or if they do not have the same codes and locations
-   */
-  void assertErrors(List<AnalysisError> expectedErrors) {
-    if (_errors.length != expectedErrors.length) {
-      _fail(expectedErrors);
-    }
-    List<AnalysisError> remainingErrors = new List<AnalysisError>();
-    for (AnalysisError error in expectedErrors) {
-      remainingErrors.add(error);
-    }
-    for (AnalysisError error in _errors) {
-      if (!_foundAndRemoved(remainingErrors, error)) {
-        _fail(expectedErrors);
+  /// Assert that the number of errors that have been gathered matches the
+  /// number of [expectedErrors] and that they have the expected error codes and
+  /// locations. The order in which the errors were gathered is ignored.
+  void assertErrors(List<ExpectedError> expectedErrors) {
+    //
+    // Match actual errors to expected errors.
+    //
+    List<AnalysisError> unmatchedActual = errors.toList();
+    List<ExpectedError> unmatchedExpected = expectedErrors.toList();
+    int actualIndex = 0;
+    while (actualIndex < unmatchedActual.length) {
+      bool matchFound = false;
+      int expectedIndex = 0;
+      while (expectedIndex < unmatchedExpected.length) {
+        if (unmatchedExpected[expectedIndex]
+            .matches(unmatchedActual[actualIndex])) {
+          matchFound = true;
+          unmatchedActual.removeAt(actualIndex);
+          unmatchedExpected.removeAt(expectedIndex);
+          break;
+        }
+        expectedIndex++;
       }
+      if (!matchFound) {
+        actualIndex++;
+      }
+    }
+    //
+    // Write the results.
+    //
+    StringBuffer buffer = StringBuffer();
+    if (unmatchedExpected.isNotEmpty) {
+      buffer.writeln('Expected but did not find:');
+      for (ExpectedError expected in unmatchedExpected) {
+        buffer.write('  ');
+        buffer.write(expected.code);
+        buffer.write(' [');
+        buffer.write(expected.offset);
+        buffer.write(', ');
+        buffer.write(expected.length);
+        if (expected.message != null) {
+          buffer.write(', message: ');
+          buffer.write(json.encode(expected.message));
+        }
+        if (expected.messageContains.isNotEmpty) {
+          buffer.write(', messageContains: ');
+          buffer.write(json.encode([
+            for (var pattern in expected.messageContains) pattern.toString()
+          ]));
+        }
+        if (expected.correctionContains != null) {
+          buffer.write(', correctionContains: ');
+          buffer.write(json.encode(expected.correctionContains.toString()));
+        }
+        buffer.writeln(']');
+      }
+    }
+    if (unmatchedActual.isNotEmpty) {
+      if (buffer.isNotEmpty) {
+        buffer.writeln();
+      }
+      buffer.writeln('Found but did not expect:');
+      for (AnalysisError actual in unmatchedActual) {
+        buffer.write('  ');
+        buffer.write(actual.errorCode);
+        buffer.write(' [');
+        buffer.write(actual.offset);
+        buffer.write(', ');
+        buffer.write(actual.length);
+        buffer.write(', ');
+        buffer.write(json.encode(actual.message));
+        buffer.write(', ');
+        buffer.write(json.encode(actual.correctionMessage));
+        buffer.writeln(']');
+      }
+    }
+    if (buffer.isNotEmpty) {
+      errors.sort((first, second) => first.offset.compareTo(second.offset));
+      buffer.writeln();
+      buffer.writeln('To accept the current state, expect:');
+      for (AnalysisError actual in errors) {
+        List<DiagnosticMessage> contextMessages = actual.contextMessages;
+        buffer.write('  error(');
+        buffer.write(actual.errorCode);
+        buffer.write(', ');
+        buffer.write(actual.offset);
+        buffer.write(', ');
+        buffer.write(actual.length);
+        if (contextMessages.isNotEmpty) {
+          buffer.write(', contextMessages: [');
+          for (int i = 0; i < contextMessages.length; i++) {
+            DiagnosticMessage message = contextMessages[i];
+            if (i > 0) {
+              buffer.write(', ');
+            }
+            buffer.write('message(\'');
+            buffer.write(message.filePath);
+            buffer.write('\', ');
+            buffer.write(message.offset);
+            buffer.write(', ');
+            buffer.write(message.length);
+            buffer.write(')');
+          }
+          buffer.write(']');
+        }
+        buffer.writeln('),');
+      }
+      fail(buffer.toString());
     }
   }
 
-  /**
-   * Assert that the number of errors that have been gathered matches the number of errors that are
-   * given and that they have the expected error codes. The order in which the errors were gathered
-   * is ignored.
-   *
-   * @param expectedErrorCodes the error codes of the errors that should have been gathered
-   * @throws AssertionFailedError if a different number of errors have been gathered than were
-   *           expected
-   */
+  /// Assert that the number of errors that have been gathered matches the
+  /// number of [expectedErrorCodes] and that they have the expected error
+  /// codes. The order in which the errors were gathered is ignored.
   void assertErrorsWithCodes(
       [List<ErrorCode> expectedErrorCodes = const <ErrorCode>[]]) {
-    StringBuffer buffer = new StringBuffer();
-    //
-    // Verify that the expected error codes have a non-empty message.
-    //
-    for (ErrorCode errorCode in expectedErrorCodes) {
-      expect(errorCode.message.isEmpty, isFalse,
-          reason: "Empty error code message");
-    }
+    StringBuffer buffer = StringBuffer();
     //
     // Compute the expected number of each type of error.
     //
-    HashMap<ErrorCode, int> expectedCounts = new HashMap<ErrorCode, int>();
+    Map<ErrorCode, int> expectedCounts = <ErrorCode, int>{};
     for (ErrorCode code in expectedErrorCodes) {
-      int count = expectedCounts[code];
+      var count = expectedCounts[code];
       if (count == null) {
         count = 1;
       } else {
@@ -265,23 +281,19 @@ class GatheringErrorListener implements AnalysisErrorListener {
     //
     // Compute the actual number of each type of error.
     //
-    HashMap<ErrorCode, List<AnalysisError>> errorsByCode =
-        new HashMap<ErrorCode, List<AnalysisError>>();
+    Map<ErrorCode, List<AnalysisError>> errorsByCode =
+        <ErrorCode, List<AnalysisError>>{};
     for (AnalysisError error in _errors) {
-      ErrorCode code = error.errorCode;
-      List<AnalysisError> list = errorsByCode[code];
-      if (list == null) {
-        list = new List<AnalysisError>();
-        errorsByCode[code] = list;
-      }
-      list.add(error);
+      errorsByCode
+          .putIfAbsent(error.errorCode, () => <AnalysisError>[])
+          .add(error);
     }
     //
     // Compare the expected and actual number of each type of error.
     //
     expectedCounts.forEach((ErrorCode code, int expectedCount) {
       int actualCount;
-      List<AnalysisError> list = errorsByCode.remove(code);
+      var list = errorsByCode.remove(code);
       if (list == null) {
         actualCount = 0;
       } else {
@@ -330,15 +342,10 @@ class GatheringErrorListener implements AnalysisErrorListener {
     }
   }
 
-  /**
-   * Assert that the number of errors that have been gathered matches the number of severities that
-   * are given and that there are the same number of errors and warnings as specified by the
-   * argument. The order in which the errors were gathered is ignored.
-   *
-   * @param expectedSeverities the severities of the errors that should have been gathered
-   * @throws AssertionFailedError if a different number of errors have been gathered than were
-   *           expected
-   */
+  /// Assert that the number of errors that have been gathered matches the
+  /// number of [expectedSeverities] and that there are the same number of
+  /// errors and warnings as specified by the argument. The order in which the
+  /// errors were gathered is ignored.
   void assertErrorsWithSeverities(List<ErrorSeverity> expectedSeverities) {
     int expectedErrorCount = 0;
     int expectedWarningCount = 0;
@@ -360,35 +367,23 @@ class GatheringErrorListener implements AnalysisErrorListener {
     }
     if (expectedErrorCount != actualErrorCount ||
         expectedWarningCount != actualWarningCount) {
-      fail(
-          "Expected $expectedErrorCount errors and $expectedWarningCount warnings, found $actualErrorCount errors and $actualWarningCount warnings");
+      fail("Expected $expectedErrorCount errors "
+          "and $expectedWarningCount warnings, "
+          "found $actualErrorCount errors "
+          "and $actualWarningCount warnings");
     }
   }
 
-  /**
-   * Assert that no errors have been gathered.
-   *
-   * @throws AssertionFailedError if any errors have been gathered
-   */
+  /// Assert that no errors have been gathered.
   void assertNoErrors() {
-    assertErrors(_NO_ERRORS);
+    assertErrors(ExpectedError.NO_ERRORS);
   }
 
-  /**
-   * Return the line information associated with the given source, or `null` if no line
-   * information has been associated with the source.
-   *
-   * @param source the source with which the line information is associated
-   * @return the line information associated with the source
-   */
-  LineInfo getLineInfo(Source source) => _lineInfoMap[source];
+  /// Return the line information associated with the given [source], or `null`
+  /// if no line information has been associated with the source.
+  LineInfo? getLineInfo(Source source) => _lineInfoMap[source];
 
-  /**
-   * Return `true` if an error with the given error code has been gathered.
-   *
-   * @param errorCode the error code being searched for
-   * @return `true` if an error with the given error code has been gathered
-   */
+  /// Return `true` if an error with the given [errorCode] has been gathered.
   bool hasError(ErrorCode errorCode) {
     for (AnalysisError error in _errors) {
       if (identical(error.errorCode, errorCode)) {
@@ -403,193 +398,100 @@ class GatheringErrorListener implements AnalysisErrorListener {
     _errors.add(error);
   }
 
-  /**
-   * Set the line information associated with the given source to the given information.
-   *
-   * @param source the source with which the line information is associated
-   * @param lineStarts the line start information to be associated with the source
-   */
+  /// Set the line information associated with the given [source] to the given
+  /// list of [lineStarts].
   void setLineInfo(Source source, List<int> lineStarts) {
-    _lineInfoMap[source] = new LineInfo(lineStarts);
-  }
-
-  /**
-   * Return `true` if the [actualError] matches the [expectedError].
-   */
-  bool _equalErrors(AnalysisError expectedError, AnalysisError actualError) {
-    Source expectedSource = expectedError.source;
-    return identical(expectedError.errorCode, actualError.errorCode) &&
-        expectedError.offset == actualError.offset &&
-        expectedError.length == actualError.length &&
-        (expectedSource == null ||
-            _equalSources(expectedSource, actualError.source));
-  }
-
-  /**
-   * Return `true` if the two sources are equivalent.
-   *
-   * @param firstSource the first source being compared
-   * @param secondSource the second source being compared
-   * @return `true` if the two sources are equivalent
-   */
-  bool _equalSources(Source firstSource, Source secondSource) {
-    if (firstSource == null) {
-      return secondSource == null;
-    } else if (secondSource == null) {
-      return false;
-    }
-    return firstSource == secondSource;
-  }
-
-  /**
-   * Assert that the number of errors that have been gathered matches the number of errors that are
-   * given and that they have the expected error codes. The order in which the errors were gathered
-   * is ignored.
-   *
-   * @param errorCodes the errors that should have been gathered
-   * @throws AssertionFailedError with
-   */
-  void _fail(List<AnalysisError> expectedErrors) {
-    StringBuffer buffer = new StringBuffer();
-    buffer.write("Expected ");
-    buffer.write(expectedErrors.length);
-    buffer.write(" errors:");
-    for (AnalysisError error in expectedErrors) {
-      Source source = error.source;
-      LineInfo lineInfo = _lineInfoMap[source];
-      buffer.writeln();
-      String sourceName = source == null ? '' : source.shortName;
-      if (lineInfo == null) {
-        int offset = error.offset;
-        buffer.write('  $sourceName ${error.errorCode} '
-            '($offset..${offset + error.length})');
-      } else {
-        LineInfo_Location location = lineInfo.getLocation(error.offset);
-        int lineNumber = location.lineNumber;
-        int columnNumber = location.columnNumber;
-        buffer.write('  $sourceName ${error.errorCode} '
-            '($lineNumber, $columnNumber/${error.length})');
-      }
-    }
-    buffer.writeln();
-    buffer.write("found ");
-    buffer.write(_errors.length);
-    buffer.write(" errors:");
-    for (AnalysisError error in _errors) {
-      Source source = error.source;
-      LineInfo lineInfo = _lineInfoMap[source];
-      buffer.writeln();
-      String sourceName = source == null ? '' : source.shortName;
-      if (lineInfo == null) {
-        int offset = error.offset;
-        buffer.write('  $sourceName ${error.errorCode} '
-            '($offset..${offset + error.length}): ${error.message}');
-      } else {
-        LineInfo_Location location = lineInfo.getLocation(error.offset);
-        int lineNumber = location.lineNumber;
-        int columnNumber = location.columnNumber;
-        buffer.write('  $sourceName ${error.errorCode} '
-            '($lineNumber, $columnNumber/${error.length}): ${error.message}');
-      }
-    }
-    fail(buffer.toString());
-  }
-
-  /**
-   * Search through the given list of errors for an error that is equal to the target error. If one
-   * is found, remove it from the list and return `true`, otherwise return `false`
-   * without modifying the list.
-   *
-   * @param errors the errors through which we are searching
-   * @param targetError the error being searched for
-   * @return `true` if the error is found and removed from the list
-   */
-  bool _foundAndRemoved(List<AnalysisError> errors, AnalysisError targetError) {
-    for (AnalysisError error in errors) {
-      if (_equalErrors(error, targetError)) {
-        errors.remove(error);
-        return true;
-      }
-    }
-    return false;
+    _lineInfoMap[source] = LineInfo(lineStarts);
   }
 }
 
-/**
- * Instances of the class [TestLogger] implement a logger that can be used by
- * tests.
- */
-class TestLogger implements Logger {
-  /**
-   * All logged messages.
-   */
+/// Instances of the class [TestInstrumentor] implement an instrumentation
+/// service that can be used by tests.
+class TestInstrumentor extends NoopInstrumentationService {
+  /// All logged messages.
   List<String> log = [];
 
   @override
-  void logError(String message, [CaughtException exception]) {
+  void logError(String message) {
     log.add("error: $message");
   }
 
   @override
-  void logInformation(String message, [CaughtException exception]) {
+  void logException(dynamic exception,
+      [StackTrace? stackTrace,
+      List<InstrumentationServiceAttachment>? attachments]) {
+    log.add("error: $exception $stackTrace");
+  }
+
+  @override
+  void logInfo(String message, [dynamic exception]) {
     log.add("info: $message");
   }
 }
 
 class TestSource extends Source {
-  String _name;
+  final String _name;
   String _contents;
   int _modificationStamp = 0;
   bool exists2 = true;
 
-  /**
-   * A flag indicating whether an exception should be generated when an attempt
-   * is made to access the contents of this source.
-   */
+  /// A flag indicating whether an exception should be generated when an attempt
+  /// is made to access the contents of this source.
   bool generateExceptionOnRead = false;
 
-  /**
-   * The number of times that the contents of this source have been requested.
-   */
+  /// The number of times that the contents of this source have been requested.
   int readCount = 0;
 
-  TestSource([this._name = '/test.dart', this._contents]);
+  TestSource([this._name = '/test.dart', this._contents = '']);
 
+  @override
   TimestampedData<String> get contents {
     readCount++;
     if (generateExceptionOnRead) {
       String msg = "I/O Exception while getting the contents of " + _name;
-      throw new Exception(msg);
+      throw Exception(msg);
     }
-    return new TimestampedData<String>(0, _contents);
+    return TimestampedData<String>(0, _contents);
   }
 
+  @Deprecated('Not used anymore')
+  @override
   String get encoding => _name;
 
+  @override
   String get fullName {
     return _name;
   }
 
+  @override
   int get hashCode => 0;
 
+  @Deprecated('Use uri.isScheme("dart") instead')
+  @override
   bool get isInSystemLibrary {
     return false;
   }
 
+  @Deprecated('Not used anymore')
   @override
   int get modificationStamp =>
       generateExceptionOnRead ? -1 : _modificationStamp;
 
+  @override
   String get shortName {
     return _name;
   }
 
-  Uri get uri => new Uri.file(_name);
+  @override
+  Uri get uri => Uri.file(_name);
 
+  @Deprecated('Use Source.uri instead')
+  @override
   UriKind get uriKind {
-    throw new UnsupportedError('uriKind');
+    throw UnsupportedError('uriKind');
   }
 
+  @override
   bool operator ==(Object other) {
     if (other is TestSource) {
       return other._name == _name;
@@ -597,18 +499,16 @@ class TestSource extends Source {
     return false;
   }
 
+  @override
   bool exists() => exists2;
-  void getContentsToReceiver(Source_ContentReceiver receiver) {
-    throw new UnsupportedError('getContentsToReceiver');
-  }
 
   Source resolve(String uri) {
-    throw new UnsupportedError('resolve');
+    throw UnsupportedError('resolve');
   }
 
   void setContents(String value) {
     generateExceptionOnRead = false;
-    _modificationStamp = new DateTime.now().millisecondsSinceEpoch;
+    _modificationStamp = DateTime.now().millisecondsSinceEpoch;
     _contents = value;
   }
 
@@ -617,24 +517,28 @@ class TestSource extends Source {
 }
 
 class TestSourceWithUri extends TestSource {
+  @override
   final Uri uri;
 
-  TestSourceWithUri(String path, this.uri, [String content])
+  TestSourceWithUri(String path, this.uri, [String content = ''])
       : super(path, content);
 
+  @Deprecated('Not used anymore')
+  @override
   String get encoding => uri.toString();
 
+  @Deprecated('Use Source.uri instead')
+  @override
   UriKind get uriKind {
-    if (uri == null) {
-      return UriKind.FILE_URI;
-    } else if (uri.scheme == 'dart') {
+    if (uri.isScheme('dart')) {
       return UriKind.DART_URI;
-    } else if (uri.scheme == 'package') {
+    } else if (uri.isScheme('package')) {
       return UriKind.PACKAGE_URI;
     }
     return UriKind.FILE_URI;
   }
 
+  @override
   bool operator ==(Object other) {
     if (other is TestSource) {
       return other.uri == uri;

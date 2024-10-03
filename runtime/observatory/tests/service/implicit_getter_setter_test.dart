@@ -4,8 +4,9 @@
 
 library implicit_getter_setter_test;
 
+import 'dart:async';
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'test_helper.dart';
 
 class A {
@@ -18,13 +19,13 @@ script() {
   }
 }
 
-testGetter(Isolate isolate) async {
-  Library rootLibrary = await isolate.rootLibrary.load();
+Future testGetter(Isolate isolate) async {
+  Library rootLibrary = await isolate.rootLibrary.load() as Library;
   expect(rootLibrary.classes.length, equals(1));
-  Class classA = await rootLibrary.classes[0].load();
+  Class classA = await rootLibrary.classes[0].load() as Class;
   expect(classA.name, equals('A'));
   // Find getter.
-  ServiceFunction getterFunc;
+  ServiceFunction? getterFunc;
   for (ServiceFunction function in classA.functions) {
     if (function.name == 'field') {
       getterFunc = function;
@@ -32,21 +33,21 @@ testGetter(Isolate isolate) async {
     }
   }
   expect(getterFunc, isNotNull);
-  await getterFunc.load();
-  Field field = await getterFunc.field.load();
+  await getterFunc!.load();
+  Field field = await getterFunc.field!.load() as Field;
   expect(field, isNotNull);
   expect(field.name, equals('field'));
-  Class classDouble = await field.guardClass.load();
+  Class classDouble = await field.guardClass!.load() as Class;
   expect(classDouble.name, equals('_Double'));
 }
 
-testSetter(Isolate isolate) async {
-  Library rootLibrary = await isolate.rootLibrary.load();
+Future testSetter(Isolate isolate) async {
+  Library rootLibrary = await isolate.rootLibrary.load() as Library;
   expect(rootLibrary.classes.length, equals(1));
-  Class classA = await rootLibrary.classes[0].load();
+  Class classA = await rootLibrary.classes[0].load() as Class;
   expect(classA.name, equals('A'));
   // Find setter.
-  ServiceFunction setterFunc;
+  ServiceFunction? setterFunc;
   for (ServiceFunction function in classA.functions) {
     if (function.name == 'field=') {
       setterFunc = function;
@@ -54,14 +55,14 @@ testSetter(Isolate isolate) async {
     }
   }
   expect(setterFunc, isNotNull);
-  await setterFunc.load();
-  Field field = await setterFunc.field.load();
+  await setterFunc!.load();
+  Field field = await setterFunc.field!.load() as Field;
   expect(field, isNotNull);
   expect(field.name, equals('field'));
-  Class classDouble = await field.guardClass.load();
+  Class classDouble = await field.guardClass!.load() as Class;
   expect(classDouble.name, equals('_Double'));
 }
 
-var tests = [testGetter, testSetter];
+var tests = <IsolateTest>[testGetter, testSetter];
 
 main(args) => runIsolateTests(args, tests, testeeBefore: script);

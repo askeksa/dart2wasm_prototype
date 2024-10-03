@@ -1,16 +1,18 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:analysis_server/src/provisional/completion/dart/completion_dart.dart';
+import 'package:analysis_server/src/services/completion/dart/completion_manager.dart';
 import 'package:analysis_server/src/services/completion/dart/named_constructor_contributor.dart';
+import 'package:analysis_server/src/services/completion/dart/suggestion_builder.dart';
 import 'package:analyzer_plugin/protocol/protocol_common.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'completion_contributor_util.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(NamedConstructorContributorTest);
   });
@@ -18,18 +20,30 @@ main() {
 
 @reflectiveTest
 class NamedConstructorContributorTest extends DartCompletionContributorTest {
-  CompletionSuggestion assertSuggestNamedConstructor(
-      String name, String returnType,
-      [int relevance = DART_RELEVANCE_DEFAULT,
-      CompletionSuggestionKind kind = CompletionSuggestionKind.INVOCATION]) {
-    CompletionSuggestion cs =
-        assertSuggest(name, csKind: kind, relevance: relevance);
-    Element element = cs.element;
-    expect(element, isNotNull);
+  CompletionSuggestion assertConstructorReference({
+    required String elementName,
+    required String name,
+    required String returnType,
+  }) {
+    return assertSuggestNamedConstructor(
+      elementName: elementName,
+      kind: CompletionSuggestionKind.IDENTIFIER,
+      name: name,
+      returnType: returnType,
+    );
+  }
+
+  CompletionSuggestion assertSuggestNamedConstructor({
+    required String elementName,
+    CompletionSuggestionKind kind = CompletionSuggestionKind.INVOCATION,
+    required String name,
+    required String returnType,
+  }) {
+    var cs = assertSuggest(name, csKind: kind);
+    var element = cs.element!;
     expect(element.kind, equals(ElementKind.CONSTRUCTOR));
-    expect(element.name, equals(name));
-    String param = element.parameters;
-    expect(param, isNotNull);
+    expect(element.name, equals(elementName));
+    var param = element.parameters!;
     expect(param[0], equals('('));
     expect(param[param.length - 1], equals(')'));
     expect(element.returnType, equals(returnType));
@@ -38,29 +52,264 @@ class NamedConstructorContributorTest extends DartCompletionContributorTest {
   }
 
   @override
-  DartCompletionContributor createContributor() {
-    return new NamedConstructorContributor();
+  DartCompletionContributor createContributor(
+    DartCompletionRequest request,
+    SuggestionBuilder builder,
+  ) {
+    return NamedConstructorContributor(request, builder);
   }
 
-  test_ConstructorName_importedClass() async {
-    // SimpleIdentifier  PrefixedIdentifier  TypeName  ConstructorName
+  Future<void>
+      test_className_period_identifier_functionTypeContext_matchingReturnType() async {
+    addTestSource('''
+class A {
+  A();
+  A.named();
+}
+
+void f() {
+  A Function() v = A.na^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset - 2);
+    expect(replacementLength, 2);
+    assertConstructorReference(
+      elementName: 'A',
+      name: 'new',
+      returnType: 'A',
+    );
+    assertConstructorReference(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A',
+    );
+  }
+
+  Future<void> test_className_period_identifier_interfaceTypeContext() async {
+    addTestSource('''
+class A {
+  A();
+  A.named();
+}
+
+void f() {
+  int v = A.na^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset - 2);
+    expect(replacementLength, 2);
+    assertSuggestNamedConstructor(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A',
+    );
+  }
+
+  Future<void>
+      test_className_period_nothing_functionTypeContext_matchingReturnType() async {
+    addTestSource('''
+class A {
+  A();
+  A.named();
+}
+
+void f() {
+  A Function() v = A.^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset);
+    expect(replacementLength, 0);
+    assertConstructorReference(
+      elementName: 'A',
+      name: 'new',
+      returnType: 'A',
+    );
+    assertConstructorReference(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A',
+    );
+  }
+
+  Future<void> test_className_period_nothing_interfaceTypeContext() async {
+    addTestSource('''
+class A {
+  A();
+  A.named();
+}
+
+void f() {
+  int v = A.^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset);
+    expect(replacementLength, 0);
+    assertSuggestNamedConstructor(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A',
+    );
+  }
+
+  Future<void>
+      test_className_typeArguments_period_identifier_functionTypeContext_matchingReturnType() async {
+    addTestSource('''
+class A<T> {
+  A.named();
+  A.new();
+}
+
+void f() {
+  A<int> Function() v = A<int>.na^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset - 2);
+    expect(replacementLength, 2);
+    assertConstructorReference(
+      elementName: 'A',
+      name: 'new',
+      returnType: 'A<T>',
+    );
+    assertConstructorReference(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A<T>',
+    );
+  }
+
+  Future<void>
+      test_className_typeArguments_period_nothing_functionTypeContext_matchingReturnType() async {
+    addTestSource('''
+class A<T> {
+  A.named();
+  A.new();
+}
+
+void f() {
+  A<int> Function() v = A<int>.^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset);
+    expect(replacementLength, 0);
+    assertConstructorReference(
+      elementName: 'A',
+      name: 'new',
+      returnType: 'A<T>',
+    );
+    assertConstructorReference(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A<T>',
+    );
+  }
+
+  Future<void>
+      test_className_typeArguments_period_nothing_functionTypeContext_matchingReturnType2() async {
+    addTestSource('''
+class A {}
+
+class B<T> extends A {
+  B.named();
+  B.new();
+}
+
+void f() {
+  A Function() v = B<int>.^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset);
+    expect(replacementLength, 0);
+    assertConstructorReference(
+      elementName: 'B',
+      name: 'new',
+      returnType: 'B<T>',
+    );
+    assertConstructorReference(
+      elementName: 'B.named',
+      name: 'named',
+      returnType: 'B<T>',
+    );
+  }
+
+  Future<void>
+      test_className_typeArguments_period_nothing_functionTypeContext_notMatchingReturnType() async {
+    addTestSource('''
+class A<T> {
+  A.named();
+}
+
+void f() {
+  List<int> Function() v = A<int>.^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset);
+    expect(replacementLength, 0);
+    assertSuggestNamedConstructor(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A<T>',
+    );
+  }
+
+  Future<void>
+      test_className_typeArguments_period_nothing_interfaceContextType() async {
+    addTestSource('''
+class A<T> {
+  A.named();
+}
+
+void f() {
+  A<int> v = A<int>.^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset);
+    expect(replacementLength, 0);
+    assertSuggestNamedConstructor(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A<T>',
+    );
+  }
+
+  Future<void> test_ConstructorName_importedClass() async {
+    // SimpleIdentifier  PrefixedIdentifier  NamedType  ConstructorName
     // InstanceCreationExpression
-    addSource(
-        '/testB.dart',
-        '''
+    addSource('$testPackageLibPath/b.dart', '''
         lib B;
         int T1;
         F1() { }
         class X {X.c(); X._d(); z() {}}''');
     addTestSource('''
-        import "/testB.dart";
+        import 'b.dart';
         var m;
         main() {new X.^}''');
 
     await computeSuggestions();
     expect(replacementOffset, completionOffset);
     expect(replacementLength, 0);
-    assertSuggestNamedConstructor('c', 'X');
+    assertSuggestNamedConstructor(
+      elementName: 'X.c',
+      name: 'c',
+      returnType: 'X',
+    );
     assertNotSuggested('F1');
     assertNotSuggested('T1');
     assertNotSuggested('_d');
@@ -68,18 +317,16 @@ class NamedConstructorContributorTest extends DartCompletionContributorTest {
     assertNotSuggested('m');
   }
 
-  test_ConstructorName_importedClass_unresolved() async {
-    // SimpleIdentifier  PrefixedIdentifier  TypeName  ConstructorName
+  Future<void> test_ConstructorName_importedClass_unresolved() async {
+    // SimpleIdentifier  PrefixedIdentifier  NamedType  ConstructorName
     // InstanceCreationExpression
-    addSource(
-        '/testB.dart',
-        '''
+    addSource('$testPackageLibPath/b.dart', '''
         lib B;
         int T1;
         F1() { }
         class X {X.c(); X._d(); z() {}}''');
     addTestSource('''
-        import "/testB.dart";
+        import 'b.dart';
         var m;
         main() {new X.^}''');
     // Assume that imported libraries are NOT resolved
@@ -87,7 +334,11 @@ class NamedConstructorContributorTest extends DartCompletionContributorTest {
     await computeSuggestions();
     expect(replacementOffset, completionOffset);
     expect(replacementLength, 0);
-    assertSuggestNamedConstructor('c', 'X');
+    assertSuggestNamedConstructor(
+      elementName: 'X.c',
+      name: 'c',
+      returnType: 'X',
+    );
     assertNotSuggested('F1');
     assertNotSuggested('T1');
     assertNotSuggested('_d');
@@ -95,25 +346,27 @@ class NamedConstructorContributorTest extends DartCompletionContributorTest {
     assertNotSuggested('m');
   }
 
-  test_ConstructorName_importedFactory() async {
-    // SimpleIdentifier  PrefixedIdentifier  TypeName  ConstructorName
+  Future<void> test_ConstructorName_importedFactory() async {
+    // SimpleIdentifier  PrefixedIdentifier  NamedType  ConstructorName
     // InstanceCreationExpression
-    addSource(
-        '/testB.dart',
-        '''
+    addSource('$testPackageLibPath/b.dart', '''
         lib B;
         int T1;
         F1() { }
         class X {factory X.c(); factory X._d(); z() {}}''');
     addTestSource('''
-        import "/testB.dart";
+        import 'b.dart';
         var m;
         main() {new X.^}''');
 
     await computeSuggestions();
     expect(replacementOffset, completionOffset);
     expect(replacementLength, 0);
-    assertSuggestNamedConstructor('c', 'X');
+    assertSuggestNamedConstructor(
+      elementName: 'X.c',
+      name: 'c',
+      returnType: 'X',
+    );
     assertNotSuggested('F1');
     assertNotSuggested('T1');
     assertNotSuggested('_d');
@@ -121,15 +374,19 @@ class NamedConstructorContributorTest extends DartCompletionContributorTest {
     assertNotSuggested('m');
   }
 
-  test_ConstructorName_importedFactory2() async {
-    // SimpleIdentifier  PrefixedIdentifier  TypeName  ConstructorName
+  Future<void> test_ConstructorName_importedFactory2() async {
+    // SimpleIdentifier  PrefixedIdentifier  NamedType  ConstructorName
     // InstanceCreationExpression
     addTestSource('''
         main() {new String.fr^omCharCodes([]);}''');
     await computeSuggestions();
     expect(replacementOffset, completionOffset - 2);
     expect(replacementLength, 13);
-    assertSuggestNamedConstructor('fromCharCodes', 'String');
+    assertSuggestNamedConstructor(
+      elementName: 'String.fromCharCodes',
+      name: 'fromCharCodes',
+      returnType: 'String',
+    );
     assertNotSuggested('isEmpty');
     assertNotSuggested('isNotEmpty');
     assertNotSuggested('length');
@@ -137,8 +394,8 @@ class NamedConstructorContributorTest extends DartCompletionContributorTest {
     assertNotSuggested('String');
   }
 
-  test_ConstructorName_localClass() async {
-    // SimpleIdentifier  PrefixedIdentifier  TypeName  ConstructorName
+  Future<void> test_ConstructorName_localClass() async {
+    // SimpleIdentifier  PrefixedIdentifier  NamedType  ConstructorName
     // InstanceCreationExpression
     addTestSource('''
         int T1;
@@ -148,16 +405,24 @@ class NamedConstructorContributorTest extends DartCompletionContributorTest {
     await computeSuggestions();
     expect(replacementOffset, completionOffset);
     expect(replacementLength, 0);
-    assertSuggestNamedConstructor('c', 'X');
-    assertSuggestNamedConstructor('_d', 'X');
+    assertSuggestNamedConstructor(
+      elementName: 'X.c',
+      name: 'c',
+      returnType: 'X',
+    );
+    assertSuggestNamedConstructor(
+      elementName: 'X._d',
+      name: '_d',
+      returnType: 'X',
+    );
     assertNotSuggested('F1');
     assertNotSuggested('T1');
     assertNotSuggested('z');
     assertNotSuggested('m');
   }
 
-  test_ConstructorName_localFactory() async {
-    // SimpleIdentifier  PrefixedIdentifier  TypeName  ConstructorName
+  Future<void> test_ConstructorName_localFactory() async {
+    // SimpleIdentifier  PrefixedIdentifier  NamedType  ConstructorName
     // InstanceCreationExpression
     addTestSource('''
         int T1;
@@ -167,11 +432,50 @@ class NamedConstructorContributorTest extends DartCompletionContributorTest {
     await computeSuggestions();
     expect(replacementOffset, completionOffset);
     expect(replacementLength, 0);
-    assertSuggestNamedConstructor('c', 'X');
-    assertSuggestNamedConstructor('_d', 'X');
+    assertSuggestNamedConstructor(
+      elementName: 'X.c',
+      name: 'c',
+      returnType: 'X',
+    );
+    assertSuggestNamedConstructor(
+      elementName: 'X._d',
+      name: '_d',
+      returnType: 'X',
+    );
     assertNotSuggested('F1');
     assertNotSuggested('T1');
     assertNotSuggested('z');
     assertNotSuggested('m');
+  }
+
+  Future<void>
+      test_importPrefix_className_typeArguments_period_nothing_functionTypeContext_matchingReturnType() async {
+    addSource('$testPackageLibPath/a.dart', '''
+class A<T> {
+  A.named();
+  A.new();
+}
+''');
+    addTestSource('''
+import 'a.dart' as prefix;
+
+void f() {
+  A<int> Function() v = prefix.A<int>.^;
+}
+''');
+    await computeSuggestions();
+
+    expect(replacementOffset, completionOffset);
+    expect(replacementLength, 0);
+    assertConstructorReference(
+      elementName: 'A',
+      name: 'new',
+      returnType: 'A<T>',
+    );
+    assertConstructorReference(
+      elementName: 'A.named',
+      name: 'named',
+      returnType: 'A<T>',
+    );
   }
 }

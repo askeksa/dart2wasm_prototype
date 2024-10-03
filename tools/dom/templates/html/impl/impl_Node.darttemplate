@@ -15,14 +15,13 @@ class _ChildNodeListLazy extends ListBase<Node> implements NodeListWrapper {
   _ChildNodeListLazy(this._this);
 
 
-$if DART2JS
   Node get first {
-    Node result = JS('Node|Null', '#.firstChild', _this);
+    Node$NULLABLE result = JS('Node|Null', '#.firstChild', _this);
     if (result == null) throw new StateError("No elements");
     return result;
   }
   Node get last {
-    Node result = JS('Node|Null', '#.lastChild', _this);
+    Node$NULLABLE result = JS('Node|Null', '#.lastChild', _this);
     if (result == null) throw new StateError("No elements");
     return result;
   }
@@ -30,26 +29,8 @@ $if DART2JS
     int l = this.length;
     if (l == 0) throw new StateError("No elements");
     if (l > 1) throw new StateError("More than one element");
-    return JS('Node|Null', '#.firstChild', _this);
+    return JS('Node|Null', '#.firstChild', _this)$NULLASSERT;
   }
-$else
-  Node get first {
-    Node result = _this.firstChild;
-    if (result == null) throw new StateError("No elements");
-    return result;
-  }
-  Node get last {
-    Node result = _this.lastChild;
-    if (result == null) throw new StateError("No elements");
-    return result;
-  }
-  Node get single {
-    int l = this.length;
-    if (l == 0) throw new StateError("No elements");
-    if (l > 1) throw new StateError("More than one element");
-    return _this.firstChild;
-  }
-$endif
 
   void add(Node value) {
     _this.append(value);
@@ -61,7 +42,7 @@ $endif
       if (!identical(otherList._this, _this)) {
         // Optimized route for copying between nodes.
         for (var i = 0, len = otherList.length; i < len; ++i) {
-          _this.append(otherList._this.firstChild);
+          _this.append(otherList._this.firstChild$NULLASSERT);
         }
       }
       return;
@@ -111,15 +92,10 @@ $endif
     return result;
   }
 
-  bool remove(Object object) {
+  bool remove(Object$NULLABLE object) {
     if (object is! Node) return false;
     Node node = object;
-$if JSINTEROP
-    // We aren't preserving identity of nodes in JSINTEROP mode
-    if (_this != node.parentNode) return false;
-$else
     if (!identical(_this, node.parentNode)) return false;
-$endif
     _this._removeChild(node);
     return true;
   }
@@ -128,9 +104,9 @@ $endif
     // This implementation of removeWhere/retainWhere is more efficient
     // than the default in ListBase. Child nodes can be removed in constant
     // time.
-    Node child = _this.firstChild;
+    Node$NULLABLE child = _this.firstChild;
     while (child != null) {
-      Node nextChild = child.nextNode;
+      Node$NULLABLE nextChild = child.nextNode;
       if (test(child) == removeMatching) {
         _this._removeChild(child);
       }
@@ -160,11 +136,11 @@ $endif
 
   // TODO(jacobr): this could be implemented for child node lists.
   // The exception we throw here is misleading.
-  void sort([Comparator<Node> compare]) {
+  void sort([Comparator<Node>$NULLABLE compare]) {
     throw new UnsupportedError("Cannot sort Node list");
   }
 
-  void shuffle([Random random]) {
+  void shuffle([Random$NULLABLE random]) {
     throw new UnsupportedError("Cannot shuffle Node list");
   }
 
@@ -174,8 +150,12 @@ $endif
     throw new UnsupportedError("Cannot setRange on Node list");
   }
 
-  void fillRange(int start, int end, [Node fill]) {
+  void fillRange(int start, int end, [Node$NULLABLE fill]) {
     throw new UnsupportedError("Cannot fillRange on Node list");
+  }
+
+  void removeRange(int start, int end) {
+    throw new UnsupportedError("Cannot removeRange on Node list");
   }
   // -- end List<Node> mixins.
 
@@ -197,11 +177,7 @@ $endif
 $(ANNOTATIONS)$(NATIVESPEC)$(CLASS_MODIFIERS)class $CLASSNAME$EXTENDS$IMPLEMENTS {
 
   // Custom element created callback.
-$if DART2JS
   Node._created() : super._created();
-$else
-  Node._created() : super._created();
-$endif
 
   /**
    * A modifiable list of this node's children.
@@ -223,38 +199,34 @@ $endif
   /**
    * Removes this node from the DOM.
    */
-  @DomName('Node.removeChild')
   void remove() {
     // TODO(jacobr): should we throw an exception if parent is already null?
     // TODO(vsm): Use the native remove when available.
     if (this.parentNode != null) {
-      final Node parent = this.parentNode;
-      parentNode._removeChild(this);
+      final Node parent = this.parentNode$NULLASSERT;
+      parent._removeChild(this);
     }
   }
 
   /**
    * Replaces this node with another node.
    */
-  @DomName('Node.replaceChild')
   Node replaceWith(Node otherNode) {
     try {
-      final Node parent = this.parentNode;
+      final Node parent = this.parentNode$NULLASSERT;
       parent._replaceChild(otherNode, this);
-    } catch (e) {
-
-    };
+    } catch (e) {}
     return this;
   }
 
   /**
-   * Inserts all of the nodes into this node directly before refChild.
+   * Inserts all of the nodes into this node directly before child.
    *
    * See also:
    *
    * * [insertBefore]
    */
-  Node insertAllBefore(Iterable<Node> newNodes, Node refChild) {
+  void insertAllBefore(Iterable<Node> newNodes, Node child) {
     if (newNodes is _ChildNodeListLazy) {
       _ChildNodeListLazy otherList = newNodes;
       if (identical(otherList._this, this)) {
@@ -263,18 +235,18 @@ $endif
 
       // Optimized route for copying between nodes.
       for (var i = 0, len = otherList.length; i < len; ++i) {
-        this.insertBefore(otherList._this.firstChild, refChild);
+        this.insertBefore(otherList._this.firstChild$NULLASSERT, child);
       }
     } else {
       for (var node in newNodes) {
-        this.insertBefore(node, refChild);
+        this.insertBefore(node, child);
       }
     }
   }
 
   void _clearChildren() {
     while (firstChild != null) {
-      _removeChild(firstChild);
+      _removeChild(firstChild$NULLASSERT);
     }
   }
 
@@ -282,11 +254,10 @@ $endif
    * Print out a String representation of this Node.
    */
   String toString() {
-    String value = nodeValue;  // Fetch DOM Node property once.
+    String$NULLABLE value = nodeValue;  // Fetch DOM Node property once.
     return value == null ? super.toString() : value;
   }
 
-$if DARTIUM
   /**
    * A list of this node's children.
    *
@@ -295,24 +266,9 @@ $if DARTIUM
    * * [Node.childNodes](https://developer.mozilla.org/en-US/docs/Web/API/Node.childNodes)
    *   from MDN.
    */
-  @DomName('Node.childNodes')
-  @DocsEditable()
-  List<Node> get childNodes => _blink.BlinkNode.instance.childNodes_Getter_(this);
-$else
-  /**
-   * A list of this node's children.
-   *
-   * ## Other resources
-   *
-   * * [Node.childNodes](https://developer.mozilla.org/en-US/docs/Web/API/Node.childNodes)
-   *   from MDN.
-   */
-  @DomName('Node.childNodes')
-  @DocsEditable()
   @Returns('NodeList')
   @Creates('NodeList')
-  final List<Node> childNodes;
+  List<Node> get childNodes native;
 
-$endif
 $!MEMBERS
 }

@@ -7,208 +7,254 @@ library timeline_page_element;
 import 'dart:async';
 import 'dart:html';
 import 'dart:convert';
-import 'package:observatory/service.dart' as S;
-import 'package:observatory/service_html.dart' as SH;
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/nav_bar.dart';
 import 'package:observatory/src/elements/helpers/nav_menu.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 import 'package:observatory/src/elements/nav/notify.dart';
 import 'package:observatory/src/elements/nav/refresh.dart';
 import 'package:observatory/src/elements/nav/top_menu.dart';
 import 'package:observatory/src/elements/nav/vm_menu.dart';
 
-enum _Profile { none, dart, vm, all, custom }
-
-class TimelinePageElement extends HtmlElement implements Renderable {
-  static const tag =
-      const Tag<TimelinePageElement>('timeline-page', dependencies: const [
-    NavTopMenuElement.tag,
-    NavVMMenuElement.tag,
-    NavRefreshElement.tag,
-    NavNotifyElement.tag
-  ]);
-
-  RenderingScheduler<TimelinePageElement> _r;
+class TimelinePageElement extends CustomElement implements Renderable {
+  late RenderingScheduler<TimelinePageElement> _r;
 
   Stream<RenderedEvent<TimelinePageElement>> get onRendered => _r.onRendered;
 
-  M.VM _vm;
-  M.EventRepository _events;
-  M.NotificationRepository _notifications;
-  String _recorderName = '';
-  _Profile _profile = _Profile.none;
-  final Set<String> _availableStreams = new Set<String>();
-  final Set<String> _recordedStreams = new Set<String>();
+  late M.VM _vm;
+  late M.TimelineRepository _repository;
+  late M.EventRepository _events;
+  late M.NotificationRepository _notifications;
+  M.TimelineRecorder? _recorder;
+  late Set<M.TimelineStream> _availableStreams;
+  late Set<M.TimelineStream> _recordedStreams;
+  late Set<M.TimelineProfile> _profiles;
 
-  M.VMRef get vm => _vm;
+  M.VM get vm => _vm;
   M.NotificationRepository get notifications => _notifications;
 
-  factory TimelinePageElement(
-      M.VM vm, M.EventRepository events, M.NotificationRepository notifications,
-      {RenderingQueue queue}) {
+  factory TimelinePageElement(M.VM vm, M.TimelineRepository repository,
+      M.EventRepository events, M.NotificationRepository notifications,
+      {RenderingQueue? queue}) {
     assert(vm != null);
+    assert(repository != null);
     assert(events != null);
     assert(notifications != null);
-    TimelinePageElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    TimelinePageElement e = new TimelinePageElement.created();
+    e._r = new RenderingScheduler<TimelinePageElement>(e, queue: queue);
     e._vm = vm;
+    e._repository = repository;
     e._events = events;
     e._notifications = notifications;
     return e;
   }
 
-  TimelinePageElement.created() : super.created();
+  TimelinePageElement.created() : super.created('timeline-page');
 
   @override
   attached() {
     super.attached();
     _r.enable();
-    _setupInitialState();
+    _updateRecorderUI();
   }
 
   @override
   detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
   }
 
-  IFrameElement _frame;
-  DivElement _content;
+  IFrameElement? _frame;
+  DivElement? _content;
+
+  bool get usingVMRecorder =>
+      _recorder!.name != "Fuchsia" &&
+      _recorder!.name != "Systrace" &&
+      _recorder!.name != "Macos";
 
   void render() {
     if (_frame == null) {
       _frame = new IFrameElement()..src = 'timeline.html';
+      _frame!.onLoad.listen((event) {
+        _refresh();
+      });
     }
     if (_content == null) {
       _content = new DivElement()..classes = ['content-centered-big'];
     }
-    _content.children = [
+    _content!.children = <Element>[
       new HeadingElement.h1()..text = 'Timeline settings',
-      new DivElement()
-        ..classes = ['memberList']
-        ..children = [
-          new DivElement()
-            ..classes = ['memberItem']
-            ..children = [
+      _recorder == null
+          ? (new DivElement()..text = 'Loading...')
+          : (new DivElement()
+            ..classes = ['memberList']
+            ..children = <Element>[
               new DivElement()
-                ..classes = ['memberName']
-                ..text = 'Recorder:',
+                ..classes = ['memberItem']
+                ..children = <Element>[
+                  new DivElement()
+                    ..classes = ['memberName']
+                    ..text = 'Recorder:',
+                  new DivElement()
+                    ..classes = ['memberValue']
+                    ..text = _recorder!.name
+                ],
               new DivElement()
-                ..classes = ['memberValue']
-                ..text = _recorderName
-            ],
-          new DivElement()
-            ..classes = ['memberItem']
-            ..children = [
+                ..classes = ['memberItem']
+                ..children = <Element>[
+                  new DivElement()
+                    ..classes = ['memberName']
+                    ..text = 'Recorded Streams Profile:',
+                  new DivElement()
+                    ..classes = ['memberValue']
+                    ..children = _createProfileSelect()
+                ],
               new DivElement()
-                ..classes = ['memberName']
-                ..text = 'Recorded Streams Profile:',
-              new DivElement()
-                ..classes = ['memberValue']
-                ..children = _createProfileSelect()
-            ],
-          new DivElement()
-            ..classes = ['memberItem']
-            ..children = [
-              new DivElement()
-                ..classes = ['memberName']
-                ..text = 'Recorded Streams:',
-              new DivElement()
-                ..classes = ['memberValue']
-                ..children = _availableStreams.map(_makeStreamToggle).toList()
-            ]
-        ]
+                ..classes = ['memberItem']
+                ..children = <Element>[
+                  new DivElement()
+                    ..classes = ['memberName']
+                    ..text = 'Recorded Streams:',
+                  new DivElement()
+                    ..classes = ['memberValue']
+                    ..children = _availableStreams
+                        .map<Element>(_makeStreamToggle)
+                        .toList()
+                ]
+            ])
     ];
-    if (children.isEmpty) {
-      children = [
-        navBar([
-          new NavTopMenuElement(queue: _r.queue),
-          new NavVMMenuElement(_vm, _events, queue: _r.queue),
-          navMenu('timeline', link: Uris.timeline()),
-          new NavRefreshElement(queue: _r.queue)
-            ..onRefresh.listen((e) async {
-              e.element.disabled = true;
-              await _refresh();
-              e.element.disabled = false;
-            }),
-          new NavRefreshElement(label: 'clear', queue: _r.queue)
-            ..onRefresh.listen((e) async {
-              e.element.disabled = true;
-              await _clear();
-              e.element.disabled = false;
-            }),
-          new NavRefreshElement(label: 'save', queue: _r.queue)
-            ..onRefresh.listen((e) async {
-              e.element.disabled = true;
-              await _save();
-              e.element.disabled = false;
-            }),
-          new NavRefreshElement(label: 'load', queue: _r.queue)
-            ..onRefresh.listen((e) async {
-              e.element.disabled = true;
-              await _load();
-              e.element.disabled = false;
-            }),
-          new NavNotifyElement(_notifications, queue: _r.queue)
-        ]),
-        _content,
-        new DivElement()
-          ..classes = ['iframe']
-          ..children = [_frame]
-      ];
+
+    children = <Element>[
+      navBar(<Element>[
+        new NavTopMenuElement(queue: _r.queue).element,
+        new NavVMMenuElement(vm, _events, queue: _r.queue).element,
+        navMenu('timeline', link: Uris.timeline()),
+        (new NavRefreshElement(queue: _r.queue)
+              ..onRefresh.listen((e) async {
+                e.element.disabled = true;
+                await _refresh();
+                e.element.disabled = !usingVMRecorder;
+              }))
+            .element,
+        (new NavRefreshElement(label: 'clear', queue: _r.queue)
+              ..onRefresh.listen((e) async {
+                e.element.disabled = true;
+                await _clear();
+                e.element.disabled = !usingVMRecorder;
+              }))
+            .element,
+        (new NavRefreshElement(label: 'save', queue: _r.queue)
+              ..onRefresh.listen((e) async {
+                e.element.disabled = true;
+                await _save();
+                e.element.disabled = !usingVMRecorder;
+              }))
+            .element,
+        (new NavRefreshElement(label: 'load', queue: _r.queue)
+              ..onRefresh.listen((e) async {
+                e.element.disabled = true;
+                await _load();
+                e.element.disabled = !usingVMRecorder;
+              }))
+            .element,
+        new NavNotifyElement(_notifications, queue: _r.queue).element
+      ]),
+      _content!,
+      _createIFrameOrMessage(),
+    ];
+  }
+
+  HtmlElement _createIFrameOrMessage() {
+    final recorder = _recorder;
+    if (recorder == null) {
+      return new DivElement()
+        ..classes = ['content-centered-big']
+        ..text = 'Loading...';
     }
+
+    if (recorder.name == "Fuchsia") {
+      return new DivElement()
+        ..classes = ['content-centered-big']
+        ..children = <Element>[
+          new BRElement(),
+          new SpanElement()
+            ..text =
+                "This VM is forwarding timeline events to Fuchsia's system tracing. See the ",
+          new AnchorElement()
+            ..text = "Fuchsia Tracing Usage Guide"
+            // ignore: unsafe_html
+            ..href = "https://fuchsia.dev/fuchsia-src/development/tracing",
+          new SpanElement()..text = ".",
+        ];
+    }
+
+    if (recorder.name == "Systrace") {
+      return new DivElement()
+        ..classes = ['content-centered-big']
+        ..children = <Element>[
+          new BRElement(),
+          new SpanElement()
+            ..text =
+                "This VM is forwarding timeline events to Android's systrace. See the ",
+          new AnchorElement()
+            ..text = "systrace usage guide"
+            // ignore: unsafe_html
+            ..href =
+                "https://developer.android.com/studio/command-line/systrace",
+          new SpanElement()..text = ".",
+        ];
+    }
+
+    if (recorder.name == "Macos") {
+      return new DivElement()
+        ..classes = ['content-centered-big']
+        ..children = <Element>[
+          new BRElement(),
+          new SpanElement()
+            ..text =
+                "This VM is forwarding timeline events to macOS's Unified Logging. "
+                    "To track these events, open 'Instruments' and add the 'os_signpost' Filter. See the ",
+          new AnchorElement()
+            ..text = "Instruments Usage Guide"
+            // ignore: unsafe_html
+            ..href = "https://help.apple.com/instruments",
+          new SpanElement()..text = ".",
+        ];
+    }
+
+    return new DivElement()
+      ..classes = ['iframe']
+      ..children = <Element>[_frame!];
   }
 
   List<Element> _createProfileSelect() {
-    var s;
     return [
-      s = new SelectElement()
-        ..classes = ['direction-select']
-        ..value = _profileToString(_profile)
-        ..children = _Profile.values.map((direction) {
-          return new OptionElement(
-              value: _profileToString(direction),
-              selected: _profile == direction)
-            ..text = _profileToString(direction);
-        }).toList(growable: false)
-        ..onChange.listen((_) {
-          _profile = _Profile.values[s.selectedIndex];
-          _applyPreset();
-          _r.dirty();
-        })
+      new SpanElement()
+        ..children = (_profiles.expand((profile) {
+          return <Element>[
+            new ButtonElement()
+              ..text = profile.name
+              ..onClick.listen((_) {
+                _applyPreset(profile);
+              }),
+            new SpanElement()..text = ' - '
+          ];
+        }).toList()
+          ..removeLast())
     ];
   }
 
-  String _profileToString(_Profile profile) {
-    switch (profile) {
-      case _Profile.none:
-        return 'none';
-      case _Profile.dart:
-        return 'Dart Developer';
-      case _Profile.vm:
-        return 'VM Developer';
-      case _Profile.all:
-        return 'All';
-      case _Profile.custom:
-        return 'Custom';
-    }
-    throw new Exception('Unknown Profile ${profile}');
-  }
-
   Future _refresh() async {
-    S.VM vm = _vm as S.VM;
-    await vm.reload();
-    await vm.reloadIsolates();
-    return _postMessage('refresh');
+    _postMessage('loading');
+    final traceData = await _repository.getTimeline(vm);
+    return _postMessage('refresh', traceData);
   }
 
   Future _clear() async {
-    S.VM vm = _vm as S.VM;
-    await vm.invokeRpc('_clearVMTimeline', {});
+    await _repository.clear(vm);
     return _postMessage('clear');
   }
 
@@ -220,118 +266,62 @@ class TimelinePageElement extends HtmlElement implements Renderable {
     return _postMessage('load');
   }
 
-  Future _postMessage(String method) {
-    S.VM vm = _vm as S.VM;
-    var isolateIds = new List();
-    for (var isolate in vm.isolates) {
-      isolateIds.add(isolate.id);
+  Future _postMessage(String method,
+      [Map<dynamic, dynamic> params = const <dynamic, dynamic>{}]) async {
+    if (_frame!.contentWindow == null) {
+      return null;
     }
-    var message = {
-      'method': method,
-      'params': {
-        'vmAddress': (vm as SH.WebSocketVM).target.networkAddress,
-        'isolateIds': isolateIds
-      }
-    };
-    _frame.contentWindow
-        .postMessage(JSON.encode(message), window.location.href);
+    var message = {'method': method, 'params': params};
+    _frame!.contentWindow!
+        .postMessage(json.encode(message), window.location.href);
     return null;
   }
 
-  Future _setupInitialState() async {
-    await _updateRecorderUI();
-    await _refresh();
-  }
-
-  // Dart developers care about the following streams:
-  List<String> _dartPreset = ['GC', 'Compiler', 'Dart'];
-
-  // VM developers care about the following streams:
-  List<String> _vmPreset = [
-    'GC',
-    'Compiler',
-    'Dart',
-    'Debugger',
-    'Embedder',
-    'Isolate',
-    'VM'
-  ];
-
-  void _applyPreset() {
-    switch (_profile) {
-      case _Profile.none:
-        _recordedStreams.clear();
-        break;
-      case _Profile.all:
-        _recordedStreams.clear();
-        _recordedStreams.addAll(_availableStreams);
-        break;
-      case _Profile.vm:
-        _recordedStreams.clear();
-        _recordedStreams.addAll(_vmPreset);
-        break;
-      case _Profile.dart:
-        _recordedStreams.clear();
-        _recordedStreams.addAll(_dartPreset);
-        break;
-      case _Profile.custom:
-        return;
-    }
+  void _applyPreset(M.TimelineProfile profile) {
+    _recordedStreams = new Set<M.TimelineStream>.from(profile.streams);
     _applyStreamChanges();
     _updateRecorderUI();
   }
 
   Future _updateRecorderUI() async {
-    S.VM vm = _vm as S.VM;
     // Grab the current timeline flags.
-    S.ServiceMap response = await vm.invokeRpc('_getVMTimelineFlags', {});
-    assert(response['type'] == 'TimelineFlags');
-    // Process them so we know available streams.
-    _processFlags(response);
+    final M.TimelineFlags flags = await _repository.getFlags(vm);
+    // Grab the recorder name.
+    _recorder = flags.recorder;
+    // Update the set of available streams.
+    _availableStreams = new Set<M.TimelineStream>.from(flags.streams);
+    // Update the set of recorded streams.
+    _recordedStreams = new Set<M.TimelineStream>.from(
+        flags.streams.where((s) => s.isRecorded));
+    // Update the set of presets.
+    _profiles = new Set<M.TimelineProfile>.from(flags.profiles);
     // Refresh the UI.
     _r.dirty();
   }
 
-  Element _makeStreamToggle(String streamName) {
+  Element _makeStreamToggle(M.TimelineStream stream) {
     LabelElement label = new LabelElement();
     label.style.paddingLeft = '8px';
     SpanElement span = new SpanElement();
-    span.text = streamName;
+    span.text = stream.name;
     InputElement checkbox = new InputElement();
     checkbox.onChange.listen((_) {
-      if (checkbox.checked) {
-        _recordedStreams.add(streamName);
+      if (checkbox.checked!) {
+        _recordedStreams.add(stream);
       } else {
-        _recordedStreams.remove(streamName);
+        _recordedStreams.remove(stream);
       }
       _applyStreamChanges();
       _updateRecorderUI();
     });
     checkbox.type = 'checkbox';
-    checkbox.checked = _recordedStreams.contains(streamName);
+    checkbox.checked = _recordedStreams.contains(stream);
     label.children.add(checkbox);
     label.children.add(span);
     return label;
   }
 
   Future _applyStreamChanges() {
-    S.VM vm = _vm as S.VM;
-    return vm.invokeRpc('_setVMTimelineFlags', {
-      'recordedStreams': '[${_recordedStreams.join(', ')}]',
-    });
-  }
-
-  void _processFlags(S.ServiceMap response) {
-    // Grab the recorder name.
-    _recorderName = response['recorderName'];
-    // Update the set of available streams.
-    _availableStreams.clear();
-    response['availableStreams']
-        .forEach((String streamName) => _availableStreams.add(streamName));
-    // Update the set of recorded streams.
-    _recordedStreams.clear();
-    response['recordedStreams']
-        .forEach((String streamName) => _recordedStreams.add(streamName));
-    _r.dirty();
+    return _repository.setRecordedStreams(vm, _recordedStreams);
   }
 }

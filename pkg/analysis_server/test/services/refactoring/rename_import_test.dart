@@ -1,15 +1,14 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer_plugin/protocol/protocol_common.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'abstract_rename.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(RenameImportTest);
   });
@@ -17,21 +16,16 @@ main() {
 
 @reflectiveTest
 class RenameImportTest extends RenameRefactoringTest {
-  test_checkNewName() async {
+  Future<void> test_checkNewName() async {
     await indexTestUnit("import 'dart:async' as test;");
     _createRefactoring("import 'dart:");
     expect(refactoring.oldName, 'test');
-    // null
-    refactoring.newName = null;
-    assertRefactoringStatus(
-        refactoring.checkNewName(), RefactoringProblemSeverity.FATAL,
-        expectedMessage: "Import prefix name must not be null.");
     // same
     refactoring.newName = 'test';
     assertRefactoringStatus(
         refactoring.checkNewName(), RefactoringProblemSeverity.FATAL,
         expectedMessage:
-            "The new name must be different than the current name.");
+            'The new name must be different than the current name.');
     // empty
     refactoring.newName = '';
     assertRefactoringStatusOK(refactoring.checkNewName());
@@ -40,7 +34,23 @@ class RenameImportTest extends RenameRefactoringTest {
     assertRefactoringStatusOK(refactoring.checkNewName());
   }
 
-  test_createChange_add() async {
+  Future<void> test_checkNewName_sameName_empty() async {
+    await indexTestUnit('''
+import 'dart:math';
+void f(Random r) {}
+''');
+
+    _createRefactoring("import 'dart:math");
+
+    refactoring.newName = '';
+    assertRefactoringStatus(
+      refactoring.checkNewName(),
+      RefactoringProblemSeverity.FATAL,
+      expectedMessage: 'The new name must be different than the current name.',
+    );
+  }
+
+  Future<void> test_createChange_add() async {
     await indexTestUnit('''
 import 'dart:async';
 import 'dart:math' show Random, min hide max;
@@ -66,7 +76,8 @@ main() {
 ''');
   }
 
-  test_createChange_add_interpolationExpression_hasCurlyBrackets() async {
+  Future<void>
+      test_createChange_add_interpolationExpression_hasCurlyBrackets() async {
     await indexTestUnit(r'''
 import 'dart:async';
 main() {
@@ -88,7 +99,8 @@ main() {
 ''');
   }
 
-  test_createChange_add_interpolationExpression_noCurlyBrackets() async {
+  Future<void>
+      test_createChange_add_interpolationExpression_noCurlyBrackets() async {
     await indexTestUnit(r'''
 import 'dart:async';
 main() {
@@ -110,7 +122,7 @@ main() {
 ''');
   }
 
-  test_createChange_change_className() async {
+  Future<void> test_createChange_change_className() async {
     await indexTestUnit('''
 import 'dart:math' as test;
 import 'dart:async' as test;
@@ -133,7 +145,7 @@ main() {
 ''');
   }
 
-  test_createChange_change_function() async {
+  Future<void> test_createChange_change_function() async {
     await indexTestUnit('''
 import 'dart:math' as test;
 import 'dart:async' as test;
@@ -158,18 +170,18 @@ main() {
 ''');
   }
 
-  test_createChange_change_onPrefixElement() async {
+  Future<void> test_createChange_change_onPrefixElement() async {
     await indexTestUnit('''
 import 'dart:async' as test;
 import 'dart:math' as test;
 main() {
   test.Future f;
-  test.PI;
-  test.E;
+  test.pi;
+  test.e;
 }
 ''');
     // configure refactoring
-    createRenameRefactoringAtString('test.PI');
+    createRenameRefactoringAtString('test.pi');
     expect(refactoring.refactoringName, 'Rename Import Prefix');
     expect(refactoring.oldName, 'test');
     refactoring.newName = 'newName';
@@ -179,13 +191,13 @@ import 'dart:async' as test;
 import 'dart:math' as newName;
 main() {
   test.Future f;
-  newName.PI;
-  newName.E;
+  newName.pi;
+  newName.e;
 }
 ''');
   }
 
-  test_createChange_remove() async {
+  Future<void> test_createChange_remove() async {
     await indexTestUnit('''
 import 'dart:math' as test;
 import 'dart:async' as test;
@@ -208,7 +220,7 @@ main() {
 ''');
   }
 
-  test_oldName_empty() async {
+  Future<void> test_oldName_empty() async {
     await indexTestUnit('''
 import 'dart:math';
 import 'dart:async';
@@ -223,8 +235,7 @@ main() {
   }
 
   void _createRefactoring(String search) {
-    ImportDirective directive =
-        findNodeAtString(search, (node) => node is ImportDirective);
+    var directive = findNode.import(search);
     createRenameRefactoringForElement(directive.element);
   }
 }

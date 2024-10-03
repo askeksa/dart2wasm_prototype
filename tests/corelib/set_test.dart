@@ -51,8 +51,8 @@ void testInts(Set create()) {
 
   // Test Set.forEach.
   int sum = 0;
-  testForEach(int val) {
-    sum += (val + 1);
+  void testForEach(dynamic val) {
+    sum += ((val as int) + 1);
   }
 
   set.forEach(testForEach);
@@ -61,8 +61,8 @@ void testInts(Set create()) {
   Expect.isTrue(set.containsAll(set));
 
   // Test Set.map.
-  testMap(int val) {
-    return val * val;
+  int testMap(dynamic val) {
+    return (val as int) * val;
   }
 
   Set mapped = set.map(testMap).toSet();
@@ -89,8 +89,8 @@ void testInts(Set create()) {
   Expect.equals(1 + 2 + 5 + 10 + 17 + 26 + 37 + 50 + 65 + 82, sum);
 
   // Test Set.filter.
-  testFilter(int val) {
-    return val.isEven;
+  bool testFilter(dynamic val) {
+    return (val as int).isEven;
   }
 
   Set filtered = set.where(testFilter).toSet();
@@ -110,8 +110,8 @@ void testInts(Set create()) {
   Expect.isTrue(set.containsAll(filtered));
 
   // Test Set.every.
-  testEvery(int val) {
-    return (val < 10);
+  bool testEvery(dynamic val) {
+    return ((val as int) < 10);
   }
 
   Expect.isTrue(set.every(testEvery));
@@ -121,7 +121,7 @@ void testInts(Set create()) {
   Expect.isFalse(filtered.every(testEvery));
 
   // Test Set.some.
-  testSome(int val) {
+  bool testSome(dynamic val) {
     return (val == 4);
   }
 
@@ -177,7 +177,7 @@ void testInts(Set create()) {
   }
 
   // Test Set.addAll.
-  List list = new List(10);
+  List list = new List.filled(10, null);
   for (int i = 0; i < 10; i++) {
     list[i] = i + 10;
   }
@@ -280,7 +280,9 @@ void testTypeAnnotations(Set<int> set) {
   testLength(1, set);
 }
 
-void testRetainWhere(Set create([equals, hashCode, validKey, compare])) {
+void testRetainWhere(
+    Set<CE> create(
+        [CEEq? equals, CEHash? hashCode, ValidKey? validKey, CECompare? compare])) {
   // The retainWhere method must not collapse the argument Iterable
   // in a way that doesn't match the equality of the set.
   // It must not throw away equal elements that are different in the
@@ -291,7 +293,7 @@ void testRetainWhere(Set create([equals, hashCode, validKey, compare])) {
   // If set equality is natural equality, using different but equal objects
   // must work. Can't use an identity set internally (as was done at some point
   // during development).
-  Set set = create();
+  var set = create();
   set.addAll([new CE(0), new CE(1), new CE(2)]);
   Expect.equals(3, set.length); // All different.
   set.retainAll([new CE(0), new CE(2)]);
@@ -362,7 +364,7 @@ void testDifferenceIntersection(create([equals, hashCode, validKey, compare])) {
   Expect.identical(ce1a, difference.lookup(ce1a));
   Expect.identical(ce2, difference.lookup(ce2));
 
-  // Intesection always takes elements from receiver set.
+  // Intersection always takes elements from receiver set.
   var intersection = set1.intersection(set2);
   testLength(1, intersection);
   Expect.identical(ce1a, intersection.lookup(ce1a));
@@ -376,18 +378,22 @@ class CE implements Comparable<CE> {
   final int id;
   const CE(this.id);
   int get hashCode => id;
-  bool operator ==(Object other) => other is CE && id == (other as CE).id;
+  bool operator ==(Object other) => other is CE && id == other.id;
   int compareTo(CE other) => id - other.id;
   String toString() => "CE($id)";
 }
 
+typedef int CECompare(CE e1, CE e2);
+typedef int CEHash(CE e1);
+typedef bool CEEq(CE e1, CE e2);
+typedef bool ValidKey(dynamic o);
 // Equality of Id objects based on id modulo value.
-Function customEq(int mod) => (CE e1, CE e2) => ((e1.id - e2.id) % mod) == 0;
-Function customHash(int mod) => (CE e) => e.id % mod;
-Function customCompare(int mod) =>
+CEEq customEq(int mod) => (CE e1, CE e2) => ((e1.id - e2.id) % mod) == 0;
+CEHash customHash(int mod) => (CE e) => e.id % mod;
+CECompare customCompare(int mod) =>
     (CE e1, CE e2) => (e1.id % mod) - (e2.id % mod);
-bool validKey(Object o) => o is CE;
-final customId = new Map.identity();
+bool validKey(dynamic o) => o is CE;
+final customId = new Map<dynamic, dynamic>.identity();
 int counter = 0;
 int identityCompare(e1, e2) {
   if (identical(e1, e2)) return 0;
@@ -439,7 +445,7 @@ void testIntSetFrom(setFrom) {
 }
 
 void testCESetFrom(setFrom) {
-  List<Object> ceList = [
+  var ceList = [
     new CE(2),
     new CE(3),
     new CE(5),
@@ -474,6 +480,66 @@ void testASetFrom(setFrom) {
   // Set.from allows to cast elements.
   Set<A> aSet = setFrom(bList);
   Expect.isTrue(aSet.length == 1);
+}
+
+void testUnmodifiable(Set source) {
+  var unmodifiable = Set.unmodifiable(source);
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.add(3);
+  }, "add");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.addAll({1, 2, 3});
+  }, "addAll");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.addAll(<int>{});
+  }, "addAll empty");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.remove(3);
+  }, "remove");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.removeAll({1, 2, 3});
+  }, "removeAll");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.removeAll(<int>{});
+  }, "removeAll empty");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.retainAll({1, 2, 3});
+  }, "retainAll");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.retainAll(<int>{});
+  }, "retainAll empty");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.removeWhere((_) => true);
+  }, "removeWhere");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.retainWhere((_) => false);
+  }, "retainWhere");
+
+  Expect.throwsUnsupportedError(() {
+    unmodifiable.clear();
+  }, "clear");
+}
+
+void testUnmodifiableSetIsNotUpdatedIfSourceSetIsUpdated() {
+  var modifiable = {1};
+  var unmodifiable = Set.unmodifiable(modifiable);
+
+  modifiable.add(2);
+  Expect.notEquals(modifiable.length, unmodifiable.length);
+  Expect.setEquals({2}, modifiable.difference(unmodifiable));
+  modifiable.removeAll({1, 2});
+  Expect.setEquals({1}, unmodifiable.difference(modifiable));
+  Expect.setEquals({1}, unmodifiable);
 }
 
 main() {
@@ -547,4 +613,7 @@ main() {
   testASetFrom((x) => new HashSet<A>.from(x));
   testASetFrom((x) => new LinkedHashSet<A>.from(x));
   testASetFrom((x) => new SplayTreeSet<A>.from(x, identityCompare));
+
+  testUnmodifiable({1});
+  testUnmodifiableSetIsNotUpdatedIfSourceSetIsUpdated();
 }

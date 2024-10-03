@@ -2,1298 +2,792 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+#if !defined(DART_PRECOMPILED_RUNTIME)
+
 #include "vm/kernel.h"
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
-namespace dart {
+#include "vm/bit_vector.h"
+#include "vm/compiler/frontend/constant_reader.h"
+#include "vm/compiler/frontend/kernel_translation_helper.h"
+#include "vm/compiler/jit/compiler.h"
+#include "vm/longjump.h"
+#include "vm/object_store.h"
+#include "vm/parser.h"  // For Parser::kParameter* constants.
+#include "vm/stack_frame.h"
 
+
+namespace dart {
 namespace kernel {
 
-
-template <typename T>
-void VisitList(List<T>* list, Visitor* visitor) {
-  for (int i = 0; i < list->length(); ++i) {
-    (*list)[i]->AcceptVisitor(visitor);
+KernelLineStartsReader::KernelLineStartsReader(
+    const dart::TypedData& line_starts_data,
+    dart::Zone* zone)
+    : line_starts_data_(line_starts_data) {
+  TypedDataElementType type = line_starts_data_.ElementType();
+  if (type == kInt8ArrayElement) {
+    helper_ = new KernelInt8LineStartsHelper();
+  } else if (type == kInt16ArrayElement) {
+    helper_ = new KernelInt16LineStartsHelper();
+  } else if (type == kInt32ArrayElement) {
+    helper_ = new KernelInt32LineStartsHelper();
+  } else {
+    UNREACHABLE();
   }
 }
 
-
-Source::~Source() {
-  delete[] uri_;
-  delete[] source_code_;
-  delete[] line_starts_;
-}
-
-
-SourceTable::~SourceTable() {
-  delete[] sources_;
-}
-
-
-Node::~Node() {}
-
-
-TreeNode::~TreeNode() {}
-
-
-void TreeNode::AcceptVisitor(Visitor* visitor) {
-  AcceptTreeVisitor(visitor);
-}
-
-
-LinkedNode::~LinkedNode() {}
-
-
-Library::~Library() {}
-
-
-void Library::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitLibrary(this);
-}
-
-
-void Library::VisitChildren(Visitor* visitor) {
-  VisitList(&typedefs(), visitor);
-  VisitList(&classes(), visitor);
-  VisitList(&procedures(), visitor);
-  VisitList(&fields(), visitor);
-}
-
-
-LibraryDependency::~LibraryDependency() {}
-
-
-Combinator::~Combinator() {}
-
-
-Typedef::~Typedef() {}
-
-
-void Typedef::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitTypedef(this);
-}
-
-
-void Typedef::VisitChildren(Visitor* visitor) {
-  VisitList(&type_parameters(), visitor);
-  type()->AcceptDartTypeVisitor(visitor);
-}
-
-
-Class::~Class() {}
-
-
-void Class::AcceptTreeVisitor(TreeVisitor* visitor) {
-  AcceptClassVisitor(visitor);
-}
-
-
-NormalClass::~NormalClass() {}
-
-
-void NormalClass::AcceptClassVisitor(ClassVisitor* visitor) {
-  visitor->VisitNormalClass(this);
-}
-
-
-void NormalClass::VisitChildren(Visitor* visitor) {
-  VisitList(&type_parameters(), visitor);
-  if (super_class() != NULL) visitor->VisitInterfaceType(super_class());
-  VisitList(&implemented_classes(), visitor);
-  VisitList(&constructors(), visitor);
-  VisitList(&procedures(), visitor);
-  VisitList(&fields(), visitor);
-}
-
-
-MixinClass::~MixinClass() {}
-
-
-void MixinClass::AcceptClassVisitor(ClassVisitor* visitor) {
-  visitor->VisitMixinClass(this);
-}
-
-
-void MixinClass::VisitChildren(Visitor* visitor) {
-  VisitList(&type_parameters(), visitor);
-  visitor->VisitInterfaceType(first());
-  visitor->VisitInterfaceType(second());
-  VisitList(&implemented_classes(), visitor);
-  VisitList(&constructors(), visitor);
-}
-
-
-Member::~Member() {}
-
-
-void Member::AcceptTreeVisitor(TreeVisitor* visitor) {
-  AcceptMemberVisitor(visitor);
-}
-
-
-Field::~Field() {}
-
-
-void Field::AcceptMemberVisitor(MemberVisitor* visitor) {
-  visitor->VisitField(this);
-}
-
-
-void Field::VisitChildren(Visitor* visitor) {
-  type()->AcceptDartTypeVisitor(visitor);
-  visitor->VisitName(name());
-  if (initializer() != NULL) initializer()->AcceptExpressionVisitor(visitor);
-}
-
-
-Constructor::~Constructor() {}
-
-
-void Constructor::AcceptMemberVisitor(MemberVisitor* visitor) {
-  visitor->VisitConstructor(this);
-}
-
-
-void Constructor::VisitChildren(Visitor* visitor) {
-  visitor->VisitName(name());
-  visitor->VisitFunctionNode(function());
-  VisitList(&initializers(), visitor);
-}
-
-
-Procedure::~Procedure() {}
-
-
-void Procedure::AcceptMemberVisitor(MemberVisitor* visitor) {
-  visitor->VisitProcedure(this);
-}
-
-
-void Procedure::VisitChildren(Visitor* visitor) {
-  visitor->VisitName(name());
-  if (function() != NULL) visitor->VisitFunctionNode(function());
-}
-
-
-Initializer::~Initializer() {}
-
-
-void Initializer::AcceptTreeVisitor(TreeVisitor* visitor) {
-  AcceptInitializerVisitor(visitor);
-}
-
-
-InvalidInitializer::~InvalidInitializer() {}
-
-
-void InvalidInitializer::AcceptInitializerVisitor(InitializerVisitor* visitor) {
-  visitor->VisitInvalidInitializer(this);
-}
-
-
-void InvalidInitializer::VisitChildren(Visitor* visitor) {}
-
-
-FieldInitializer::~FieldInitializer() {}
-
-
-void FieldInitializer::AcceptInitializerVisitor(InitializerVisitor* visitor) {
-  visitor->VisitFieldInitializer(this);
-}
-
-
-void FieldInitializer::VisitChildren(Visitor* visitor) {
-  value()->AcceptExpressionVisitor(visitor);
-}
-
-
-SuperInitializer::~SuperInitializer() {}
-
-
-void SuperInitializer::AcceptInitializerVisitor(InitializerVisitor* visitor) {
-  visitor->VisitSuperInitializer(this);
-}
-
-
-void SuperInitializer::VisitChildren(Visitor* visitor) {
-  visitor->VisitArguments(arguments());
-}
-
-
-RedirectingInitializer::~RedirectingInitializer() {}
-
-
-void RedirectingInitializer::AcceptInitializerVisitor(
-    InitializerVisitor* visitor) {
-  visitor->VisitRedirectingInitializer(this);
-}
-
-
-void RedirectingInitializer::VisitChildren(Visitor* visitor) {
-  visitor->VisitArguments(arguments());
-}
-
-
-LocalInitializer::~LocalInitializer() {}
-
-
-void LocalInitializer::AcceptInitializerVisitor(InitializerVisitor* visitor) {
-  visitor->VisitLocalInitializer(this);
-}
-
-
-void LocalInitializer::VisitChildren(Visitor* visitor) {
-  visitor->VisitVariableDeclaration(variable());
-}
-
-
-FunctionNode::~FunctionNode() {}
-
-
-void FunctionNode::ReplaceBody(Statement* body) {
-  delete body_;
-  // Use static_cast to invoke the conversion function and so avoid triggering
-  // ASSERT(pointer_ == NULL) in operator= when overwriting a non-NULL body.
-  static_cast<Statement*&>(body_) = body;
-}
-
-
-void FunctionNode::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitFunctionNode(this);
-}
-
-
-void FunctionNode::VisitChildren(Visitor* visitor) {
-  VisitList(&type_parameters(), visitor);
-  VisitList(&positional_parameters(), visitor);
-  VisitList(&named_parameters(), visitor);
-  if (return_type() != NULL) return_type()->AcceptDartTypeVisitor(visitor);
-  if (body() != NULL) body()->AcceptStatementVisitor(visitor);
-}
-
-
-Expression::~Expression() {}
-
-
-void Expression::AcceptTreeVisitor(TreeVisitor* visitor) {
-  AcceptExpressionVisitor(visitor);
-}
-
-
-InvalidExpression::~InvalidExpression() {}
-
-
-void InvalidExpression::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitInvalidExpression(this);
-}
-
-
-void InvalidExpression::VisitChildren(Visitor* visitor) {}
-
-
-VariableGet::~VariableGet() {}
-
-
-void VariableGet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitVariableGet(this);
-}
-
-
-void VariableGet::VisitChildren(Visitor* visitor) {}
-
-
-VariableSet::~VariableSet() {}
-
-
-void VariableSet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitVariableSet(this);
-}
-
-
-void VariableSet::VisitChildren(Visitor* visitor) {
-  expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-PropertyGet::~PropertyGet() {}
-
-
-void PropertyGet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitPropertyGet(this);
-}
-
-
-void PropertyGet::VisitChildren(Visitor* visitor) {
-  receiver()->AcceptExpressionVisitor(visitor);
-  visitor->VisitName(name());
-}
-
-
-PropertySet::~PropertySet() {}
-
-
-void PropertySet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitPropertySet(this);
-}
-
-
-void PropertySet::VisitChildren(Visitor* visitor) {
-  receiver()->AcceptExpressionVisitor(visitor);
-  visitor->VisitName(name());
-  value()->AcceptExpressionVisitor(visitor);
-}
-
-
-DirectPropertyGet::~DirectPropertyGet() {}
-
-
-void DirectPropertyGet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitDirectPropertyGet(this);
-}
-
-
-void DirectPropertyGet::VisitChildren(Visitor* visitor) {
-  receiver()->AcceptExpressionVisitor(visitor);
-}
-
-
-DirectPropertySet::~DirectPropertySet() {}
-
-
-void DirectPropertySet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitDirectPropertySet(this);
-}
-
-
-void DirectPropertySet::VisitChildren(Visitor* visitor) {
-  receiver()->AcceptExpressionVisitor(visitor);
-  value()->AcceptExpressionVisitor(visitor);
-}
-
-
-StaticGet::~StaticGet() {}
-
-
-void StaticGet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitStaticGet(this);
-}
-
-
-void StaticGet::VisitChildren(Visitor* visitor) {}
-
-
-StaticSet::~StaticSet() {}
-
-
-void StaticSet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitStaticSet(this);
-}
-
-
-void StaticSet::VisitChildren(Visitor* visitor) {
-  expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-Arguments::~Arguments() {}
-
-
-void Arguments::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitArguments(this);
-}
-
-
-void Arguments::VisitChildren(Visitor* visitor) {
-  VisitList(&types(), visitor);
-  VisitList(&positional(), visitor);
-  VisitList(&named(), visitor);
-}
-
-
-NamedExpression::~NamedExpression() {}
-
-
-void NamedExpression::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitNamedExpression(this);
-}
-
-
-void NamedExpression::VisitChildren(Visitor* visitor) {
-  expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-MethodInvocation::~MethodInvocation() {}
-
-
-void MethodInvocation::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitMethodInvocation(this);
-}
-
-
-void MethodInvocation::VisitChildren(Visitor* visitor) {
-  receiver()->AcceptExpressionVisitor(visitor);
-  visitor->VisitName(name());
-  visitor->VisitArguments(arguments());
-}
-
-
-DirectMethodInvocation::~DirectMethodInvocation() {}
-
-
-void DirectMethodInvocation::AcceptExpressionVisitor(
-    ExpressionVisitor* visitor) {
-  visitor->VisitDirectMethodInvocation(this);
-}
-
-
-void DirectMethodInvocation::VisitChildren(Visitor* visitor) {
-  receiver()->AcceptExpressionVisitor(visitor);
-  visitor->VisitArguments(arguments());
-}
-
-
-StaticInvocation::~StaticInvocation() {}
-
-
-void StaticInvocation::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitStaticInvocation(this);
-}
-
-
-void StaticInvocation::VisitChildren(Visitor* visitor) {
-  visitor->VisitArguments(arguments());
-}
-
-
-ConstructorInvocation::~ConstructorInvocation() {}
-
-
-void ConstructorInvocation::AcceptExpressionVisitor(
-    ExpressionVisitor* visitor) {
-  visitor->VisitConstructorInvocation(this);
-}
-
-
-void ConstructorInvocation::VisitChildren(Visitor* visitor) {
-  visitor->VisitArguments(arguments());
-}
-
-
-Not::~Not() {}
-
-
-void Not::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitNot(this);
-}
-
-
-void Not::VisitChildren(Visitor* visitor) {
-  expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-LogicalExpression::~LogicalExpression() {}
-
-
-void LogicalExpression::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitLogicalExpression(this);
-}
-
-
-void LogicalExpression::VisitChildren(Visitor* visitor) {
-  left()->AcceptExpressionVisitor(visitor);
-  right()->AcceptExpressionVisitor(visitor);
-}
-
-
-ConditionalExpression::~ConditionalExpression() {}
-
-
-void ConditionalExpression::AcceptExpressionVisitor(
-    ExpressionVisitor* visitor) {
-  visitor->VisitConditionalExpression(this);
-}
-
-
-void ConditionalExpression::VisitChildren(Visitor* visitor) {
-  condition()->AcceptExpressionVisitor(visitor);
-  then()->AcceptExpressionVisitor(visitor);
-  otherwise()->AcceptExpressionVisitor(visitor);
-}
-
-
-StringConcatenation::~StringConcatenation() {}
-
-
-void StringConcatenation::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitStringConcatenation(this);
-}
-
-
-void StringConcatenation::VisitChildren(Visitor* visitor) {
-  VisitList(&expressions(), visitor);
-}
-
-
-IsExpression::~IsExpression() {}
-
-
-void IsExpression::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitIsExpression(this);
-}
-
-
-void IsExpression::VisitChildren(Visitor* visitor) {
-  operand()->AcceptExpressionVisitor(visitor);
-  type()->AcceptDartTypeVisitor(visitor);
-}
-
-
-AsExpression::~AsExpression() {}
-
-
-void AsExpression::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitAsExpression(this);
-}
-
-
-void AsExpression::VisitChildren(Visitor* visitor) {
-  operand()->AcceptExpressionVisitor(visitor);
-  type()->AcceptDartTypeVisitor(visitor);
-}
-
-
-BasicLiteral::~BasicLiteral() {}
-
-
-void BasicLiteral::VisitChildren(Visitor* visitor) {}
-
-
-StringLiteral::~StringLiteral() {}
-
-
-void StringLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitStringLiteral(this);
-}
-
-
-BigintLiteral::~BigintLiteral() {}
-
-
-void BigintLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitBigintLiteral(this);
-}
-
-
-IntLiteral::~IntLiteral() {}
-
-
-void IntLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitIntLiteral(this);
-}
-
-
-DoubleLiteral::~DoubleLiteral() {}
-
-
-void DoubleLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitDoubleLiteral(this);
-}
-
-
-BoolLiteral::~BoolLiteral() {}
-
-
-void BoolLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitBoolLiteral(this);
-}
-
-
-NullLiteral::~NullLiteral() {}
-
-
-void NullLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitNullLiteral(this);
-}
-
-
-SymbolLiteral::~SymbolLiteral() {}
-
-
-void SymbolLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitSymbolLiteral(this);
-}
-
-
-void SymbolLiteral::VisitChildren(Visitor* visitor) {}
-
-
-TypeLiteral::~TypeLiteral() {}
-
-
-void TypeLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitTypeLiteral(this);
-}
-
-
-void TypeLiteral::VisitChildren(Visitor* visitor) {
-  type()->AcceptDartTypeVisitor(visitor);
-}
-
-
-ThisExpression::~ThisExpression() {}
-
-
-void ThisExpression::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitThisExpression(this);
-}
-
-
-void ThisExpression::VisitChildren(Visitor* visitor) {}
-
-
-Rethrow::~Rethrow() {}
-
-
-void Rethrow::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitRethrow(this);
-}
-
-
-void Rethrow::VisitChildren(Visitor* visitor) {}
-
-
-Throw::~Throw() {}
-
-
-void Throw::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitThrow(this);
-}
-
-
-void Throw::VisitChildren(Visitor* visitor) {
-  expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-ListLiteral::~ListLiteral() {}
-
-
-void ListLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitListLiteral(this);
-}
-
-
-void ListLiteral::VisitChildren(Visitor* visitor) {
-  type()->AcceptDartTypeVisitor(visitor);
-  VisitList(&expressions(), visitor);
-}
-
-
-MapLiteral::~MapLiteral() {}
-
-
-void MapLiteral::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitMapLiteral(this);
-}
-
-
-void MapLiteral::VisitChildren(Visitor* visitor) {
-  key_type()->AcceptDartTypeVisitor(visitor);
-  value_type()->AcceptDartTypeVisitor(visitor);
-  VisitList(&entries(), visitor);
-}
-
-
-MapEntry::~MapEntry() {}
-
-
-void MapEntry::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitMapEntry(this);
-}
-
-
-void MapEntry::VisitChildren(Visitor* visitor) {
-  key()->AcceptExpressionVisitor(visitor);
-  value()->AcceptExpressionVisitor(visitor);
-}
-
-
-AwaitExpression::~AwaitExpression() {}
-
-
-void AwaitExpression::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitAwaitExpression(this);
-}
-
-
-void AwaitExpression::VisitChildren(Visitor* visitor) {
-  operand()->AcceptExpressionVisitor(visitor);
-}
-
-
-FunctionExpression::~FunctionExpression() {}
-
-
-void FunctionExpression::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitFunctionExpression(this);
-}
-
-
-void FunctionExpression::VisitChildren(Visitor* visitor) {
-  visitor->VisitFunctionNode(function());
-}
-
-
-Let::~Let() {}
-
-
-void Let::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitLet(this);
-}
-
-
-void Let::VisitChildren(Visitor* visitor) {
-  visitor->VisitVariableDeclaration(variable());
-  body()->AcceptExpressionVisitor(visitor);
-}
-
-
-VectorCreation::~VectorCreation() {}
-
-
-void VectorCreation::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitVectorCreation(this);
-}
-
-
-void VectorCreation::VisitChildren(Visitor* visitor) {}
-
-
-VectorGet::~VectorGet() {}
-
-
-void VectorGet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitVectorGet(this);
-}
-
-
-void VectorGet::VisitChildren(Visitor* visitor) {
-  vector_expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-VectorSet::~VectorSet() {}
-
-
-void VectorSet::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitVectorSet(this);
-}
-
-
-void VectorSet::VisitChildren(Visitor* visitor) {
-  vector_expression()->AcceptExpressionVisitor(visitor);
-  value()->AcceptExpressionVisitor(visitor);
-}
-
-
-VectorCopy::~VectorCopy() {}
-
-
-void VectorCopy::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitVectorCopy(this);
-}
-
-
-void VectorCopy::VisitChildren(Visitor* visitor) {
-  vector_expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-ClosureCreation::~ClosureCreation() {}
-
-
-void ClosureCreation::AcceptExpressionVisitor(ExpressionVisitor* visitor) {
-  visitor->VisitClosureCreation(this);
-}
-
-
-void ClosureCreation::VisitChildren(Visitor* visitor) {
-  context_vector()->AcceptExpressionVisitor(visitor);
-  function_type()->AcceptDartTypeVisitor(visitor);
-}
-
-
-Statement::~Statement() {}
-
-
-void Statement::AcceptTreeVisitor(TreeVisitor* visitor) {
-  AcceptStatementVisitor(visitor);
-}
-
-
-InvalidStatement::~InvalidStatement() {}
-
-
-void InvalidStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitInvalidStatement(this);
-}
-
-
-void InvalidStatement::VisitChildren(Visitor* visitor) {}
-
-
-ExpressionStatement::~ExpressionStatement() {}
-
-
-void ExpressionStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitExpressionStatement(this);
-}
-
-
-void ExpressionStatement::VisitChildren(Visitor* visitor) {
-  expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-Block::~Block() {}
-
-
-void Block::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitBlock(this);
-}
-
-
-void Block::VisitChildren(Visitor* visitor) {
-  VisitList(&statements(), visitor);
-}
-
-
-EmptyStatement::~EmptyStatement() {}
-
-
-void EmptyStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitEmptyStatement(this);
-}
-
-
-void EmptyStatement::VisitChildren(Visitor* visitor) {}
-
-
-AssertStatement::~AssertStatement() {}
-
-
-void AssertStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitAssertStatement(this);
-}
-
-
-void AssertStatement::VisitChildren(Visitor* visitor) {
-  condition()->AcceptExpressionVisitor(visitor);
-  if (message() != NULL) message()->AcceptExpressionVisitor(visitor);
-}
-
-
-LabeledStatement::~LabeledStatement() {}
-
-
-void LabeledStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitLabeledStatement(this);
-}
-
-
-void LabeledStatement::VisitChildren(Visitor* visitor) {
-  body()->AcceptStatementVisitor(visitor);
-}
-
-
-BreakStatement::~BreakStatement() {}
-
-
-void BreakStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitBreakStatement(this);
-}
-
-
-void BreakStatement::VisitChildren(Visitor* visitor) {}
-
-
-WhileStatement::~WhileStatement() {}
-
-
-void WhileStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitWhileStatement(this);
-}
-
-
-void WhileStatement::VisitChildren(Visitor* visitor) {
-  condition()->AcceptExpressionVisitor(visitor);
-  body()->AcceptStatementVisitor(visitor);
-}
-
-
-DoStatement::~DoStatement() {}
-
-
-void DoStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitDoStatement(this);
-}
-
-
-void DoStatement::VisitChildren(Visitor* visitor) {
-  body()->AcceptStatementVisitor(visitor);
-  condition()->AcceptExpressionVisitor(visitor);
-}
-
-
-ForStatement::~ForStatement() {}
-
-
-void ForStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitForStatement(this);
-}
-
-
-void ForStatement::VisitChildren(Visitor* visitor) {
-  VisitList(&variables(), visitor);
-  if (condition() != NULL) condition()->AcceptExpressionVisitor(visitor);
-  VisitList(&updates(), visitor);
-  body()->AcceptStatementVisitor(visitor);
-}
-
-
-ForInStatement::~ForInStatement() {}
-
-
-void ForInStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitForInStatement(this);
-}
-
-
-void ForInStatement::VisitChildren(Visitor* visitor) {
-  visitor->VisitVariableDeclaration(variable());
-  iterable()->AcceptExpressionVisitor(visitor);
-  body()->AcceptStatementVisitor(visitor);
-}
-
-
-SwitchStatement::~SwitchStatement() {}
-
-
-void SwitchStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitSwitchStatement(this);
-}
-
-
-void SwitchStatement::VisitChildren(Visitor* visitor) {
-  condition()->AcceptExpressionVisitor(visitor);
-  VisitList(&cases(), visitor);
-}
-
-
-SwitchCase::~SwitchCase() {}
-
-
-void SwitchCase::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitSwitchCase(this);
-}
-
-
-void SwitchCase::VisitChildren(Visitor* visitor) {
-  VisitList(&expressions(), visitor);
-  body()->AcceptStatementVisitor(visitor);
-}
-
-
-ContinueSwitchStatement::~ContinueSwitchStatement() {}
-
-
-void ContinueSwitchStatement::AcceptStatementVisitor(
-    StatementVisitor* visitor) {
-  visitor->VisitContinueSwitchStatement(this);
-}
-
-
-void ContinueSwitchStatement::VisitChildren(Visitor* visitor) {}
-
-
-IfStatement::~IfStatement() {}
-
-
-void IfStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitIfStatement(this);
-}
-
-
-void IfStatement::VisitChildren(Visitor* visitor) {
-  condition()->AcceptExpressionVisitor(visitor);
-  then()->AcceptStatementVisitor(visitor);
-  otherwise()->AcceptStatementVisitor(visitor);
-}
-
-
-ReturnStatement::~ReturnStatement() {}
-
-
-void ReturnStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitReturnStatement(this);
-}
-
-
-void ReturnStatement::VisitChildren(Visitor* visitor) {
-  if (expression() != NULL) expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-TryCatch::~TryCatch() {}
-
-
-void TryCatch::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitTryCatch(this);
-}
-
-
-void TryCatch::VisitChildren(Visitor* visitor) {
-  body()->AcceptStatementVisitor(visitor);
-  VisitList(&catches(), visitor);
-}
-
-
-Catch::~Catch() {}
-
-
-void Catch::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitCatch(this);
-}
-
-
-void Catch::VisitChildren(Visitor* visitor) {
-  if (guard() != NULL) guard()->AcceptDartTypeVisitor(visitor);
-  if (exception() != NULL) visitor->VisitVariableDeclaration(exception());
-  if (stack_trace() != NULL) visitor->VisitVariableDeclaration(stack_trace());
-  body()->AcceptStatementVisitor(visitor);
-}
-
-
-TryFinally::~TryFinally() {}
-
-
-void TryFinally::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitTryFinally(this);
-}
-
-
-void TryFinally::VisitChildren(Visitor* visitor) {
-  body()->AcceptStatementVisitor(visitor);
-  finalizer()->AcceptStatementVisitor(visitor);
-}
-
-
-YieldStatement::~YieldStatement() {}
-
-
-void YieldStatement::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitYieldStatement(this);
-}
-
-
-void YieldStatement::VisitChildren(Visitor* visitor) {
-  expression()->AcceptExpressionVisitor(visitor);
-}
-
-
-VariableDeclaration::~VariableDeclaration() {}
-
-
-void VariableDeclaration::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitVariableDeclaration(this);
-}
-
-
-void VariableDeclaration::VisitChildren(Visitor* visitor) {
-  if (type() != NULL) type()->AcceptDartTypeVisitor(visitor);
-  if (initializer() != NULL) initializer()->AcceptExpressionVisitor(visitor);
-}
-
-
-FunctionDeclaration::~FunctionDeclaration() {}
-
-
-void FunctionDeclaration::AcceptStatementVisitor(StatementVisitor* visitor) {
-  visitor->VisitFunctionDeclaration(this);
-}
-
-
-void FunctionDeclaration::VisitChildren(Visitor* visitor) {
-  visitor->VisitVariableDeclaration(variable());
-  visitor->VisitFunctionNode(function());
-}
-
-
-Name::~Name() {}
-
-
-void Name::AcceptVisitor(Visitor* visitor) {
-  visitor->VisitName(this);
-}
-
-
-void Name::VisitChildren(Visitor* visitor) {}
-
-
-DartType::~DartType() {}
-
-
-void DartType::AcceptVisitor(Visitor* visitor) {
-  AcceptDartTypeVisitor(visitor);
-}
-
-
-InvalidType::~InvalidType() {}
-
-
-void InvalidType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitInvalidType(this);
-}
-
-
-void InvalidType::VisitChildren(Visitor* visitor) {}
-
-
-DynamicType::~DynamicType() {}
-
-
-void DynamicType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitDynamicType(this);
-}
-
-
-void DynamicType::VisitChildren(Visitor* visitor) {}
-
-
-VoidType::~VoidType() {}
-
-
-void VoidType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitVoidType(this);
-}
-
-
-void VoidType::VisitChildren(Visitor* visitor) {}
-
-
-BottomType::~BottomType() {}
-
-
-void BottomType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitBottomType(this);
-}
-
-
-void BottomType::VisitChildren(Visitor* visitor) {}
-
-
-InterfaceType::~InterfaceType() {}
-
-
-void InterfaceType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitInterfaceType(this);
-}
-
-
-void InterfaceType::VisitChildren(Visitor* visitor) {
-  VisitList(&type_arguments(), visitor);
-}
-
-
-TypedefType::~TypedefType() {}
-
-
-void TypedefType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitTypedefType(this);
-}
-
-
-void TypedefType::VisitChildren(Visitor* visitor) {
-  VisitList(&type_arguments(), visitor);
-}
-
-
-FunctionType::~FunctionType() {}
-
-
-void FunctionType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitFunctionType(this);
-}
-
-
-void FunctionType::VisitChildren(Visitor* visitor) {
-  VisitList(&type_parameters(), visitor);
-  VisitList(&positional_parameters(), visitor);
-  for (int i = 0; i < named_parameters().length(); ++i) {
-    named_parameters()[i]->type()->AcceptDartTypeVisitor(visitor);
+int32_t KernelLineStartsReader::MaxPosition() const {
+  const intptr_t line_count = line_starts_data_.Length();
+  intptr_t current_start = 0;
+  for (intptr_t i = 0; i < line_count; i++) {
+    current_start += helper_->At(line_starts_data_, i);
   }
-  return_type()->AcceptDartTypeVisitor(visitor);
+  return current_start;
 }
 
-
-TypeParameterType::~TypeParameterType() {}
-
-
-void TypeParameterType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitTypeParameterType(this);
-}
-
-
-void TypeParameterType::VisitChildren(Visitor* visitor) {}
-
-
-VectorType::~VectorType() {}
-
-
-void VectorType::AcceptDartTypeVisitor(DartTypeVisitor* visitor) {
-  visitor->VisitVectorType(this);
-}
-
-
-void VectorType::VisitChildren(Visitor* visitor) {}
-
-
-TypeParameter::~TypeParameter() {}
-
-
-void TypeParameter::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitTypeParameter(this);
-}
-
-
-void TypeParameter::VisitChildren(Visitor* visitor) {
-  bound()->AcceptDartTypeVisitor(visitor);
-}
-
-
-Program::~Program() {
-  while (valid_token_positions.length() > 0) {
-    delete valid_token_positions.RemoveLast();
+bool KernelLineStartsReader::LocationForPosition(intptr_t position,
+                                                 intptr_t* line,
+                                                 intptr_t* col) const {
+  intptr_t line_count = line_starts_data_.Length();
+  intptr_t current_start = 0;
+  intptr_t previous_start = 0;
+  for (intptr_t i = 0; i < line_count; ++i) {
+    current_start += helper_->At(line_starts_data_, i);
+    if (current_start > position) {
+      *line = i;
+      if (col != nullptr) {
+        *col = position - previous_start + 1;
+      }
+      return true;
+    }
+    if (current_start == position) {
+      *line = i + 1;
+      if (col != nullptr) {
+        *col = 1;
+      }
+      return true;
+    }
+    previous_start = current_start;
   }
-  while (yield_token_positions.length() > 0) {
-    delete yield_token_positions.RemoveLast();
+
+  return false;
+}
+
+bool KernelLineStartsReader::TokenRangeAtLine(
+    intptr_t line_number,
+    TokenPosition* first_token_index,
+    TokenPosition* last_token_index) const {
+  if (line_number < 0 || line_number > line_starts_data_.Length()) {
+    return false;
+  }
+  intptr_t cumulative = 0;
+  for (intptr_t i = 0; i < line_number; ++i) {
+    cumulative += helper_->At(line_starts_data_, i);
+  }
+  *first_token_index = dart::TokenPosition::Deserialize(cumulative);
+  if (line_number == line_starts_data_.Length()) {
+    *last_token_index = *first_token_index;
+  } else {
+    *last_token_index = dart::TokenPosition::Deserialize(
+        cumulative + helper_->At(line_starts_data_, line_number) - 1);
+  }
+  return true;
+}
+
+int32_t KernelLineStartsReader::KernelInt8LineStartsHelper::At(
+    const dart::TypedData& data,
+    intptr_t index) const {
+  return data.GetInt8(index);
+}
+
+int32_t KernelLineStartsReader::KernelInt16LineStartsHelper::At(
+    const dart::TypedData& data,
+    intptr_t index) const {
+  return data.GetInt16(index << 1);
+}
+
+int32_t KernelLineStartsReader::KernelInt32LineStartsHelper::At(
+    const dart::TypedData& data,
+    intptr_t index) const {
+  return data.GetInt32(index << 2);
+}
+
+class KernelTokenPositionCollector : public KernelReaderHelper {
+ public:
+  KernelTokenPositionCollector(
+      Zone* zone,
+      TranslationHelper* translation_helper,
+      const Script& script,
+      const ExternalTypedData& data,
+      intptr_t data_program_offset,
+      intptr_t initial_script_index,
+      intptr_t record_for_script_id,
+      GrowableArray<intptr_t>* record_token_positions_into)
+      : KernelReaderHelper(zone,
+                           translation_helper,
+                           script,
+                           data,
+                           data_program_offset),
+        current_script_id_(initial_script_index),
+        record_for_script_id_(record_for_script_id),
+        record_token_positions_into_(record_token_positions_into) {}
+
+  void CollectTokenPositions(intptr_t kernel_offset);
+
+  void RecordTokenPosition(TokenPosition position) override;
+
+  void set_current_script_id(intptr_t id) override { current_script_id_ = id; }
+
+ private:
+  intptr_t current_script_id_;
+  intptr_t record_for_script_id_;
+  GrowableArray<intptr_t>* record_token_positions_into_;
+
+  DISALLOW_COPY_AND_ASSIGN(KernelTokenPositionCollector);
+};
+
+void KernelTokenPositionCollector::CollectTokenPositions(
+    intptr_t kernel_offset) {
+  SetOffset(kernel_offset);
+
+  const Tag tag = PeekTag();
+  if (tag == kProcedure) {
+    ProcedureHelper procedure_helper(this);
+    procedure_helper.ReadUntilExcluding(ProcedureHelper::kEnd);
+  } else if (tag == kConstructor) {
+    ConstructorHelper constructor_helper(this);
+    constructor_helper.ReadUntilExcluding(ConstructorHelper::kEnd);
+  } else if (tag == kFunctionNode) {
+    FunctionNodeHelper function_node_helper(this);
+    function_node_helper.ReadUntilExcluding(FunctionNodeHelper::kEnd);
+  } else if (tag == kField) {
+    FieldHelper field_helper(this);
+    field_helper.ReadUntilExcluding(FieldHelper::kEnd);
+  } else if (tag == kClass) {
+    ClassHelper class_helper(this);
+    class_helper.ReadUntilExcluding(ClassHelper::kEnd);
+  } else {
+    ReportUnexpectedTag("a class or a member", tag);
+    UNREACHABLE();
   }
 }
 
-
-void Program::AcceptTreeVisitor(TreeVisitor* visitor) {
-  visitor->VisitProgram(this);
+void KernelTokenPositionCollector::RecordTokenPosition(TokenPosition position) {
+  if (record_for_script_id_ == current_script_id_ &&
+      record_token_positions_into_ != NULL && position.IsReal()) {
+    record_token_positions_into_->Add(position.Serialize());
+  }
 }
 
-
-void Program::VisitChildren(Visitor* visitor) {
-  VisitList(&libraries(), visitor);
+static int LowestFirst(const intptr_t* a, const intptr_t* b) {
+  return *a - *b;
 }
 
+/**
+ * If index exists as sublist in list, sort the sublist from lowest to highest,
+ * then copy it, as Smis and without duplicates,
+ * to a new Array in Heap::kOld which is returned.
+ * Note that the source list is both sorted and de-duplicated as well, but will
+ * possibly contain duplicate and unsorted data at the end.
+ * Otherwise (when sublist doesn't exist in list) return new empty array.
+ */
+static ArrayPtr AsSortedDuplicateFreeArray(GrowableArray<intptr_t>* source) {
+  intptr_t size = source->length();
+  if (size == 0) {
+    return Object::empty_array().ptr();
+  }
+
+  source->Sort(LowestFirst);
+
+  intptr_t last = 0;
+  for (intptr_t current = 1; current < size; ++current) {
+    if (source->At(last) != source->At(current)) {
+      (*source)[++last] = source->At(current);
+    }
+  }
+  Array& array_object = Array::Handle();
+  array_object = Array::New(last + 1, Heap::kOld);
+  Smi& smi_value = Smi::Handle();
+  for (intptr_t i = 0; i <= last; ++i) {
+    smi_value = Smi::New(source->At(i));
+    array_object.SetAt(i, smi_value);
+  }
+  return array_object.ptr();
+}
+
+static void CollectKernelDataTokenPositions(
+    const ExternalTypedData& kernel_data,
+    const Script& script,
+    const Script& entry_script,
+    intptr_t kernel_offset,
+    intptr_t data_kernel_offset,
+    Zone* zone,
+    TranslationHelper* helper,
+    GrowableArray<intptr_t>* token_positions) {
+  if (kernel_data.IsNull()) {
+    return;
+  }
+
+  KernelTokenPositionCollector token_position_collector(
+      zone, helper, script, kernel_data, data_kernel_offset,
+      entry_script.kernel_script_index(), script.kernel_script_index(),
+      token_positions);
+
+  token_position_collector.CollectTokenPositions(kernel_offset);
+}
+
+void CollectTokenPositionsFor(const Script& interesting_script) {
+  Thread* thread = Thread::Current();
+  Zone* zone = thread->zone();
+  interesting_script.LookupSourceAndLineStarts(zone);
+  TranslationHelper helper(thread);
+  helper.InitFromScript(interesting_script);
+
+  GrowableArray<intptr_t> token_positions(10);
+
+  auto isolate_group = thread->isolate_group();
+  const GrowableObjectArray& libs = GrowableObjectArray::Handle(
+      zone, isolate_group->object_store()->libraries());
+  Library& lib = Library::Handle(zone);
+  Object& entry = Object::Handle(zone);
+  Script& entry_script = Script::Handle(zone);
+  ExternalTypedData& data = ExternalTypedData::Handle(zone);
+
+  auto& temp_array = Array::Handle(zone);
+  auto& temp_field = Field::Handle(zone);
+  auto& temp_function = Function::Handle(zone);
+  for (intptr_t i = 0; i < libs.Length(); i++) {
+    lib ^= libs.At(i);
+    lib.EnsureTopLevelClassIsFinalized();
+    DictionaryIterator it(lib);
+    while (it.HasNext()) {
+      entry = it.GetNext();
+      data = ExternalTypedData::null();
+      if (entry.IsClass()) {
+        const Class& klass = Class::Cast(entry);
+        if (klass.script() == interesting_script.ptr()) {
+          token_positions.Add(klass.token_pos().Serialize());
+          token_positions.Add(klass.end_token_pos().Serialize());
+        }
+        if (klass.is_finalized()) {
+          temp_array = klass.fields();
+          for (intptr_t i = 0; i < temp_array.Length(); ++i) {
+            temp_field ^= temp_array.At(i);
+            if (temp_field.kernel_offset() <= 0) {
+              // Skip artificially injected fields.
+              continue;
+            }
+            entry_script = temp_field.Script();
+            if (entry_script.ptr() != interesting_script.ptr()) {
+              continue;
+            }
+            data = temp_field.KernelData();
+            CollectKernelDataTokenPositions(
+                data, interesting_script, entry_script,
+                temp_field.kernel_offset(),
+                temp_field.KernelDataProgramOffset(), zone, &helper,
+                &token_positions);
+          }
+          temp_array = klass.current_functions();
+          for (intptr_t i = 0; i < temp_array.Length(); ++i) {
+            temp_function ^= temp_array.At(i);
+            entry_script = temp_function.script();
+            if (entry_script.ptr() != interesting_script.ptr()) {
+              continue;
+            }
+            data = temp_function.KernelData();
+            CollectKernelDataTokenPositions(
+                data, interesting_script, entry_script,
+                temp_function.kernel_offset(),
+                temp_function.KernelDataProgramOffset(), zone, &helper,
+                &token_positions);
+          }
+        } else {
+          // Class isn't finalized yet: read the data attached to it.
+          ASSERT(klass.kernel_offset() > 0);
+          data = lib.kernel_data();
+          ASSERT(!data.IsNull());
+          const intptr_t library_kernel_offset = lib.kernel_offset();
+          ASSERT(library_kernel_offset > 0);
+          const intptr_t class_offset = klass.kernel_offset();
+
+          entry_script = klass.script();
+          if (entry_script.ptr() != interesting_script.ptr()) {
+            continue;
+          }
+          CollectKernelDataTokenPositions(
+              data, interesting_script, entry_script, class_offset,
+              library_kernel_offset, zone, &helper, &token_positions);
+        }
+      } else if (entry.IsFunction()) {
+        temp_function ^= entry.ptr();
+        entry_script = temp_function.script();
+        if (entry_script.ptr() != interesting_script.ptr()) {
+          continue;
+        }
+        data = temp_function.KernelData();
+        CollectKernelDataTokenPositions(data, interesting_script, entry_script,
+                                        temp_function.kernel_offset(),
+                                        temp_function.KernelDataProgramOffset(),
+                                        zone, &helper, &token_positions);
+      } else if (entry.IsField()) {
+        const Field& field = Field::Cast(entry);
+        if (field.kernel_offset() <= 0) {
+          // Skip artificially injected fields.
+          continue;
+        }
+        entry_script = field.Script();
+        if (entry_script.ptr() != interesting_script.ptr()) {
+          continue;
+        }
+        data = field.KernelData();
+        CollectKernelDataTokenPositions(
+            data, interesting_script, entry_script, field.kernel_offset(),
+            field.KernelDataProgramOffset(), zone, &helper, &token_positions);
+      }
+    }
+  }
+
+  Script& script = Script::Handle(zone, interesting_script.ptr());
+  Array& array_object = Array::Handle(zone);
+  array_object = AsSortedDuplicateFreeArray(&token_positions);
+  script.set_debug_positions(array_object);
+}
+
+#if !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
+ArrayPtr CollectConstConstructorCoverageFrom(const Script& interesting_script) {
+  Thread* thread = Thread::Current();
+  Zone* zone = thread->zone();
+  interesting_script.LookupSourceAndLineStarts(zone);
+  TranslationHelper helper(thread);
+  helper.InitFromScript(interesting_script);
+
+  ExternalTypedData& data =
+      ExternalTypedData::Handle(zone, interesting_script.constant_coverage());
+
+  KernelReaderHelper kernel_reader(zone, &helper, interesting_script, data, 0);
+
+  // Read "constant coverage constructors".
+  const intptr_t constant_coverage_constructors = kernel_reader.ReadUInt();
+  const Array& constructors =
+      Array::Handle(Array::New(constant_coverage_constructors));
+  for (intptr_t i = 0; i < constant_coverage_constructors; ++i) {
+    NameIndex kernel_name = kernel_reader.ReadCanonicalNameReference();
+    Class& klass = Class::ZoneHandle(
+        zone,
+        helper.LookupClassByKernelClass(helper.EnclosingName(kernel_name)));
+    const Function& target = Function::ZoneHandle(
+        zone, helper.LookupConstructorByKernelConstructor(klass, kernel_name));
+    constructors.SetAt(i, target);
+  }
+  return constructors.ptr();
+}
+#endif  // !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
+
+ObjectPtr EvaluateStaticConstFieldInitializer(const Field& field) {
+  ASSERT(field.is_static() && field.is_const());
+
+  LongJumpScope jump;
+  if (setjmp(*jump.Set()) == 0) {
+    Thread* thread = Thread::Current();
+    Zone* zone = thread->zone();
+    TranslationHelper helper(thread);
+    Script& script = Script::Handle(zone, field.Script());
+    helper.InitFromScript(script);
+
+    const Class& owner_class = Class::Handle(zone, field.Owner());
+    ActiveClass active_class;
+    ActiveClassScope active_class_scope(&active_class, &owner_class);
+
+    KernelReaderHelper kernel_reader(
+        zone, &helper, script,
+        ExternalTypedData::Handle(zone, field.KernelData()),
+        field.KernelDataProgramOffset());
+    kernel_reader.SetOffset(field.kernel_offset());
+    ConstantReader constant_reader(&kernel_reader, &active_class);
+
+    FieldHelper field_helper(&kernel_reader);
+    field_helper.ReadUntilExcluding(FieldHelper::kInitializer);
+    ASSERT(field_helper.IsConst());
+
+    return constant_reader.ReadConstantInitializer();
+  } else {
+    return Thread::Current()->StealStickyError();
+  }
+}
+
+class MetadataEvaluator : public KernelReaderHelper {
+ public:
+  MetadataEvaluator(Zone* zone,
+                    TranslationHelper* translation_helper,
+                    const Script& script,
+                    const ExternalTypedData& data,
+                    intptr_t data_program_offset,
+                    ActiveClass* active_class)
+      : KernelReaderHelper(zone,
+                           translation_helper,
+                           script,
+                           data,
+                           data_program_offset),
+        constant_reader_(this, active_class) {}
+
+  ObjectPtr EvaluateMetadata(intptr_t kernel_offset,
+                             bool is_annotations_offset) {
+    SetOffset(kernel_offset);
+
+    // Library and LibraryDependency objects do not have a tag in kernel binary.
+    // Synthetic metadata fields corresponding to these objects keep kernel
+    // offset of annotations list instead of annotated object.
+    if (!is_annotations_offset) {
+      const Tag tag = PeekTag();
+
+      if (tag == kClass) {
+        ClassHelper class_helper(this);
+        class_helper.ReadUntilExcluding(ClassHelper::kAnnotations);
+      } else if (tag == kProcedure) {
+        ProcedureHelper procedure_helper(this);
+        procedure_helper.ReadUntilExcluding(ProcedureHelper::kAnnotations);
+      } else if (tag == kField) {
+        FieldHelper field_helper(this);
+        field_helper.ReadUntilExcluding(FieldHelper::kAnnotations);
+      } else if (tag == kConstructor) {
+        ConstructorHelper constructor_helper(this);
+        constructor_helper.ReadUntilExcluding(ConstructorHelper::kAnnotations);
+      } else if (tag == kFunctionDeclaration) {
+        ReadTag();
+        ReadPosition();  // fileOffset
+        VariableDeclarationHelper variable_declaration_helper(this);
+        variable_declaration_helper.ReadUntilExcluding(
+            VariableDeclarationHelper::kAnnotations);
+      } else {
+        FATAL("No support for metadata on this type of kernel node: %" Pd32
+              "\n",
+              tag);
+      }
+    }
+
+    return constant_reader_.ReadAnnotations();
+  }
+
+ private:
+  ConstantReader constant_reader_;
+
+  DISALLOW_COPY_AND_ASSIGN(MetadataEvaluator);
+};
+
+ObjectPtr EvaluateMetadata(const Library& library,
+                           intptr_t kernel_offset,
+                           bool is_annotations_offset) {
+  LongJumpScope jump;
+  if (setjmp(*jump.Set()) == 0) {
+    Thread* thread = Thread::Current();
+    Zone* zone = thread->zone();
+    TranslationHelper helper(thread);
+    Script& script = Script::Handle(
+        zone, Class::Handle(zone, library.toplevel_class()).script());
+    helper.InitFromScript(script);
+
+    const Class& owner_class = Class::Handle(zone, library.toplevel_class());
+    ActiveClass active_class;
+    ActiveClassScope active_class_scope(&active_class, &owner_class);
+
+    MetadataEvaluator metadata_evaluator(
+        zone, &helper, script,
+        ExternalTypedData::Handle(zone, library.kernel_data()),
+        library.kernel_offset(), &active_class);
+
+    return metadata_evaluator.EvaluateMetadata(kernel_offset,
+                                               is_annotations_offset);
+
+  } else {
+    return Thread::Current()->StealStickyError();
+  }
+}
+
+class ParameterDescriptorBuilder : public KernelReaderHelper {
+ public:
+  ParameterDescriptorBuilder(TranslationHelper* translation_helper,
+                             const Script& script,
+                             Zone* zone,
+                             const ExternalTypedData& data,
+                             intptr_t data_program_offset,
+                             ActiveClass* active_class)
+      : KernelReaderHelper(zone,
+                           translation_helper,
+                           script,
+                           data,
+                           data_program_offset),
+        constant_reader_(this, active_class) {}
+
+  ObjectPtr BuildParameterDescriptor(const Function& function);
+
+ private:
+  ConstantReader constant_reader_;
+
+  DISALLOW_COPY_AND_ASSIGN(ParameterDescriptorBuilder);
+};
+
+ObjectPtr ParameterDescriptorBuilder::BuildParameterDescriptor(
+    const Function& function) {
+  SetOffset(function.kernel_offset());
+  ReadUntilFunctionNode();
+  FunctionNodeHelper function_node_helper(this);
+  function_node_helper.ReadUntilExcluding(
+      FunctionNodeHelper::kPositionalParameters);
+  intptr_t param_count = function_node_helper.total_parameter_count_;
+  intptr_t positional_count = ReadListLength();  // read list length.
+  intptr_t named_parameter_count = param_count - positional_count;
+
+  const Array& param_descriptor = Array::Handle(
+      Array::New(param_count * Parser::kParameterEntrySize, Heap::kOld));
+  for (intptr_t i = 0; i < param_count; ++i) {
+    const intptr_t entry_start = i * Parser::kParameterEntrySize;
+
+    if (i == positional_count) {
+      intptr_t named_parameter_count_check =
+          ReadListLength();  // read list length.
+      ASSERT(named_parameter_count_check == named_parameter_count);
+    }
+
+    // Read ith variable declaration.
+    intptr_t param_kernel_offset = reader_.offset();
+    VariableDeclarationHelper helper(this);
+    helper.ReadUntilExcluding(VariableDeclarationHelper::kInitializer);
+    param_descriptor.SetAt(entry_start + Parser::kParameterIsFinalOffset,
+                           helper.IsFinal() ? Bool::True() : Bool::False());
+
+    Tag tag = ReadTag();  // read (first part of) initializer.
+    if ((tag == kSomething) && !function.is_abstract()) {
+      // This will read the initializer.
+      Instance& constant = Instance::ZoneHandle(
+          zone_, constant_reader_.ReadConstantExpression());
+      param_descriptor.SetAt(entry_start + Parser::kParameterDefaultValueOffset,
+                             constant);
+    } else {
+      if (tag == kSomething) {
+        SkipExpression();  // Skip initializer.
+      }
+      param_descriptor.SetAt(entry_start + Parser::kParameterDefaultValueOffset,
+                             Object::null_instance());
+    }
+
+    if (FLAG_enable_mirrors && (helper.annotation_count_ > 0)) {
+      AlternativeReadingScope alt(&reader_, param_kernel_offset);
+      VariableDeclarationHelper helper(this);
+      helper.ReadUntilExcluding(VariableDeclarationHelper::kAnnotations);
+      Object& metadata =
+          Object::ZoneHandle(zone_, constant_reader_.ReadAnnotations());
+      param_descriptor.SetAt(entry_start + Parser::kParameterMetadataOffset,
+                             metadata);
+    } else {
+      param_descriptor.SetAt(entry_start + Parser::kParameterMetadataOffset,
+                             Object::null_instance());
+    }
+  }
+  return param_descriptor.ptr();
+}
+
+ObjectPtr BuildParameterDescriptor(const Function& function) {
+  LongJumpScope jump;
+  if (setjmp(*jump.Set()) == 0) {
+    Thread* thread = Thread::Current();
+    Zone* zone = thread->zone();
+    TranslationHelper helper(thread);
+    Script& script = Script::Handle(zone, function.script());
+    helper.InitFromScript(script);
+
+    const Class& owner_class = Class::Handle(zone, function.Owner());
+    ActiveClass active_class;
+    ActiveClassScope active_class_scope(&active_class, &owner_class);
+
+    ParameterDescriptorBuilder builder(
+        &helper, Script::Handle(zone, function.script()), zone,
+        ExternalTypedData::Handle(zone, function.KernelData()),
+        function.KernelDataProgramOffset(), &active_class);
+
+    return builder.BuildParameterDescriptor(function);
+  } else {
+    return Thread::Current()->StealStickyError();
+  }
+}
+
+void ReadParameterCovariance(const Function& function,
+                             BitVector* is_covariant,
+                             BitVector* is_generic_covariant_impl) {
+  Thread* thread = Thread::Current();
+  Zone* zone = thread->zone();
+
+  const intptr_t num_params = function.NumParameters();
+  ASSERT(is_covariant->length() == num_params);
+  ASSERT(is_generic_covariant_impl->length() == num_params);
+
+  const auto& script = Script::Handle(zone, function.script());
+  TranslationHelper translation_helper(thread);
+  translation_helper.InitFromScript(script);
+
+  KernelReaderHelper reader_helper(
+      zone, &translation_helper, script,
+      ExternalTypedData::Handle(zone, function.KernelData()),
+      function.KernelDataProgramOffset());
+
+  reader_helper.SetOffset(function.kernel_offset());
+  reader_helper.ReadUntilFunctionNode();
+
+  FunctionNodeHelper function_node_helper(&reader_helper);
+  function_node_helper.ReadUntilExcluding(
+      FunctionNodeHelper::kPositionalParameters);
+
+  // Positional.
+  const intptr_t num_positional_params = reader_helper.ReadListLength();
+  intptr_t param_index = function.NumImplicitParameters();
+  for (intptr_t i = 0; i < num_positional_params; ++i, ++param_index) {
+    VariableDeclarationHelper helper(&reader_helper);
+    helper.ReadUntilExcluding(VariableDeclarationHelper::kEnd);
+
+    if (helper.IsCovariant()) {
+      is_covariant->Add(param_index);
+    }
+    if (helper.IsGenericCovariantImpl()) {
+      is_generic_covariant_impl->Add(param_index);
+    }
+  }
+
+  // Named.
+  const intptr_t num_named_params = reader_helper.ReadListLength();
+  for (intptr_t i = 0; i < num_named_params; ++i, ++param_index) {
+    VariableDeclarationHelper helper(&reader_helper);
+    helper.ReadUntilExcluding(VariableDeclarationHelper::kEnd);
+
+    if (helper.IsCovariant()) {
+      is_covariant->Add(param_index);
+    }
+    if (helper.IsGenericCovariantImpl()) {
+      is_generic_covariant_impl->Add(param_index);
+    }
+  }
+}
+
+bool NeedsDynamicInvocationForwarder(const Function& function) {
+  Zone* zone = Thread::Current()->zone();
+
+  // Right now closures do not need a dyn:* forwarder.
+  // See https://github.com/dart-lang/sdk/issues/40813
+  if (function.IsClosureFunction()) return false;
+
+  // Method extractors have no parameters to check and return value is a closure
+  // and therefore not an unboxed primitive type.
+  if (function.IsMethodExtractor()) {
+    return false;
+  }
+
+  // Invoke field dispatchers are dynamically generated, will invoke a getter to
+  // obtain the field value and then invoke ".call()" on the result.
+  // Those dynamically generated dispathers don't have proper kernel metadata
+  // associated with them - we can therefore not query if there are dynamic
+  // calls to them or not and are therefore conservative.
+  if (function.IsInvokeFieldDispatcher()) {
+    return true;
+  }
+
+  // The dyn:* forwarders perform unboxing of parameters before calling the
+  // actual target (which accepts unboxed parameters) and boxes return values
+  // of the return value.
+  if (function.HasUnboxedParameters() || function.HasUnboxedReturnValue()) {
+    return true;
+  }
+
+  // There are no parameters to type check for getters and if the return value
+  // is boxed, then the dyn:* forwarder is not needed.
+  if (function.IsImplicitGetterFunction()) {
+    return false;
+  }
+
+  // Covariant parameters (both explicitly covariant and generic-covariant-impl)
+  // are checked in the body of a function and therefore don't need checks in a
+  // dynamic invocation forwarder. So dynamic invocation forwarder is only
+  // needed if there are non-covariant parameters of non-top type.
+  if (function.IsImplicitSetterFunction()) {
+    const auto& field = Field::Handle(zone, function.accessor_field());
+    return !(field.is_covariant() || field.is_generic_covariant_impl());
+  }
+
+  const auto& type_params =
+      TypeParameters::Handle(zone, function.type_parameters());
+  if (!type_params.IsNull()) {
+    auto& bound = AbstractType::Handle(zone);
+    for (intptr_t i = 0, n = type_params.Length(); i < n; ++i) {
+      bound = type_params.BoundAt(i);
+      if (!bound.IsTopTypeForSubtyping() &&
+          !type_params.IsGenericCovariantImplAt(i)) {
+        return true;
+      }
+    }
+  }
+
+  const intptr_t num_params = function.NumParameters();
+  BitVector is_covariant(zone, num_params);
+  BitVector is_generic_covariant_impl(zone, num_params);
+  ReadParameterCovariance(function, &is_covariant, &is_generic_covariant_impl);
+
+  auto& type = AbstractType::Handle(zone);
+  for (intptr_t i = function.NumImplicitParameters(); i < num_params; ++i) {
+    type = function.ParameterTypeAt(i);
+    if (!type.IsTopTypeForSubtyping() &&
+        !is_generic_covariant_impl.Contains(i) && !is_covariant.Contains(i)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static ProcedureAttributesMetadata ProcedureAttributesOf(
+    Zone* zone,
+    const Script& script,
+    const ExternalTypedData& kernel_data,
+    intptr_t kernel_data_program_offset,
+    intptr_t kernel_offset) {
+  TranslationHelper translation_helper(Thread::Current());
+  translation_helper.InitFromScript(script);
+  KernelReaderHelper reader_helper(zone, &translation_helper, script,
+                                   kernel_data, kernel_data_program_offset);
+  ProcedureAttributesMetadataHelper procedure_attributes_metadata_helper(
+      &reader_helper);
+  ProcedureAttributesMetadata attrs =
+      procedure_attributes_metadata_helper.GetProcedureAttributes(
+          kernel_offset);
+  return attrs;
+}
+
+ProcedureAttributesMetadata ProcedureAttributesOf(const Function& function,
+                                                  Zone* zone) {
+  const Script& script = Script::Handle(zone, function.script());
+  return ProcedureAttributesOf(
+      zone, script, ExternalTypedData::Handle(zone, function.KernelData()),
+      function.KernelDataProgramOffset(), function.kernel_offset());
+}
+
+ProcedureAttributesMetadata ProcedureAttributesOf(const Field& field,
+                                                  Zone* zone) {
+  const Class& parent = Class::Handle(zone, field.Owner());
+  const Script& script = Script::Handle(zone, parent.script());
+  return ProcedureAttributesOf(
+      zone, script, ExternalTypedData::Handle(zone, field.KernelData()),
+      field.KernelDataProgramOffset(), field.kernel_offset());
+}
+
+TableSelectorMetadata* TableSelectorMetadataForProgram(
+    const KernelProgramInfo& info,
+    Zone* zone) {
+  TranslationHelper translation_helper(Thread::Current());
+  translation_helper.InitFromKernelProgramInfo(info);
+  const auto& data = ExternalTypedData::Handle(zone, info.metadata_payloads());
+  KernelReaderHelper reader_helper(zone, &translation_helper,
+                                   Script::Handle(zone), data, 0);
+  TableSelectorMetadataHelper table_selector_metadata_helper(&reader_helper);
+  return table_selector_metadata_helper.GetTableSelectorMetadata(zone);
+}
 
 }  // namespace kernel
-
 }  // namespace dart
+
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)

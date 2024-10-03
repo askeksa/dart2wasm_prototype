@@ -15,10 +15,10 @@ abstract class Priority implements Comparable {
   /**
    * Return < 0 if other is bigger, >0 if other is smaller, 0 if they are equal.
    */
-  int compareTo(Priority other);
-  bool operator <(Priority other) => compareTo(other) < 0;
-  bool operator >(Priority other) => compareTo(other) > 0;
-  bool operator ==(Priority other) => compareTo(other) == 0;
+  int compareTo(dynamic other);
+  bool operator <(dynamic other) => compareTo(other) < 0;
+  bool operator >(dynamic other) => compareTo(other) > 0;
+  bool operator ==(dynamic other) => compareTo(other) == 0;
 }
 
 /**
@@ -28,8 +28,8 @@ class IntPriority extends Priority {
   int priority;
   IntPriority(int this.priority);
 
-  int compareTo(IntPriority other) {
-    return priority - other.priority;
+  int compareTo(dynamic other) {
+    return (priority - other.priority) as int;
   }
 
   String toString() => "$priority";
@@ -47,7 +47,7 @@ class StringTypedElement<V> extends TypedElement {
   String type;
   V value;
   StringTypedElement(String this.type, V this.value);
-  bool typeEquals(String otherType) => otherType == type;
+  bool typeEquals(dynamic otherType) => otherType == type;
   String toString() => "<Type: $type, Value: $value>";
 }
 
@@ -59,8 +59,8 @@ class StringTypedElement<V> extends TypedElement {
 class PriorityNode<N extends TypedElement, T extends Priority> {
   T priority;
   Queue<N> values;
-  PriorityNode prev;
-  PriorityNode next;
+  PriorityNode? prev;
+  PriorityNode? next;
   PriorityNode(N initialNode, T this.priority) : values = new Queue<N>() {
     add(initialNode);
   }
@@ -87,7 +87,7 @@ class PriorityNode<N extends TypedElement, T extends Priority> {
  * use the value or type of the nodes.
  */
 class PriorityQueue<N extends TypedElement, P extends Priority> {
-  PriorityNode<N, P> head;
+  PriorityNode<N, P>? head;
   int length = 0;
 
   void add(N value, P priority) {
@@ -96,17 +96,17 @@ class PriorityQueue<N extends TypedElement, P extends Priority> {
       head = new PriorityNode<N, P>(value, priority);
       return;
     }
-    assert(head.next == null);
-    var node = head;
+    assert(head!.next == null);
+    var node = head!;
     while (node.prev != null && node.priority > priority) {
-      node = node.prev;
+      node = node.prev as PriorityNode<N, P>;
     }
     if (node.priority == priority) {
       node.add(value);
     } else if (node.priority < priority) {
       var newNode = new PriorityNode<N, P>(value, priority);
       newNode.next = node.next;
-      if (node.next != null) node.next.prev = newNode;
+      if (node.next != null) node.next!.prev = newNode;
       newNode.prev = node;
       node.next = newNode;
       if (node == head) head = newNode;
@@ -117,33 +117,33 @@ class PriorityQueue<N extends TypedElement, P extends Priority> {
     }
   }
 
-  N get first => head.first;
+  N get first => head!.first;
 
-  Priority get firstPriority => head.priority;
+  Priority get firstPriority => head!.priority;
 
   bool get isEmpty => head == null;
 
   N removeFirst() {
     if (isEmpty) throw "Can't get element from empty queue";
-    var value = head.removeFirst();
-    if (head.isEmpty) {
-      if (head.prev != null) {
-        head.prev.next = null;
+    var value = head!.removeFirst();
+    if (head!.isEmpty) {
+      if (head!.prev != null) {
+        head!.prev!.next = null;
       }
-      head = head.prev;
+      head = head!.prev as PriorityNode<N, P>?;
     }
     length--;
-    assert(head == null || head.next == null);
+    assert(head == null || head!.next == null);
     return value;
   }
 
   String toString() {
     if (head == null) return "Empty priority queue";
-    var node = head;
+    var node = head!;
     var buffer = new StringBuffer();
     while (node.prev != null) {
       buffer.writeln(node);
-      node = node.prev;
+      node = node.prev as PriorityNode<N, P>;
     }
     buffer.writeln(node);
     return buffer.toString();
@@ -170,12 +170,12 @@ class RestrictViewPriorityQueue<N extends TypedElement, P extends Priority> {
   // FIFO for items with the same order. This is currently not uptimized for
   // different N, if many different N is expected here we should have a
   // priority queue instead of a list.
-  List<PriorityQueue<N, P>> restrictedQueues = new List<PriorityQueue<N, P>>();
+  List<PriorityQueue<N, P>> restrictedQueues = <PriorityQueue<N, P>>[];
   PriorityQueue<N, P> mainQueue = new PriorityQueue<N, P>();
 
   void add(N value, P priority) {
     for (var queue in restrictedQueues) {
-      if (queue.first.value == value) {
+      if ((queue.first as StringTypedElement).value == value) {
         queue.add(value, priority);
       }
     }
@@ -185,13 +185,13 @@ class RestrictViewPriorityQueue<N extends TypedElement, P extends Priority> {
   bool get isEmpty => restrictedQueues.length + mainQueue.length == 0;
 
   int get length =>
-      restrictedQueues.fold(0, (v, e) => v + e.length) + mainQueue.length;
+      restrictedQueues.fold<int>(0, (v, e) => v + e.length) + mainQueue.length;
 
-  PriorityQueue getRestricted(List<N> restrictions) {
+  PriorityQueue? getRestricted(List<N> restrictions) {
     var current = null;
     // Find highest restricted priority.
     for (var queue in restrictedQueues) {
-      if (!restrictions.any((e) => queue.head.first.typeEquals(e))) {
+      if (!restrictions.any((e) => queue.head!.first.typeEquals(e))) {
         if (current == null || queue.firstPriority > current.firstPriority) {
           current = queue;
         } else if (current.firstPriority == queue.firstPriority) {
@@ -202,13 +202,13 @@ class RestrictViewPriorityQueue<N extends TypedElement, P extends Priority> {
     return current;
   }
 
-  N get first {
+  N? get first {
     if (isEmpty) throw "Trying to remove node from empty queue";
     var candidate = getRestricted([]);
     if (candidate != null &&
         (mainQueue.isEmpty ||
             mainQueue.firstPriority < candidate.firstPriority)) {
-      return candidate.first;
+      return candidate.first as N;
     }
     return mainQueue.isEmpty ? null : mainQueue.first;
   }
@@ -219,7 +219,7 @@ class RestrictViewPriorityQueue<N extends TypedElement, P extends Priority> {
    * If the queue is not empty, but no node exists that adheres to the
    * restrictions we return null.
    */
-  N removeFirst({List restrictions: const []}) {
+  N? removeFirst({List<N> restrictions: const []}) {
     if (isEmpty) throw "Trying to remove node from empty queue";
     var candidate = getRestricted(restrictions);
 
@@ -228,7 +228,7 @@ class RestrictViewPriorityQueue<N extends TypedElement, P extends Priority> {
             mainQueue.firstPriority < candidate.firstPriority)) {
       var value = candidate.removeFirst();
       if (candidate.isEmpty) restrictedQueues.remove(candidate);
-      return value;
+      return value as N;
     }
     while (!mainQueue.isEmpty) {
       var currentPriority = mainQueue.firstPriority;
@@ -236,14 +236,18 @@ class RestrictViewPriorityQueue<N extends TypedElement, P extends Priority> {
       if (!restrictions.any((e) => current.typeEquals(e))) {
         return current;
       } else {
-        var restrictedQueue = restrictedQueues.firstWhere(
-            (e) => current.typeEquals(e.first.type),
-            orElse: () => null);
+        PriorityQueue<N, P>? restrictedQueue;
+        for (var e in restrictedQueues) {
+          if (current.typeEquals((e.first as StringTypedElement).type)) {
+            restrictedQueue = e;
+            break;
+          }
+        }
         if (restrictedQueue == null) {
           restrictedQueue = new PriorityQueue<N, P>();
           restrictedQueues.add(restrictedQueue);
         }
-        restrictedQueue.add(current, currentPriority);
+        restrictedQueue.add(current, currentPriority as P);
       }
     }
     return null;
@@ -283,7 +287,7 @@ void stress(queue) {
     new StringTypedElement('drt', 'fisk')
   ];
 
-  var restricted = ['safari', 'chrome'];
+  var restricted = [values[0], values[4]];
 
   void addRandom() {
     queue.add(values[random.nextInt(values.length)],

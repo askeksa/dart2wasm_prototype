@@ -24,284 +24,388 @@ const int _LOWER_CASE_Z = 0x7A;
 
 const String _hexDigits = "0123456789ABCDEF";
 
-/**
- * A parsed URI, such as a URL.
- *
- * **See also:**
- *
- * * [URIs][uris] in the [library tour][libtour]
- * * [RFC-3986](http://tools.ietf.org/html/rfc3986)
- *
- * [uris]: https://www.dartlang.org/docs/dart-up-and-running/ch03.html#uris
- * [libtour]: https://www.dartlang.org/docs/dart-up-and-running/contents/ch03.html
- */
+/// A parsed URI, such as a URL.
+///
+/// To create a URI with specific components, use [new Uri]:
+/// ```dart
+/// var httpsUri = Uri(
+///     scheme: 'https',
+///     host: 'dart.dev',
+///     path: '/guides/libraries/library-tour',
+///     fragment: 'numbers');
+/// print(httpsUri); // https://dart.dev/guides/libraries/library-tour#numbers
+///
+/// httpsUri = Uri(
+///     scheme: 'https',
+///     host: 'example.com',
+///     path: '/page/',
+///     queryParameters: {'search': 'blue', 'limit': '10'});
+/// print(httpsUri); // https://example.com/page/?search=blue&limit=10
+///
+/// final mailtoUri = Uri(
+///     scheme: 'mailto',
+///     path: 'John.Doe@example.com',
+///     queryParameters: {'subject': 'Example'});
+/// print(mailtoUri); // mailto:John.Doe@example.com?subject=Example
+/// ```
+///
+/// ## HTTP and HTTPS URI
+/// To create a URI with https scheme, use [Uri.https] or [Uri.http]:
+/// ```dart
+/// final httpsUri = Uri.https('example.com', 'api/fetch', {'limit': '10'});
+/// print(httpsUri); // https://example.com/api/fetch?limit=10
+/// ```
+/// ## File URI
+/// To create a URI from file path, use [Uri.file]:
+/// ```dart
+/// final fileUriUnix =
+///     Uri.file(r'/home/myself/images/image.png', windows: false);
+/// print(fileUriUnix); // file:///home/myself/images/image.png
+///
+/// final fileUriWindows =
+///     Uri.file(r'C:\Users\myself\Documents\image.png', windows: true);
+/// print(fileUriWindows); // file:///C:/Users/myself/Documents/image.png
+/// ```
+/// If the URI is not a file URI, calling this throws [UnsupportedError].
+///
+/// ## Directory URI
+/// Like [Uri.file] except that a non-empty URI path ends in a slash.
+/// ```dart
+/// final fileDirectory =
+///     Uri.directory('/home/myself/data/image', windows: false);
+/// print(fileDirectory); // file:///home/myself/data/image/
+///
+/// final fileDirectoryWindows = Uri.directory('/data/images', windows: true);
+/// print(fileDirectoryWindows); //  file:///data/images/
+/// ```
+///
+/// ## URI from string
+/// To create a URI from string, use [Uri.parse] or [Uri.tryParse]:
+/// ```dart
+/// final uri = Uri.parse(
+///     'https://dart.dev/guides/libraries/library-tour#utility-classes');
+/// print(uri); // https://dart.dev
+/// print(uri.isScheme('https')); // true
+/// print(uri.origin); // https://dart.dev
+/// print(uri.host); // dart.dev
+/// print(uri.authority); // dart.dev
+/// print(uri.port); // 443
+/// print(uri.path); // guides/libraries/library-tour
+/// print(uri.pathSegments); // [guides, libraries, library-tour]
+/// print(uri.fragment); // utility-classes
+/// print(uri.hasQuery); // false
+/// print(uri.data); // null
+/// ```
+///
+/// **See also:**
+/// * [URIs][uris] in the [library tour][libtour]
+/// * [RFC-3986](https://tools.ietf.org/html/rfc3986)
+/// * [RFC-2396](https://tools.ietf.org/html/rfc2396)
+/// * [RFC-2045](https://tools.ietf.org/html/rfc2045)
+///
+/// [uris]: https://dart.dev/guides/libraries/library-tour#uris
+/// [libtour]: https://dart.dev/guides/libraries/library-tour
 abstract class Uri {
-  /**
-   * Returns the natural base URI for the current platform.
-   *
-   * When running in a browser this is the current URL of the current page
-   * (from `window.location.href`).
-   *
-   * When not running in a browser this is the file URI referencing
-   * the current working directory.
-   */
+  /// The natural base URI for the current platform.
+  ///
+  /// When running in a browser, this is the current URL of the current page
+  /// (from `window.location.href`).
+  ///
+  /// When not running in a browser, this is the file URI referencing
+  /// the current working directory.
   external static Uri get base;
 
-  /**
-   * Creates a new URI from its components.
-   *
-   * Each component is set through a named argument. Any number of
-   * components can be provided. The [path] and [query] components can be set
-   * using either of two different named arguments.
-   *
-   * The scheme component is set through [scheme]. The scheme is
-   * normalized to all lowercase letters. If the scheme is omitted or empty,
-   * the URI will not have a scheme part.
-   *
-   * The user info part of the authority component is set through
-   * [userInfo]. It defaults to the empty string, which will be omitted
-   * from the string representation of the URI.
-   *
-   * The host part of the authority component is set through
-   * [host]. The host can either be a hostname, an IPv4 address or an
-   * IPv6 address, contained in '[' and ']'. If the host contains a
-   * ':' character, the '[' and ']' are added if not already provided.
-   * The host is normalized to all lowercase letters.
-   *
-   * The port part of the authority component is set through
-   * [port].
-   * If [port] is omitted or `null`, it implies the default port for
-   * the URI's scheme, and is equivalent to passing that port explicitly.
-   * The recognized schemes, and their default ports, are "http" (80) and
-   * "https" (443). All other schemes are considered as having zero as the
-   * default port.
-   *
-   * If any of `userInfo`, `host` or `port` are provided,
-   * the URI has an authority according to [hasAuthority].
-   *
-   * The path component is set through either [path] or
-   * [pathSegments].
-   * When [path] is used, it should be a valid URI path,
-   * but invalid characters, except the general delimiters ':/@[]?#',
-   * will be escaped if necessary.
-   * When [pathSegments] is used, each of the provided segments
-   * is first percent-encoded and then joined using the forward slash
-   * separator.
-   *
-   * The percent-encoding of the path segments encodes all
-   * characters except for the unreserved characters and the following
-   * list of characters: `!$&'()*+,;=:@`. If the other components
-   * necessitate an absolute path, a leading slash `/` is prepended if
-   * not already there.
-   *
-   * The query component is set through either [query] or [queryParameters].
-   * When [query] is used, the provided string should be a valid URI query,
-   * but invalid characters, other than general delimiters,
-   * will be escaped if necessary.
-   * When [queryParameters] is used the query is built from the
-   * provided map. Each key and value in the map is percent-encoded
-   * and joined using equal and ampersand characters.
-   * A value in the map must be either a string, or an [Iterable] of strings,
-   * where the latter corresponds to multiple values for the same key.
-   *
-   * The percent-encoding of the keys and values encodes all characters
-   * except for the unreserved characters, and replaces spaces with `+`.
-   * If `query` is the empty string, it is equivalent to omitting it.
-   * To have an actual empty query part,
-   * use an empty map for `queryParameters`.
-   *
-   * If both `query` and `queryParameters` are omitted or `null`,
-   * the URI has no query part.
-   *
-   * The fragment component is set through [fragment].
-   * It should be a valid URI fragment, but invalid characters other than
-   * general delimiters, are escaped if necessary.
-   * If `fragment` is omitted or `null`, the URI has no fragment part.
-   */
+  /// Creates a new URI from its components.
+  ///
+  /// Each component is set through a named argument. Any number of
+  /// components can be provided. The [path] and [query] components can be set
+  /// using either of two different named arguments.
+  ///
+  /// The scheme component is set through [scheme]. The scheme is
+  /// normalized to all lowercase letters. If the scheme is omitted or empty,
+  /// the URI will not have a scheme part.
+  ///
+  /// The user info part of the authority component is set through
+  /// [userInfo]. It defaults to the empty string, which will be omitted
+  /// from the string representation of the URI.
+  ///
+  /// The host part of the authority component is set through
+  /// [host]. The host can either be a hostname, an IPv4 address or an
+  /// IPv6 address, contained in `'['` and `']'`. If the host contains a
+  /// ':' character, the `'['` and `']'` are added if not already provided.
+  /// The host is normalized to all lowercase letters.
+  ///
+  /// The port part of the authority component is set through
+  /// [port].
+  /// If [port] is omitted or `null`, it implies the default port for
+  /// the URI's scheme, and is equivalent to passing that port explicitly.
+  /// The recognized schemes, and their default ports, are "http" (80) and
+  /// "https" (443). All other schemes are considered as having zero as the
+  /// default port.
+  ///
+  /// If any of `userInfo`, `host` or `port` are provided,
+  /// the URI has an authority according to [hasAuthority].
+  ///
+  /// The path component is set through either [path] or
+  /// [pathSegments].
+  /// When [path] is used, it should be a valid URI path,
+  /// but invalid characters, except the general delimiters ':/@[]?#',
+  /// will be escaped if necessary.
+  /// When [pathSegments] is used, each of the provided segments
+  /// is first percent-encoded and then joined using the forward slash
+  /// separator.
+  ///
+  /// The percent-encoding of the path segments encodes all
+  /// characters except for the unreserved characters and the following
+  /// list of characters: `!$&'()*+,;=:@`. If the other components
+  /// necessitate an absolute path, a leading slash `/` is prepended if
+  /// not already there.
+  ///
+  /// The query component is set through either [query] or [queryParameters].
+  /// When [query] is used, the provided string should be a valid URI query,
+  /// but invalid characters, other than general delimiters,
+  /// will be escaped if necessary.
+  /// When [queryParameters] is used, the query is built from the
+  /// provided map. Each key and value in the map is percent-encoded
+  /// and joined using equal and ampersand characters.
+  /// A value in the map must be either a string, or an [Iterable] of strings,
+  /// where the latter corresponds to multiple values for the same key.
+  ///
+  /// The percent-encoding of the keys and values encodes all characters
+  /// except for the unreserved characters, and replaces spaces with `+`.
+  /// If [query] is the empty string, it is equivalent to omitting it.
+  /// To have an actual empty query part,
+  /// use an empty map for [queryParameters].
+  ///
+  /// If both [query] and [queryParameters] are omitted or `null`,
+  /// the URI has no query part.
+  ///
+  /// The fragment component is set through [fragment].
+  /// It should be a valid URI fragment, but invalid characters other than
+  /// general delimiters are escaped if necessary.
+  /// If [fragment] is omitted or `null`, the URI has no fragment part.
+  ///
+  /// Example:
+  /// ```dart
+  /// final httpsUri = Uri(
+  ///     scheme: 'https',
+  ///     host: 'dart.dev',
+  ///     path: 'guides/libraries/library-tour',
+  ///     fragment: 'numbers');
+  /// print(httpsUri); // https://dart.dev/guides/libraries/library-tour#numbers
+  ///
+  /// final mailtoUri = Uri(
+  ///     scheme: 'mailto',
+  ///     path: 'John.Doe@example.com',
+  ///     queryParameters: {'subject': 'Example'});
+  /// print(mailtoUri); // mailto:John.Doe@example.com?subject=Example
+  /// ```
   factory Uri(
-      {String scheme,
-      String userInfo,
-      String host,
-      int port,
-      String path,
-      Iterable<String> pathSegments,
-      String query,
-      Map<String, dynamic /*String|Iterable<String>*/ > queryParameters,
-      String fragment}) = _Uri;
+      {String? scheme,
+      String? userInfo,
+      String? host,
+      int? port,
+      String? path,
+      Iterable<String>? pathSegments,
+      String? query,
+      Map<String, dynamic /*String|Iterable<String>*/ >? queryParameters,
+      String? fragment}) = _Uri;
 
-  /**
-   * Creates a new `http` URI from authority, path and query.
-   *
-   * Examples:
-   *
-   * ```
-   * // http://example.org/path?q=dart.
-   * new Uri.http("example.org", "/path", { "q" : "dart" });
-   *
-   * // http://user:pass@localhost:8080
-   * new Uri.http("user:pass@localhost:8080", "");
-   *
-   * // http://example.org/a%20b
-   * new Uri.http("example.org", "a b");
-   *
-   * // http://example.org/a%252F
-   * new Uri.http("example.org", "/a%2F");
-   * ```
-   *
-   * The `scheme` is always set to `http`.
-   *
-   * The `userInfo`, `host` and `port` components are set from the
-   * [authority] argument. If `authority` is `null` or empty,
-   * the created `Uri` has no authority, and isn't directly usable
-   * as an HTTP URL, which must have a non-empty host.
-   *
-   * The `path` component is set from the [unencodedPath]
-   * argument. The path passed must not be encoded as this constructor
-   * encodes the path.
-   *
-   * The `query` component is set from the optional [queryParameters]
-   * argument.
-   */
+  /// Creates a new `http` URI from authority, path and query.
+  ///
+  /// Example:
+  /// ```dart
+  /// var uri = Uri.http('example.org', '/path', { 'q' : 'dart' });
+  /// print(uri); // http://example.org/path?q=dart
+  ///
+  /// uri = Uri.http('user:password@localhost:8080', '');
+  /// print(uri); // http://user:password@localhost:8080
+  ///
+  /// uri = Uri.http('example.org', 'a b');
+  /// print(uri); // http://example.org/a%20b
+  ///
+  /// uri = Uri.http('example.org', '/a%2F');
+  /// print(uri); // http://example.org/a%252F
+  /// ```
+  ///
+  /// The `scheme` is always set to `http`.
+  ///
+  /// The `userInfo`, `host` and `port` components are set from the
+  /// [authority] argument. If `authority` is `null` or empty,
+  /// the created `Uri` has no authority, and isn't directly usable
+  /// as an HTTP URL, which must have a non-empty host.
+  ///
+  /// The `path` component is set from the [unencodedPath]
+  /// argument. The path passed must not be encoded as this constructor
+  /// encodes the path.
+  ///
+  /// The `query` component is set from the optional [queryParameters]
+  /// argument.
   factory Uri.http(String authority, String unencodedPath,
-      [Map<String, String> queryParameters]) = _Uri.http;
+      [Map<String, dynamic>? queryParameters]) = _Uri.http;
 
-  /**
-   * Creates a new `https` URI from authority, path and query.
-   *
-   * This constructor is the same as [Uri.http] except for the scheme
-   * which is set to `https`.
-   */
+  /// Creates a new `https` URI from authority, path and query.
+  ///
+  /// This constructor is the same as [Uri.http] except for the scheme
+  /// which is set to `https`.
+  ///
+  /// Example:
+  /// ```dart
+  /// var uri = Uri.https('example.org', '/path', {'q': 'dart'});
+  /// print(uri); // https://example.org/path?q=dart
+  ///
+  /// uri = Uri.https('user:password@localhost:8080', '');
+  /// print(uri); // https://user:password@localhost:8080
+  ///
+  /// uri = Uri.https('example.org', 'a b');
+  /// print(uri); // https://example.org/a%20b
+  ///
+  /// uri = Uri.https('example.org', '/a%2F');
+  /// print(uri); // https://example.org/a%252F
+  /// ```
   factory Uri.https(String authority, String unencodedPath,
-      [Map<String, String> queryParameters]) = _Uri.https;
+      [Map<String, dynamic>? queryParameters]) = _Uri.https;
 
-  /**
-   * Creates a new file URI from an absolute or relative file path.
-   *
-   * The file path is passed in [path].
-   *
-   * This path is interpreted using either Windows or non-Windows
-   * semantics.
-   *
-   * With non-Windows semantics the slash (`/`) is used to separate
-   * path segments in the input [path].
-   *
-   * With Windows semantics, backslash (`\`) and forward-slash (`/`)
-   * are used to separate path segments in the input [path],
-   * except if the path starts with `\\?\` in which case
-   * only backslash (`\`) separates path segments in [path].
-   *
-   * If the path starts with a path separator, an absolute URI (with the
-   * `file` scheme and an empty authority) is created.
-   * Otherwise a relative URI reference with no scheme or authority is created.
-   * One exception from this rule is that when Windows semantics is used
-   * and the path starts with a drive letter followed by a colon (":") and a
-   * path separator, then an absolute URI is created.
-   *
-   * The default for whether to use Windows or non-Windows semantics
-   * determined from the platform Dart is running on. When running in
-   * the standalone VM, this is detected by the VM based on the
-   * operating system. When running in a browser non-Windows semantics
-   * is always used.
-   *
-   * To override the automatic detection of which semantics to use pass
-   * a value for [windows]. Passing `true` will use Windows
-   * semantics and passing `false` will use non-Windows semantics.
-   *
-   * Examples using non-Windows semantics:
-   *
-   * ```
-   * // xxx/yyy
-   * new Uri.file("xxx/yyy", windows: false);
-   *
-   * // xxx/yyy/
-   * new Uri.file("xxx/yyy/", windows: false);
-   *
-   * // file:///xxx/yyy
-   * new Uri.file("/xxx/yyy", windows: false);
-   *
-   * // file:///xxx/yyy/
-   * new Uri.file("/xxx/yyy/", windows: false);
-   *
-   * // C%3A
-   * new Uri.file("C:", windows: false);
-   * ```
-   *
-   * Examples using Windows semantics:
-   *
-   * ```
-   * // xxx/yyy
-   * new Uri.file(r"xxx\yyy", windows: true);
-   *
-   * // xxx/yyy/
-   * new Uri.file(r"xxx\yyy\", windows: true);
-   *
-   * file:///xxx/yyy
-   * new Uri.file(r"\xxx\yyy", windows: true);
-   *
-   * file:///xxx/yyy/
-   * new Uri.file(r"\xxx\yyy/", windows: true);
-   *
-   * // file:///C:/xxx/yyy
-   * new Uri.file(r"C:\xxx\yyy", windows: true);
-   *
-   * // This throws an error. A path with a drive letter, but no following
-   * // path, is not allowed.
-   * new Uri.file(r"C:", windows: true);
-   *
-   * // This throws an error. A path with a drive letter is not absolute.
-   * new Uri.file(r"C:xxx\yyy", windows: true);
-   *
-   * // file://server/share/file
-   * new Uri.file(r"\\server\share\file", windows: true);
-   * ```
-   *
-   * If the path passed is not a valid file path, an error is thrown.
-   */
-  factory Uri.file(String path, {bool windows}) = _Uri.file;
+  /// Creates a new file URI from an absolute or relative file path.
+  ///
+  /// The file path is passed in [path].
+  ///
+  /// This path is interpreted using either Windows or non-Windows
+  /// semantics.
+  ///
+  /// With non-Windows semantics, the slash (`/`) is used to separate
+  /// path segments in the input [path].
+  ///
+  /// With Windows semantics, backslash (`\`) and forward-slash (`/`)
+  /// are used to separate path segments in the input [path],
+  /// except if the path starts with `\\?\` in which case
+  /// only backslash (`\`) separates path segments in [path].
+  ///
+  /// If the path starts with a path separator, an absolute URI (with the
+  /// `file` scheme and an empty authority) is created.
+  /// Otherwise a relative URI reference with no scheme or authority is created.
+  /// One exception to this rule is that when Windows semantics is used
+  /// and the path starts with a drive letter followed by a colon (":") and a
+  /// path separator, then an absolute URI is created.
+  ///
+  /// The default for whether to use Windows or non-Windows semantics
+  /// is determined from the platform Dart is running on. When running in
+  /// the standalone VM, this is detected by the VM based on the
+  /// operating system. When running in a browser, non-Windows semantics
+  /// is always used.
+  ///
+  /// To override the automatic detection of which semantics to use pass
+  /// a value for [windows]. Passing `true` will use Windows
+  /// semantics and passing `false` will use non-Windows semantics.
+  ///
+  /// Examples using non-Windows semantics:
+  /// ```dart
+  /// // xxx/yyy
+  /// Uri.file('xxx/yyy', windows: false);
+  ///
+  /// // xxx/yyy/
+  /// Uri.file('xxx/yyy/', windows: false);
+  ///
+  /// // file:///xxx/yyy
+  /// Uri.file('/xxx/yyy', windows: false);
+  ///
+  /// // file:///xxx/yyy/
+  /// Uri.file('/xxx/yyy/', windows: false);
+  ///
+  /// // C%3A
+  /// Uri.file('C:', windows: false);
+  /// ```
+  ///
+  /// Examples using Windows semantics:
+  /// ```dart
+  /// // xxx/yyy
+  /// Uri.file(r'xxx\yyy', windows: true);
+  ///
+  /// // xxx/yyy/
+  /// Uri.file(r'xxx\yyy\', windows: true);
+  ///
+  /// file:///xxx/yyy
+  /// Uri.file(r'\xxx\yyy', windows: true);
+  ///
+  /// file:///xxx/yyy/
+  /// Uri.file(r'\xxx\yyy/', windows: true);
+  ///
+  /// // file:///C:/xxx/yyy
+  /// Uri.file(r'C:\xxx\yyy', windows: true);
+  ///
+  /// // This throws an error. A path with a drive letter, but no following
+  /// // path, is not allowed.
+  /// Uri.file(r'C:', windows: true);
+  ///
+  /// // This throws an error. A path with a drive letter is not absolute.
+  /// Uri.file(r'C:xxx\yyy', windows: true);
+  ///
+  /// // file://server/share/file
+  /// Uri.file(r'\\server\share\file', windows: true);
+  /// ```
+  ///
+  /// If the path passed is not a valid file path, an error is thrown.
+  factory Uri.file(String path, {bool? windows}) = _Uri.file;
 
-  /**
-   * Like [Uri.file] except that a non-empty URI path ends in a slash.
-   *
-   * If [path] is not empty, and it doesn't end in a directory separator,
-   * then a slash is added to the returned URI's path.
-   * In all other cases, the result is the same as returned by `Uri.file`.
-   */
-  factory Uri.directory(String path, {bool windows}) = _Uri.directory;
+  /// Like [Uri.file] except that a non-empty URI path ends in a slash.
+  ///
+  /// If [path] is not empty, and it doesn't end in a directory separator,
+  /// then a slash is added to the returned URI's path.
+  /// In all other cases, the result is the same as returned by `Uri.file`.
+  ///
+  /// Example:
+  /// ```dart
+  /// final fileDirectory = Uri.directory('data/images', windows: false);
+  /// print(fileDirectory); // data/images/
+  ///
+  /// final fileDirectoryWindows =
+  ///    Uri.directory(r'C:\data\images', windows: true);
+  /// print(fileDirectoryWindows); // file:///C:/data/images/
+  /// ```
+  factory Uri.directory(String path, {bool? windows}) = _Uri.directory;
 
-  /**
-   * Creates a `data:` URI containing the [content] string.
-   *
-   * Converts the content to a bytes using [encoding] or the charset specified
-   * in [parameters] (defaulting to US-ASCII if not specified or unrecognized),
-   * then encodes the bytes into the resulting data URI.
-   *
-   * Defaults to encoding using percent-encoding (any non-ASCII or non-URI-valid
-   * bytes is replaced by a percent encoding). If [base64] is true, the bytes
-   * are instead encoded using [BASE64].
-   *
-   * If [encoding] is not provided and [parameters] has a `charset` entry,
-   * that name is looked up using [Encoding.getByName],
-   * and if the lookup returns an encoding, that encoding is used to convert
-   * [content] to bytes.
-   * If providing both an [encoding] and a charset in [parameters], they should
-   * agree, otherwise decoding won't be able to use the charset parameter
-   * to determine the encoding.
-   *
-   * If [mimeType] and/or [parameters] are supplied, they are added to the
-   * created URI. If any of these contain characters that are not allowed
-   * in the data URI, the character is percent-escaped. If the character is
-   * non-ASCII, it is first UTF-8 encoded and then the bytes are percent
-   * encoded. An omitted [mimeType] in a data URI means `text/plain`, just
-   * as an omitted `charset` parameter defaults to meaning `US-ASCII`.
-   *
-   * To read the content back, use [UriData.contentAsString].
-   */
+  /// Creates a `data:` URI containing the [content] string.
+  ///
+  /// Converts the content to bytes using [encoding] or the charset specified
+  /// in [parameters] (defaulting to US-ASCII if not specified or unrecognized),
+  /// then encodes the bytes into the resulting data URI.
+  ///
+  /// Defaults to encoding using percent-encoding (any non-ASCII or
+  /// non-URI-valid bytes is replaced by a percent encoding). If [base64] is
+  /// true, the bytes are instead encoded using [base64].
+  ///
+  /// If [encoding] is not provided and [parameters] has a `charset` entry,
+  /// that name is looked up using [Encoding.getByName],
+  /// and if the lookup returns an encoding, that encoding is used to convert
+  /// [content] to bytes.
+  /// If providing both an [encoding] and a charset in [parameters], they should
+  /// agree, otherwise decoding won't be able to use the charset parameter
+  /// to determine the encoding.
+  ///
+  /// If [mimeType] and/or [parameters] are supplied, they are added to the
+  /// created URI. If any of these contain characters that are not allowed
+  /// in the data URI, the character is percent-escaped. If the character is
+  /// non-ASCII, it is first UTF-8 encoded and then the bytes are percent
+  /// encoded. An omitted [mimeType] in a data URI means `text/plain`, just
+  /// as an omitted `charset` parameter defaults to meaning `US-ASCII`.
+  ///
+  /// To read the content back, use [UriData.contentAsString].
+  ///
+  /// Example:
+  /// ```dart
+  /// final uri = Uri.dataFromString(
+  ///   'example content',
+  ///   mimeType: 'text/plain',
+  ///   parameters: <String, String>{'search': 'file', 'max': '10'},
+  /// );
+  /// print(uri); // data:;search=name;max=10,example%20content
+  /// ```
   factory Uri.dataFromString(String content,
-      {String mimeType,
-      Encoding encoding,
-      Map<String, String> parameters,
-      bool base64: false}) {
-    UriData data = new UriData.fromString(content,
+      {String? mimeType,
+      Encoding? encoding,
+      Map<String, String>? parameters,
+      bool base64 = false}) {
+    UriData data = UriData.fromString(content,
         mimeType: mimeType,
         encoding: encoding,
         parameters: parameters,
@@ -309,210 +413,199 @@ abstract class Uri {
     return data.uri;
   }
 
-  /**
-   * Creates a `data:` URI containing an encoding of [bytes].
-   *
-   * Defaults to Base64 encoding the bytes, but if [percentEncoded]
-   * is `true`, the bytes will instead be percent encoded (any non-ASCII
-   * or non-valid-ASCII-character byte is replaced by a percent encoding).
-   *
-   * To read the bytes back, use [UriData.contentAsBytes].
-   *
-   * It defaults to having the mime-type `application/octet-stream`.
-   * The [mimeType] and [parameters] are added to the created URI.
-   * If any of these contain characters that are not allowed
-   * in the data URI, the character is percent-escaped. If the character is
-   * non-ASCII, it is first UTF-8 encoded and then the bytes are percent
-   * encoded.
-   */
+  /// Creates a `data:` URI containing an encoding of [bytes].
+  ///
+  /// Defaults to Base64 encoding the bytes, but if [percentEncoded]
+  /// is `true`, the bytes will instead be percent encoded (any non-ASCII
+  /// or non-valid-ASCII-character byte is replaced by a percent encoding).
+  ///
+  /// To read the bytes back, use [UriData.contentAsBytes].
+  ///
+  /// It defaults to having the mime-type `application/octet-stream`.
+  /// The [mimeType] and [parameters] are added to the created URI.
+  /// If any of these contain characters that are not allowed
+  /// in the data URI, the character is percent-escaped. If the character is
+  /// non-ASCII, it is first UTF-8 encoded and then the bytes are percent
+  /// encoded.
+  ///
+  /// Example:
+  /// ```dart
+  /// final uri = Uri.dataFromBytes([68, 97, 114, 116]);
+  /// print(uri); // data:application/octet-stream;base64,RGFydA==
+  /// ```
   factory Uri.dataFromBytes(List<int> bytes,
-      {mimeType: "application/octet-stream",
-      Map<String, String> parameters,
-      percentEncoded: false}) {
-    UriData data = new UriData.fromBytes(bytes,
+      {String mimeType = "application/octet-stream",
+      Map<String, String>? parameters,
+      bool percentEncoded = false}) {
+    UriData data = UriData.fromBytes(bytes,
         mimeType: mimeType,
         parameters: parameters,
         percentEncoded: percentEncoded);
     return data.uri;
   }
 
-  /**
-   * The scheme component of the URI.
-   *
-   * Returns the empty string if there is no scheme component.
-   *
-   * A URI scheme is case insensitive.
-   * The returned scheme is canonicalized to lowercase letters.
-   */
+  /// The scheme component of the URI.
+  ///
+  /// The value is the empty string if there is no scheme component.
+  ///
+  /// A URI scheme is case insensitive.
+  /// The returned scheme is canonicalized to lowercase letters.
   String get scheme;
 
-  /**
-   * Returns the authority component.
-   *
-   * The authority is formatted from the [userInfo], [host] and [port]
-   * parts.
-   *
-   * Returns the empty string if there is no authority component.
-   */
+  /// The authority component.
+  ///
+  /// The authority is formatted from the [userInfo], [host] and [port]
+  /// parts.
+  ///
+  /// The value is the empty string if there is no authority component.
   String get authority;
 
-  /**
-   * Returns the user info part of the authority component.
-   *
-   * Returns the empty string if there is no user info in the
-   * authority component.
-   */
+  /// The user info part of the authority component.
+  ///
+  /// The value is the empty string if there is no user info in the
+  /// authority component.
   String get userInfo;
 
-  /**
-   * Returns the host part of the authority component.
-   *
-   * Returns the empty string if there is no authority component and
-   * hence no host.
-   *
-   * If the host is an IP version 6 address, the surrounding `[` and `]` is
-   * removed.
-   *
-   * The host string is case-insensitive.
-   * The returned host name is canonicalized to lower-case
-   * with upper-case percent-escapes.
-   */
+  /// The host part of the authority component.
+  ///
+  /// The value is the empty string if there is no authority component and
+  /// hence no host.
+  ///
+  /// If the host is an IP version 6 address, the surrounding `[` and `]` is
+  /// removed.
+  ///
+  /// The host string is case-insensitive.
+  /// The returned host name is canonicalized to lower-case
+  /// with upper-case percent-escapes.
   String get host;
 
-  /**
-   * Returns the port part of the authority component.
-   *
-   * Returns the default port if there is no port number in the authority
-   * component. That's 80 for http, 443 for https, and 0 for everything else.
-   */
+  /// The port part of the authority component.
+  ///
+  /// The value is the default port if there is no port number in the authority
+  /// component. That's 80 for http, 443 for https, and 0 for everything else.
   int get port;
 
-  /**
-   * Returns the path component.
-   *
-   * The returned path is encoded. To get direct access to the decoded
-   * path use [pathSegments].
-   *
-   * Returns the empty string if there is no path component.
-   */
+  /// The path component.
+  ///
+  /// The path is the actual substring of the URI representing the path,
+  /// and it is encoded where necessary. To get direct access to the decoded
+  /// path, use [pathSegments].
+  ///
+  /// The path value is the empty string if there is no path component.
   String get path;
 
-  /**
-   * Returns the query component. The returned query is encoded. To get
-   * direct access to the decoded query use [queryParameters].
-   *
-   * Returns the empty string if there is no query component.
-   */
+  /// The query component.
+  ///
+  /// The value is the actual substring of the URI representing the query part,
+  /// and it is encoded where necessary.
+  /// To get direct access to the decoded query, use [queryParameters].
+  ///
+  /// The value is the empty string if there is no query component.
   String get query;
 
-  /**
-   * Returns the fragment identifier component.
-   *
-   * Returns the empty string if there is no fragment identifier
-   * component.
-   */
+  /// The fragment identifier component.
+  ///
+  /// The value is the empty string if there is no fragment identifier
+  /// component.
   String get fragment;
 
-  /**
-   * Returns the URI path split into its segments. Each of the segments in the
-   * returned list have been decoded. If the path is empty the empty list will
-   * be returned. A leading slash `/` does not affect the segments returned.
-   *
-   * The returned list is unmodifiable and will throw [UnsupportedError] on any
-   * calls that would mutate it.
-   */
+  /// The URI path split into its segments.
+  ///
+  /// Each of the segments in the list has been decoded.
+  /// If the path is empty, the empty list will
+  /// be returned. A leading slash `/` does not affect the segments returned.
+  ///
+  /// The list is unmodifiable and will throw [UnsupportedError] on any
+  /// calls that would mutate it.
   List<String> get pathSegments;
 
-  /**
-   * Returns the URI query split into a map according to the rules
-   * specified for FORM post in the [HTML 4.01 specification section
-   * 17.13.4](http://www.w3.org/TR/REC-html40/interact/forms.html#h-17.13.4 "HTML 4.01 section 17.13.4").
-   * Each key and value in the returned map has been decoded.
-   * If there is no query the empty map is returned.
-   *
-   * Keys in the query string that have no value are mapped to the
-   * empty string.
-   * If a key occurs more than once in the query string, it is mapped to
-   * an arbitrary choice of possible value.
-   * The [queryParametersAll] getter can provide a map
-   * that maps keys to all of their values.
-   *
-   * The returned map is unmodifiable.
-   */
+  /// The URI query split into a map according to the rules
+  /// specified for FORM post in the [HTML 4.01 specification section
+  /// 17.13.4](https://www.w3.org/TR/REC-html40/interact/forms.html#h-17.13.4
+  /// "HTML 4.01 section 17.13.4").
+  ///
+  /// Each key and value in the resulting map has been decoded.
+  /// If there is no query, the empty map is returned.
+  ///
+  /// Keys in the query string that have no value are mapped to the
+  /// empty string.
+  /// If a key occurs more than once in the query string, it is mapped to
+  /// an arbitrary choice of possible value.
+  /// The [queryParametersAll] getter can provide a map
+  /// that maps keys to all of their values.
+  ///
+  /// Example:
+  /// ```dart import:convert
+  /// final uri =
+  ///     Uri.parse('https://example.com/api/fetch?limit=10,20,30&max=100');
+  /// print(jsonEncode(uri.queryParameters));
+  /// // {"limit":"10,20,30","max":"100"}
+  /// ```
+  ///
+  /// The map is unmodifiable.
   Map<String, String> get queryParameters;
 
-  /**
-   * Returns the URI query split into a map according to the rules
-   * specified for FORM post in the [HTML 4.01 specification section
-   * 17.13.4](http://www.w3.org/TR/REC-html40/interact/forms.html#h-17.13.4 "HTML 4.01 section 17.13.4").
-   * Each key and value in the returned map has been decoded. If there is no
-   * query the empty map is returned.
-   *
-   * Keys are mapped to lists of their values. If a key occurs only once,
-   * its value is a singleton list. If a key occurs with no value, the
-   * empty string is used as the value for that occurrence.
-   *
-   * The returned map and the lists it contains are unmodifiable.
-   */
+  /// Returns the URI query split into a map according to the rules
+  /// specified for FORM post in the [HTML 4.01 specification section
+  /// 17.13.4](https://www.w3.org/TR/REC-html40/interact/forms.html#h-17.13.4
+  /// "HTML 4.01 section 17.13.4").
+  ///
+  /// Each key and value in the resulting map has been decoded. If there is no
+  /// query, the map is empty.
+  ///
+  /// Keys are mapped to lists of their values. If a key occurs only once,
+  /// its value is a singleton list. If a key occurs with no value, the
+  /// empty string is used as the value for that occurrence.
+  ///
+  /// Example:
+  /// ```dart import:convert
+  /// final uri =
+  ///     Uri.parse('https://example.com/api/fetch?limit=10,20,30&max=100');
+  /// print(jsonEncode(uri.queryParameters)); // {"limit":"10,20,30","max":"100"}
+  /// ```
+  ///
+  /// The map and the lists it contains are unmodifiable.
   Map<String, List<String>> get queryParametersAll;
 
-  /**
-   * Returns whether the URI is absolute.
-   *
-   * A URI is an absolute URI in the sense of RFC 3986 if it has a scheme
-   * and no fragment.
-   */
+  /// Whether the URI is absolute.
+  ///
+  /// A URI is an absolute URI in the sense of RFC 3986 if it has a scheme
+  /// and no fragment.
   bool get isAbsolute;
 
-  /**
-   * Returns whether the URI has a [scheme] component.
-   */
+  /// Whether the URI has a [scheme] component.
   bool get hasScheme => scheme.isNotEmpty;
 
-  /**
-   * Returns whether the URI has an [authority] component.
-   */
+  /// Whether the URI has an [authority] component.
   bool get hasAuthority;
 
-  /**
-   * Returns whether the URI has an explicit port.
-   *
-   * If the port number is the default port number
-   * (zero for unrecognized schemes, with http (80) and https (443) being
-   * recognized),
-   * then the port is made implicit and omitted from the URI.
-   */
+  /// Whether the URI has an explicit port.
+  ///
+  /// If the port number is the default port number
+  /// (zero for unrecognized schemes, with http (80) and https (443) being
+  /// recognized),
+  /// then the port is made implicit and omitted from the URI.
   bool get hasPort;
 
-  /**
-   * Returns whether the URI has a query part.
-   */
+  /// Whether the URI has a query part.
   bool get hasQuery;
 
-  /**
-   * Returns whether the URI has a fragment part.
-   */
+  /// Whether the URI has a fragment part.
   bool get hasFragment;
 
-  /**
-   * Returns whether the URI has an empty path.
-   */
+  /// Whether the URI has an empty path.
   bool get hasEmptyPath;
 
-  /**
-   * Returns whether the URI has an absolute path (starting with '/').
-   */
+  /// Whether the URI has an absolute path (starting with '/').
   bool get hasAbsolutePath;
 
-  /**
-   * Returns the origin of the URI in the form scheme://host:port for the
-   * schemes http and https.
-   *
-   * It is an error if the scheme is not "http" or "https", or if the host name
-   * is missing or empty.
-   *
-   * See: http://www.w3.org/TR/2011/WD-html5-20110405/origin-0.html#origin
-   */
+  /// Returns the origin of the URI in the form scheme://host:port for the
+  /// schemes http and https.
+  ///
+  /// It is an error if the scheme is not "http" or "https", or if the host name
+  /// is missing or empty.
+  ///
+  /// See: https://www.w3.org/TR/2011/WD-html5-20110405/origin-0.html#origin
   String get origin;
 
   /// Whether the scheme of this [Uri] is [scheme].
@@ -522,216 +615,225 @@ abstract class Uri {
   ///
   /// Example:
   /// ```dart
-  /// var uri = Uri.parse("http://example.com/");
-  /// print(uri.isScheme("HTTP"));  // Prints true.
+  /// var uri = Uri.parse('http://example.com');
+  /// print(uri.isScheme('HTTP')); // true
+  ///
+  /// final uriNoScheme = Uri(host: 'example.com');
+  /// print(uriNoScheme.isScheme('HTTP')); // false
   /// ```
   ///
-  /// A `null` or empty [scheme] string matches a URI with no scheme
+  /// An empty [scheme] string matches a URI with no scheme
   /// (one where [hasScheme] returns false).
   bool isScheme(String scheme);
 
-  /**
-   * Returns the file path from a file URI.
-   *
-   * The returned path has either Windows or non-Windows
-   * semantics.
-   *
-   * For non-Windows semantics the slash ("/") is used to separate
-   * path segments.
-   *
-   * For Windows semantics the backslash ("\\") separator is used to
-   * separate path segments.
-   *
-   * If the URI is absolute the path starts with a path separator
-   * unless Windows semantics is used and the first path segment is a
-   * drive letter. When Windows semantics is used a host component in
-   * the uri in interpreted as a file server and a UNC path is
-   * returned.
-   *
-   * The default for whether to use Windows or non-Windows semantics
-   * determined from the platform Dart is running on. When running in
-   * the standalone VM this is detected by the VM based on the
-   * operating system. When running in a browser non-Windows semantics
-   * is always used.
-   *
-   * To override the automatic detection of which semantics to use pass
-   * a value for [windows]. Passing `true` will use Windows
-   * semantics and passing `false` will use non-Windows semantics.
-   *
-   * If the URI ends with a slash (i.e. the last path component is
-   * empty) the returned file path will also end with a slash.
-   *
-   * With Windows semantics URIs starting with a drive letter cannot
-   * be relative to the current drive on the designated drive. That is
-   * for the URI `file:///c:abc` calling `toFilePath` will throw as a
-   * path segment cannot contain colon on Windows.
-   *
-   * Examples using non-Windows semantics (resulting of calling
-   * toFilePath in comment):
-   *
-   *     Uri.parse("xxx/yyy");  // xxx/yyy
-   *     Uri.parse("xxx/yyy/");  // xxx/yyy/
-   *     Uri.parse("file:///xxx/yyy");  // /xxx/yyy
-   *     Uri.parse("file:///xxx/yyy/");  // /xxx/yyy/
-   *     Uri.parse("file:///C:");  // /C:
-   *     Uri.parse("file:///C:a");  // /C:a
-   *
-   * Examples using Windows semantics (resulting URI in comment):
-   *
-   *     Uri.parse("xxx/yyy");  // xxx\yyy
-   *     Uri.parse("xxx/yyy/");  // xxx\yyy\
-   *     Uri.parse("file:///xxx/yyy");  // \xxx\yyy
-   *     Uri.parse("file:///xxx/yyy/");  // \xxx\yyy\
-   *     Uri.parse("file:///C:/xxx/yyy");  // C:\xxx\yyy
-   *     Uri.parse("file:C:xxx/yyy");  // Throws as a path segment
-   *                                   // cannot contain colon on Windows.
-   *     Uri.parse("file://server/share/file");  // \\server\share\file
-   *
-   * If the URI is not a file URI calling this throws
-   * [UnsupportedError].
-   *
-   * If the URI cannot be converted to a file path calling this throws
-   * [UnsupportedError].
-   */
+  /// Creates a file path from a file URI.
+  ///
+  /// The returned path has either Windows or non-Windows
+  /// semantics.
+  ///
+  /// For non-Windows semantics, the slash ("/") is used to separate
+  /// path segments.
+  ///
+  /// For Windows semantics, the backslash ("\\") separator is used to
+  /// separate path segments.
+  ///
+  /// If the URI is absolute, the path starts with a path separator
+  /// unless Windows semantics is used and the first path segment is a
+  /// drive letter. When Windows semantics is used, a host component in
+  /// the uri in interpreted as a file server and a UNC path is
+  /// returned.
+  ///
+  /// The default for whether to use Windows or non-Windows semantics
+  /// is determined from the platform Dart is running on. When running in
+  /// the standalone VM, this is detected by the VM based on the
+  /// operating system. When running in a browser, non-Windows semantics
+  /// is always used.
+  ///
+  /// To override the automatic detection of which semantics to use pass
+  /// a value for [windows]. Passing `true` will use Windows
+  /// semantics and passing `false` will use non-Windows semantics.
+  ///
+  /// If the URI ends with a slash (i.e. the last path component is
+  /// empty), the returned file path will also end with a slash.
+  ///
+  /// With Windows semantics, URIs starting with a drive letter cannot
+  /// be relative to the current drive on the designated drive. That is,
+  /// for the URI `file:///c:abc` calling `toFilePath` will throw as a
+  /// path segment cannot contain colon on Windows.
+  ///
+  /// Examples using non-Windows semantics (resulting of calling
+  /// toFilePath in comment):
+  /// ```dart
+  /// Uri.parse("xxx/yyy");  // xxx/yyy
+  /// Uri.parse("xxx/yyy/");  // xxx/yyy/
+  /// Uri.parse("file:///xxx/yyy");  // /xxx/yyy
+  /// Uri.parse("file:///xxx/yyy/");  // /xxx/yyy/
+  /// Uri.parse("file:///C:");  // /C:
+  /// Uri.parse("file:///C:a");  // /C:a
+  /// ```
+  /// Examples using Windows semantics (resulting URI in comment):
+  /// ```dart
+  /// Uri.parse("xxx/yyy");  // xxx\yyy
+  /// Uri.parse("xxx/yyy/");  // xxx\yyy\
+  /// Uri.parse("file:///xxx/yyy");  // \xxx\yyy
+  /// Uri.parse("file:///xxx/yyy/");  // \xxx\yyy\
+  /// Uri.parse("file:///C:/xxx/yyy");  // C:\xxx\yyy
+  /// Uri.parse("file:C:xxx/yyy");  // Throws as a path segment
+  ///                               // cannot contain colon on Windows.
+  /// Uri.parse("file://server/share/file");  // \\server\share\file
+  /// ```
+  /// If the URI is not a file URI, calling this throws
+  /// [UnsupportedError].
+  ///
+  /// If the URI cannot be converted to a file path, calling this throws
+  /// [UnsupportedError].
   // TODO(lrn): Deprecate and move functionality to File class or similar.
   // The core libraries should not worry about the platform.
-  String toFilePath({bool windows});
+  String toFilePath({bool? windows});
 
-  /**
-   * Access the structure of a `data:` URI.
-   *
-   * Returns a [UriData] object for `data:` URIs and `null` for all other
-   * URIs.
-   * The [UriData] object can be used to access the media type and data
-   * of a `data:` URI.
-   */
-  UriData get data;
+  /// Access the structure of a `data:` URI.
+  ///
+  /// Returns a [UriData] object for `data:` URIs and `null` for all other
+  /// URIs.
+  /// The [UriData] object can be used to access the media type and data
+  /// of a `data:` URI.
+  UriData? get data;
 
   /// Returns a hash code computed as `toString().hashCode`.
   ///
-  /// This guarantees that URIs with the same normalized
+  /// This guarantees that URIs with the same normalized string representation
+  /// have the same hash code.
   int get hashCode;
 
   /// A URI is equal to another URI with the same normalized representation.
   bool operator ==(Object other);
 
-  /// Returns the normalized string representation of the URI.
+  /// The normalized string representation of the URI.
   String toString();
 
-  /**
-   * Returns a new `Uri` based on this one, but with some parts replaced.
-   *
-   * This method takes the same parameters as the [new Uri] constructor,
-   * and they have the same meaning.
-   *
-   * At most one of [path] and [pathSegments] must be provided.
-   * Likewise, at most one of [query] and [queryParameters] must be provided.
-   *
-   * Each part that is not provided will default to the corresponding
-   * value from this `Uri` instead.
-   *
-   * This method is different from [Uri.resolve] which overrides in a
-   * hierarchical manner,
-   * and can instead replace each part of a `Uri` individually.
-   *
-   * Example:
-   *
-   *     Uri uri1 = Uri.parse("a://b@c:4/d/e?f#g");
-   *     Uri uri2 = uri1.replace(scheme: "A", path: "D/E/E", fragment: "G");
-   *     print(uri2);  // prints "a://b@c:4/D/E/E?f#G"
-   *
-   * This method acts similarly to using the `new Uri` constructor with
-   * some of the arguments taken from this `Uri`. Example:
-   *
-   *     Uri uri3 = new Uri(
-   *         scheme: "A",
-   *         userInfo: uri1.userInfo,
-   *         host: uri1.host,
-   *         port: uri1.port,
-   *         path: "D/E/E",
-   *         query: uri1.query,
-   *         fragment: "G");
-   *     print(uri3);  // prints "a://b@c:4/D/E/E?f#G"
-   *     print(uri2 == uri3);  // prints true.
-   *
-   * Using this method can be seen as a shorthand for the `Uri` constructor
-   * call above, but may also be slightly faster because the parts taken
-   * from this `Uri` need not be checked for validity again.
-   */
+  /// Creates a new `Uri` based on this one, but with some parts replaced.
+  ///
+  /// This method takes the same parameters as the [Uri] constructor,
+  /// and they have the same meaning.
+  ///
+  /// At most one of [path] and [pathSegments] must be provided.
+  /// Likewise, at most one of [query] and [queryParameters] must be provided.
+  ///
+  /// Each part that is not provided will default to the corresponding
+  /// value from this `Uri` instead.
+  ///
+  /// This method is different from [Uri.resolve], which overrides in a
+  /// hierarchical manner,
+  /// and can instead replace each part of a `Uri` individually.
+  ///
+  /// Example:
+  /// ```dart
+  /// final uri1 = Uri.parse(
+  ///     'http://dart.dev/guides/libraries/library-tour#utility-classes');
+  ///
+  /// final uri2 = uri1.replace(
+  ///     scheme: 'https',
+  ///     path: 'guides/libraries/library-tour',
+  ///     fragment: 'uris');
+  /// print(uri2); // https://dart.dev/guides/libraries/library-tour#uris
+  /// ```
+  /// This method acts similarly to using the `Uri` constructor with
+  /// some of the arguments taken from this `Uri`. Example:
+  /// ``` dart continued
+  /// final Uri uri3 = Uri(
+  ///     scheme: 'https',
+  ///     userInfo: uri1.userInfo,
+  ///     host: uri1.host,
+  ///     port: uri2.port,
+  ///     path: '/guides/language/language-tour',
+  ///     query: uri1.query,
+  ///     fragment: null);
+  /// print(uri3); // https://dart.dev/guides/language/language-tour
+  /// ```
+  /// Using this method can be seen as shorthand for the `Uri` constructor
+  /// call above, but may also be slightly faster because the parts taken
+  /// from this `Uri` need not be checked for validity again.
   Uri replace(
-      {String scheme,
-      String userInfo,
-      String host,
-      int port,
-      String path,
-      Iterable<String> pathSegments,
-      String query,
-      Map<String, dynamic /*String|Iterable<String>*/ > queryParameters,
-      String fragment});
+      {String? scheme,
+      String? userInfo,
+      String? host,
+      int? port,
+      String? path,
+      Iterable<String>? pathSegments,
+      String? query,
+      Map<String, dynamic /*String|Iterable<String>*/ >? queryParameters,
+      String? fragment});
 
-  /**
-   * Returns a `Uri` that differs from this only in not having a fragment.
-   *
-   * If this `Uri` does not have a fragment, it is itself returned.
-   */
+  /// Creates a `Uri` that differs from this only in not having a fragment.
+  ///
+  /// If this `Uri` does not have a fragment, it is itself returned.
+  ///
+  /// Example:
+  /// ```dart
+  /// final uri =
+  ///     Uri.parse('https://example.org:8080/foo/bar#frag').removeFragment();
+  /// print(uri); // https://example.org:8080/foo/bar
+  /// ```
   Uri removeFragment();
 
-  /**
-   * Resolve [reference] as an URI relative to `this`.
-   *
-   * First turn [reference] into a URI using [Uri.parse]. Then resolve the
-   * resulting URI relative to `this`.
-   *
-   * Returns the resolved URI.
-   *
-   * See [resolveUri] for details.
-   */
+  /// Resolve [reference] as an URI relative to `this`.
+  ///
+  /// First turn [reference] into a URI using [Uri.parse]. Then resolve the
+  /// resulting URI relative to `this`.
+  ///
+  /// Returns the resolved URI.
+  ///
+  /// See [resolveUri] for details.
   Uri resolve(String reference);
 
-  /**
-   * Resolve [reference] as an URI relative to `this`.
-   *
-   * Returns the resolved URI.
-   *
-   * The algorithm "Transform Reference" for resolving a reference is described
-   * in [RFC-3986 Section 5](http://tools.ietf.org/html/rfc3986#section-5 "RFC-1123").
-   *
-   * Updated to handle the case where the base URI is just a relative path -
-   * that is: when it has no scheme and no authority and the path does not start
-   * with a slash.
-   * In that case, the paths are combined without removing leading "..", and
-   * an empty path is not converted to "/".
-   */
+  /// Resolve [reference] as a URI relative to `this`.
+  ///
+  /// Returns the resolved URI.
+  ///
+  /// The algorithm "Transform Reference" for resolving a reference is described
+  /// in [RFC-3986 Section 5](https://tools.ietf.org/html/rfc3986#section-5
+  /// "RFC-1123").
+  ///
+  /// Updated to handle the case where the base URI is just a relative path -
+  /// that is: when it has no scheme and no authority and the path does not
+  /// start with a slash.
+  /// In that case, the paths are combined without removing leading "..", and
+  /// an empty path is not converted to "/".
   Uri resolveUri(Uri reference);
 
-  /**
-   * Returns a URI where the path has been normalized.
-   *
-   * A normalized path does not contain `.` segments or non-leading `..`
-   * segments.
-   * Only a relative path with no scheme or authority may contain
-   * leading `..` segments,
-   * a path that starts with `/` will also drop any leading `..` segments.
-   *
-   * This uses the same normalization strategy as `new Uri().resolve(this)`.
-   *
-   * Does not change any part of the URI except the path.
-   *
-   * The default implementation of `Uri` always normalizes paths, so calling
-   * this function has no effect.
-   */
+  /// Returns a URI where the path has been normalized.
+  ///
+  /// A normalized path does not contain `.` segments or non-leading `..`
+  /// segments.
+  /// Only a relative path with no scheme or authority may contain
+  /// leading `..` segments;
+  /// a path that starts with `/` will also drop any leading `..` segments.
+  ///
+  /// This uses the same normalization strategy as `Uri().resolve(this)`.
+  ///
+  /// Does not change any part of the URI except the path.
+  ///
+  /// The default implementation of `Uri` always normalizes paths, so calling
+  /// this function has no effect.
   Uri normalizePath();
 
-  /**
-   * Creates a new `Uri` object by parsing a URI string.
-   *
-   * If [start] and [end] are provided, only the substring from `start`
-   * to `end` is parsed as a URI.
-   *
-   * If the string is not valid as a URI or URI reference,
-   * a [FormatException] is thrown.
-   */
-  static Uri parse(String uri, [int start = 0, int end]) {
+  /// Creates a new `Uri` object by parsing a URI string.
+  ///
+  /// If [start] and [end] are provided, they must specify a valid substring
+  /// of [uri], and only the substring from `start` to `end` is parsed as a URI.
+  ///
+  /// If the [uri] string is not valid as a URI or URI reference,
+  /// a [FormatException] is thrown.
+  ///
+  /// Example:
+  /// ```dart
+  /// final uri =
+  ///     Uri.parse('https://example.com/api/fetch?limit=10,20,30&max=100');
+  /// print(uri); // https://example.com/api/fetch?limit=10,20,30&max=100
+  ///
+  /// Uri.parse('::Not valid URI::'); // Throws FormatException.
+  /// ```
+  static Uri parse(String uri, [int start = 0, int? end]) {
     // This parsing will not validate percent-encoding, IPv6, etc.
     // When done splitting into parts, it will call, e.g., [_makeFragment]
     // to do the final parsing.
@@ -760,6 +862,9 @@ abstract class Uri {
     // authority     = [ userinfo "@" ] host [ ":" port ]
     // userinfo      = *( unreserved / pct-encoded / sub-delims / ":" )
     // host          = IP-literal / IPv4address / reg-name
+    // IP-literal    = "[" ( IPv6address / IPv6addrz / IPvFuture ) "]"
+    // IPv6addrz     = IPv6address "%25" ZoneID
+    // ZoneID        = 1*( unreserved / pct-encoded )
     // port          = *DIGIT
     // reg-name      = *( unreserved / pct-encoded / sub-delims )
     //
@@ -803,7 +908,7 @@ abstract class Uri {
     // The following index-normalization belongs with the scanning, but is
     // easier to do here because we already have extracted variables from the
     // indices list.
-    var indices = new List<int>(8);
+    var indices = List<int>.filled(8, 0, growable: false);
 
     // Set default values for each position.
     // The value will either be correct in some cases where it isn't set
@@ -845,15 +950,21 @@ abstract class Uri {
     int queryStart = indices[_queryStartIndex];
     int fragmentStart = indices[_fragmentStartIndex];
 
-    // We may discover scheme while handling special cases.
-    String scheme;
+    // We may discover the scheme while handling special cases.
+    String? scheme;
 
     // Derive some positions that weren't set to normalize the indices.
-    // If pathStart isn't set (it's before scheme end or host start), then
-    // the path is empty.
     if (fragmentStart < queryStart) queryStart = fragmentStart;
-    if (pathStart < hostStart || pathStart <= schemeEnd) {
+    // If pathStart isn't set (it's before scheme end or host start), then
+    // the path is empty, or there is no authority part and the path
+    // starts with a non-simple character.
+    if (pathStart < hostStart) {
+      // There is an authority, but no path. The path would start with `/`
+      // if it was there.
       pathStart = queryStart;
+    } else if (pathStart <= schemeEnd) {
+      // There is a scheme, but no authority.
+      pathStart = schemeEnd + 1;
     }
     // If there is an authority with no port, set the port position
     // to be at the end of the authority (equal to pathStart).
@@ -1005,40 +1116,71 @@ abstract class Uri {
         queryStart -= start;
         fragmentStart -= start;
       }
-      return new _SimpleUri(uri, schemeEnd, hostStart, portStart, pathStart,
+      return _SimpleUri(uri, schemeEnd, hostStart, portStart, pathStart,
           queryStart, fragmentStart, scheme);
     }
 
-    return new _Uri.notSimple(uri, start, end, schemeEnd, hostStart, portStart,
+    return _Uri.notSimple(uri, start, end, schemeEnd, hostStart, portStart,
         pathStart, queryStart, fragmentStart, scheme);
   }
 
-  /**
-   * Encode the string [component] using percent-encoding to make it
-   * safe for literal use as a URI component.
-   *
-   * All characters except uppercase and lowercase letters, digits and
-   * the characters `-_.!~*'()` are percent-encoded. This is the
-   * set of characters specified in RFC 2396 and the which is
-   * specified for the encodeUriComponent in ECMA-262 version 5.1.
-   *
-   * When manually encoding path segments or query components remember
-   * to encode each part separately before building the path or query
-   * string.
-   *
-   * For encoding the query part consider using
-   * [encodeQueryComponent].
-   *
-   * To avoid the need for explicitly encoding use the [pathSegments]
-   * and [queryParameters] optional named arguments when constructing
-   * a [Uri].
-   */
+  /// Creates a new `Uri` object by parsing a URI string.
+  ///
+  /// If [start] and [end] are provided, they must specify a valid substring
+  /// of [uri], and only the substring from `start` to `end` is parsed as a URI.
+  ///
+  /// Returns `null` if the [uri] string is not valid as a URI or URI reference.
+  ///
+  /// Example:
+  /// ```dart
+  /// final uri = Uri.tryParse(
+  ///     'https://dart.dev/guides/libraries/library-tour#utility-classes', 0,
+  ///     16);
+  /// print(uri); // https://dart.dev
+  ///
+  /// var notUri = Uri.tryParse('::Not valid URI::');
+  /// print(notUri); // null
+  /// ```
+  static Uri? tryParse(String uri, [int start = 0, int? end]) {
+    // TODO: Optimize to avoid throwing-and-recatching.
+    try {
+      return parse(uri, start, end);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Encode the string [component] using percent-encoding to make it
+  /// safe for literal use as a URI component.
+  ///
+  /// All characters except uppercase and lowercase letters, digits and
+  /// the characters `-_.!~*'()` are percent-encoded. This is the
+  /// set of characters specified in RFC 2396 and which is
+  /// specified for the encodeUriComponent in ECMA-262 version 5.1.
+  ///
+  /// When manually encoding path segments or query components, remember
+  /// to encode each part separately before building the path or query
+  /// string.
+  ///
+  /// For encoding the query part consider using
+  /// [encodeQueryComponent].
+  ///
+  /// To avoid the need for explicitly encoding, use the [pathSegments]
+  /// and [queryParameters] optional named arguments when constructing
+  /// a [Uri].
+  ///
+  /// Example:
+  /// ```dart
+  /// const request = 'http://example.com/search=Dart';
+  /// final encoded = Uri.encodeComponent(request);
+  /// print(encoded); // http%3A%2F%2Fexample.com%2Fsearch%3DDart
+  /// ```
   static String encodeComponent(String component) {
-    return _Uri._uriEncode(_Uri._unreserved2396Table, component, UTF8, false);
+    return _Uri._uriEncode(_Uri._unreserved2396Table, component, utf8, false);
   }
 
   /**
-   * Encode the string [component] according to the HTML 4.01 rules
+   * Encodes the string [component] according to the HTML 4.01 rules
    * for encoding the posting of a HTML form as a query string
    * component.
    *
@@ -1047,7 +1189,7 @@ abstract class Uri {
    * component.
 
    * The component is first encoded to bytes using [encoding].
-   * The default is to use [UTF8] encoding, which preserves all
+   * The default is to use [utf8] encoding, which preserves all
    * the characters that don't need encoding.
 
    * Then the resulting bytes are "percent-encoded". This transforms
@@ -1067,86 +1209,108 @@ abstract class Uri {
    * [queryParameters] optional named arguments when constructing a
    * [Uri].
    *
-   * See http://www.w3.org/TR/html401/interact/forms.html#h-17.13.4.2 for more
+   * See https://www.w3.org/TR/html401/interact/forms.html#h-17.13.4.2 for more
    * details.
    */
   static String encodeQueryComponent(String component,
-      {Encoding encoding: UTF8}) {
+      {Encoding encoding = utf8}) {
     return _Uri._uriEncode(_Uri._unreservedTable, component, encoding, true);
   }
 
-  /**
-   * Decodes the percent-encoding in [encodedComponent].
-   *
-   * Note that decoding a URI component might change its meaning as
-   * some of the decoded characters could be characters with are
-   * delimiters for a given URI component type. Always split a URI
-   * component using the delimiters for the component before decoding
-   * the individual parts.
-   *
-   * For handling the [path] and [query] components consider using
-   * [pathSegments] and [queryParameters] to get the separated and
-   * decoded component.
-   */
+  /// Decodes the percent-encoding in [encodedComponent].
+  ///
+  /// Note that decoding a URI component might change its meaning as
+  /// some of the decoded characters could be characters which are
+  /// delimiters for a given URI component type. Always split a URI
+  /// component using the delimiters for the component before decoding
+  /// the individual parts.
+  ///
+  /// For handling the [path] and [query] components, consider using
+  /// [pathSegments] and [queryParameters] to get the separated and
+  /// decoded component.
+  ///
+  /// Example:
+  /// ```dart
+  /// final decoded =
+  ///     Uri.decodeComponent('http%3A%2F%2Fexample.com%2Fsearch%3DDart');
+  /// print(decoded); // http://example.com/search=Dart
+  /// ```
   static String decodeComponent(String encodedComponent) {
     return _Uri._uriDecode(
-        encodedComponent, 0, encodedComponent.length, UTF8, false);
+        encodedComponent, 0, encodedComponent.length, utf8, false);
   }
 
-  /**
-   * Decodes the percent-encoding in [encodedComponent], converting
-   * pluses to spaces.
-   *
-   * It will create a byte-list of the decoded characters, and then use
-   * [encoding] to decode the byte-list to a String. The default encoding is
-   * UTF-8.
-   */
+  /// Decodes the percent-encoding in [encodedComponent], converting
+  /// pluses to spaces.
+  ///
+  /// It will create a byte-list of the decoded characters, and then use
+  /// [encoding] to decode the byte-list to a String. The default encoding is
+  /// UTF-8.
   static String decodeQueryComponent(String encodedComponent,
-      {Encoding encoding: UTF8}) {
+      {Encoding encoding = utf8}) {
     return _Uri._uriDecode(
         encodedComponent, 0, encodedComponent.length, encoding, true);
   }
 
-  /**
-   * Encode the string [uri] using percent-encoding to make it
-   * safe for literal use as a full URI.
-   *
-   * All characters except uppercase and lowercase letters, digits and
-   * the characters `!#$&'()*+,-./:;=?@_~` are percent-encoded. This
-   * is the set of characters specified in in ECMA-262 version 5.1 for
-   * the encodeURI function .
-   */
+  /// Encodes the string [uri] using percent-encoding to make it
+  /// safe for literal use as a full URI.
+  ///
+  /// All characters except uppercase and lowercase letters, digits and
+  /// the characters `!#$&'()*+,-./:;=?@_~` are percent-encoded. This
+  /// is the set of characters specified in in ECMA-262 version 5.1 for
+  /// the encodeURI function.
+  ///
+  /// Example:
+  /// ```dart
+  /// final encoded =
+  ///     Uri.encodeFull('https://example.com/api/query?search= dart is');
+  /// print(encoded); // https://example.com/api/query?search=%20dart%20is
+  /// ```
   static String encodeFull(String uri) {
-    return _Uri._uriEncode(_Uri._encodeFullTable, uri, UTF8, false);
+    return _Uri._uriEncode(_Uri._encodeFullTable, uri, utf8, false);
   }
 
-  /**
-   * Decodes the percent-encoding in [uri].
-   *
-   * Note that decoding a full URI might change its meaning as some of
-   * the decoded characters could be reserved characters. In most
-   * cases an encoded URI should be parsed into components using
-   * [Uri.parse] before decoding the separate components.
-   */
+  /// Decodes the percent-encoding in [uri].
+  ///
+  /// Note that decoding a full URI might change its meaning as some of
+  /// the decoded characters could be reserved characters. In most
+  /// cases, an encoded URI should be parsed into components using
+  /// [Uri.parse] before decoding the separate components.
+  ///
+  /// Example:
+  /// ```dart
+  /// final decoded =
+  ///     Uri.decodeFull('https://example.com/api/query?search=%20dart%20is');
+  /// print(decoded); // https://example.com/api/query?search= dart is
+  /// ```
   static String decodeFull(String uri) {
-    return _Uri._uriDecode(uri, 0, uri.length, UTF8, false);
+    return _Uri._uriDecode(uri, 0, uri.length, utf8, false);
   }
 
-  /**
-   * Returns the [query] split into a map according to the rules
-   * specified for FORM post in the [HTML 4.01 specification section
-   * 17.13.4](http://www.w3.org/TR/REC-html40/interact/forms.html#h-17.13.4 "HTML 4.01 section 17.13.4").
-   * Each key and value in the returned map has been decoded. If the [query]
-   * is the empty string an empty map is returned.
-   *
-   * Keys in the query string that have no value are mapped to the
-   * empty string.
-   *
-   * Each query component will be decoded using [encoding]. The default encoding
-   * is UTF-8.
-   */
+  /// Splits the [query] into a map according to the rules
+  /// specified for FORM post in the [HTML 4.01 specification section
+  /// 17.13.4](https://www.w3.org/TR/REC-html40/interact/forms.html#h-17.13.4
+  /// "HTML 4.01 section 17.13.4").
+  ///
+  /// Each key and value in the returned map has been decoded. If the [query]
+  /// is the empty string, an empty map is returned.
+  ///
+  /// Keys in the query string that have no value are mapped to the
+  /// empty string.
+  ///
+  /// Each query component will be decoded using [encoding]. The default
+  /// encoding is UTF-8.
+  ///
+  /// Example:
+  /// ```dart import:convert
+  /// final queryStringMap =
+  ///     Uri.splitQueryString('limit=10&max=100&search=Dart%20is%20fun');
+  /// print(jsonEncode(queryStringMap));
+  /// // {"limit":"10","max":"100","search":"Dart is fun"}
+  ///
+  /// ```
   static Map<String, String> splitQueryString(String query,
-      {Encoding encoding: UTF8}) {
+      {Encoding encoding = utf8}) {
     return query.split("&").fold({}, (map, element) {
       int index = element.indexOf("=");
       if (index == -1) {
@@ -1163,23 +1327,21 @@ abstract class Uri {
     });
   }
 
-  /**
-   * Parse the [host] as an IP version 4 (IPv4) address, returning the address
-   * as a list of 4 bytes in network byte order (big endian).
-   *
-   * Throws a [FormatException] if [host] is not a valid IPv4 address
-   * representation.
-   */
+  /// Parses the [host] as an IP version 4 (IPv4) address, returning the address
+  /// as a list of 4 bytes in network byte order (big endian).
+  ///
+  /// Throws a [FormatException] if [host] is not a valid IPv4 address
+  /// representation.
   static List<int> parseIPv4Address(String host) =>
       _parseIPv4Address(host, 0, host.length);
 
   /// Implementation of [parseIPv4Address] that can work on a substring.
   static List<int> _parseIPv4Address(String host, int start, int end) {
     void error(String msg, int position) {
-      throw new FormatException('Illegal IPv4 address, $msg', host, position);
+      throw FormatException('Illegal IPv4 address, $msg', host, position);
     }
 
-    var result = new Uint8List(4);
+    var result = Uint8List(4);
     int partIndex = 0;
     int partStart = start;
     for (int i = start; i < end; i++) {
@@ -1215,25 +1377,25 @@ abstract class Uri {
     return result;
   }
 
-  /**
-   * Parse the [host] as an IP version 6 (IPv6) address, returning the address
-   * as a list of 16 bytes in network byte order (big endian).
-   *
-   * Throws a [FormatException] if [host] is not a valid IPv6 address
-   * representation.
-   *
-   * Acts on the substring from [start] to [end]. If [end] is omitted, it
-   * defaults ot the end of the string.
-   *
-   * Some examples of IPv6 addresses:
-   *  * ::1
-   *  * FEDC:BA98:7654:3210:FEDC:BA98:7654:3210
-   *  * 3ffe:2a00:100:7031::1
-   *  * ::FFFF:129.144.52.38
-   *  * 2010:836B:4179::836B:4179
-   */
-  static List<int> parseIPv6Address(String host, [int start = 0, int end]) {
-    if (end == null) end = host.length;
+  /// Parses the [host] as an IP version 6 (IPv6) address.
+  ///
+  /// Returns the address as a list of 16 bytes in network byte order
+  /// (big endian).
+  ///
+  /// Throws a [FormatException] if [host] is not a valid IPv6 address
+  /// representation.
+  ///
+  /// Acts on the substring from [start] to [end]. If [end] is omitted, it
+  /// defaults to the end of the string.
+  ///
+  /// Some examples of IPv6 addresses:
+  ///  * `::1`
+  ///  * `FEDC:BA98:7654:3210:FEDC:BA98:7654:3210`
+  ///  * `3ffe:2a00:100:7031::1`
+  ///  * `::FFFF:129.144.52.38`
+  ///  * `2010:836B:4179::836B:4179`
+  static List<int> parseIPv6Address(String host, [int start = 0, int? end]) {
+    end ??= host.length;
     // An IPv6 address consists of exactly 8 parts of 1-4 hex digits, separated
     // by `:`'s, with the following exceptions:
     //
@@ -1242,8 +1404,8 @@ abstract class Uri {
     //  - The last two parts may be replaced by an IPv4 "dotted-quad" address.
 
     // Helper function for reporting a badly formatted IPv6 address.
-    void error(String msg, [position]) {
-      throw new FormatException('Illegal IPv6 address, $msg', host, position);
+    void error(String msg, int? position) {
+      throw FormatException('Illegal IPv6 address, $msg', host, position);
     }
 
     // Parse a hex block.
@@ -1258,7 +1420,7 @@ abstract class Uri {
       return value;
     }
 
-    if (host.length < 2) error('address is too short');
+    if (host.length < 2) error('address is too short', null);
     List<int> parts = [];
     bool wildcardSeen = false;
     // Set if seeing a ".", suggesting that there is an IPv4 address.
@@ -1292,7 +1454,7 @@ abstract class Uri {
         seenDot = true;
       }
     }
-    if (parts.length == 0) error('too few parts');
+    if (parts.length == 0) error('too few parts', null);
     bool atEnd = (partStart == end);
     bool isLastWildcard = (parts.last == -1);
     if (atEnd && !isLastWildcard) {
@@ -1309,12 +1471,12 @@ abstract class Uri {
     }
     if (wildcardSeen) {
       if (parts.length > 7) {
-        error('an address with a wildcard must have less than 7 parts');
+        error('an address with a wildcard must have less than 7 parts', null);
       }
     } else if (parts.length != 8) {
-      error('an address without a wildcard must contain exactly 8 parts');
+      error('an address without a wildcard must contain exactly 8 parts', null);
     }
-    List<int> bytes = new Uint8List(16);
+    List<int> bytes = Uint8List(16);
     for (int i = 0, index = 0; i < parts.length; i++) {
       int value = parts[i];
       if (value == -1) {
@@ -1339,77 +1501,63 @@ class _Uri implements Uri {
   // A valid scheme cannot be empty.
   final String scheme;
 
-  /**
-   * The user-info part of the authority.
-   *
-   * Does not distinguish between an empty user-info and an absent one.
-   * The value is always non-null.
-   * Is considered absent if [_host] is `null`.
-   */
+  /// The user-info part of the authority.
+  ///
+  /// Does not distinguish between an empty user-info and an absent one.
+  /// The value is always non-null.
+  /// Is considered absent if [_host] is `null`.
   final String _userInfo;
 
-  /**
-   * The host name of the URI.
-   *
-   * Set to `null` if there is no authority in the URI.
-   * The host name is the only mandatory part of an authority, so we use
-   * it to mark whether an authority part was present or not.
-   */
-  final String _host;
+  /// The host name of the URI.
+  ///
+  /// Set to `null` if there is no authority in the URI.
+  /// The host name is the only mandatory part of an authority, so we use
+  /// it to mark whether an authority part was present or not.
+  final String? _host;
 
-  /**
-   * The port number part of the authority.
-   *
-   * The port. Set to null if there is no port. Normalized to null if
-   * the port is the default port for the scheme.
-   */
-  int _port;
+  /// The port number part of the authority.
+  ///
+  /// The port. Set to null if there is no port. Normalized to null if
+  /// the port is the default port for the scheme.
+  int? _port;
 
-  /**
-   * The path of the URI.
-   *
-   * Always non-null.
-   */
+  /// The path of the URI.
+  ///
+  /// Always non-null.
   final String path;
 
-  // The query content, or null if there is no query.
-  final String _query;
+  /// The query content, or null if there is no query.
+  final String? _query;
 
   // The fragment content, or null if there is no fragment.
-  final String _fragment;
+  final String? _fragment;
 
-  /**
-   * Cache the computed return value of [pathSegments].
-   */
-  List<String> _pathSegments;
+  /// Cache of the full normalized text representation of the URI.
+  late final String _text = this._initializeText();
 
-  /**
-   * Cache of the full normalized text representation of the URI.
-   */
-  String _text;
+  /// Cache of the list of path segments.
+  late final List<String> pathSegments = _computePathSegments(this.path);
 
-  /**
-   * Cache of the hashCode of [_text].
-   *
-   * Is null until computed.
-   */
-  int _hashCodeCache;
+  /// Lazily computed and cached hashCode of [_text].
+  late final int hashCode = this._text.hashCode;
 
-  /**
-   * Cache the computed return value of [queryParameters].
-   */
-  Map<String, String> _queryParameters;
-  Map<String, List<String>> _queryParameterLists;
+  /// Cache the computed return value of [queryParameters].
+  late final Map<String, String> queryParameters =
+      UnmodifiableMapView<String, String>(Uri.splitQueryString(this.query));
+
+  /// Cache the computed return value of [queryParametersAll].
+  late final Map<String, List<String>> queryParametersAll =
+      _computeQueryParametersAll(this.query);
 
   /// Internal non-verifying constructor. Only call with validated arguments.
   ///
   /// The components must be properly normalized.
   ///
   /// Use `null` for [_host] if there is no authority. In that case, always
-  /// pass `null` for [_port] and [_userInfo] as well.
+  /// pass `null` for [_port] and an empty string for [_userInfo] as well.
   ///
-  /// Use `null` for [_port], [_userInfo], [_query] and [_fragment] if there is
-  /// component of that type.
+  /// Use `null` for [_port], [_query] and [_fragment] if there is
+  /// component of that type, and empty string for [_userInfo].
   ///
   /// The [path] and [scheme] are never empty.
   _Uri._internal(this.scheme, this._userInfo, this._host, this._port, this.path,
@@ -1430,7 +1578,7 @@ class _Uri implements Uri {
       int pathStart,
       int queryStart,
       int fragmentStart,
-      String scheme) {
+      String? scheme) {
     if (scheme == null) {
       scheme = "";
       if (schemeEnd > start) {
@@ -1440,8 +1588,8 @@ class _Uri implements Uri {
       }
     }
     String userInfo = "";
-    String host;
-    int port;
+    String? host;
+    int? port;
     if (hostStart > start) {
       int userInfoStart = schemeEnd + 3;
       if (userInfoStart < hostStart) {
@@ -1449,40 +1597,46 @@ class _Uri implements Uri {
       }
       host = _makeHost(uri, hostStart, portStart, false);
       if (portStart + 1 < pathStart) {
-        // Should throw because invalid.
-        port = int.parse(uri.substring(portStart + 1, pathStart), onError: (_) {
-          throw new FormatException("Invalid port", uri, portStart + 1);
-        });
-        port = _makePort(port, scheme);
+        int portNumber =
+            int.tryParse(uri.substring(portStart + 1, pathStart)) ??
+                (throw FormatException("Invalid port", uri, portStart + 1));
+        port = _makePort(portNumber, scheme);
       }
     }
     String path =
         _makePath(uri, pathStart, queryStart, null, scheme, host != null);
-    String query;
+    String? query;
     if (queryStart < fragmentStart) {
       query = _makeQuery(uri, queryStart + 1, fragmentStart, null);
     }
-    String fragment;
+    String? fragment;
     if (fragmentStart < end) {
       fragment = _makeFragment(uri, fragmentStart + 1, end);
     }
-    return new _Uri._internal(
-        scheme, userInfo, host, port, path, query, fragment);
+    return _Uri._internal(scheme, userInfo, host, port, path, query, fragment);
   }
 
   /// Implementation of [Uri.Uri].
   factory _Uri(
-      {String scheme,
-      String userInfo,
-      String host,
-      int port,
-      String path,
-      Iterable<String> pathSegments,
-      String query,
-      Map<String, dynamic /*String|Iterable<String>*/ > queryParameters,
-      String fragment}) {
-    scheme = _makeScheme(scheme, 0, _stringOrNullLength(scheme));
+      {String? scheme,
+      String? userInfo,
+      String? host,
+      int? port,
+      String? path,
+      Iterable<String>? pathSegments,
+      String? query,
+      Map<String, dynamic /*String|Iterable<String>*/ >? queryParameters,
+      String? fragment}) {
+    if (scheme == null) {
+      scheme = "";
+    } else {
+      scheme = _makeScheme(scheme, 0, scheme.length);
+    }
     userInfo = _makeUserInfo(userInfo, 0, _stringOrNullLength(userInfo));
+    if (userInfo == null) {
+      // TODO(dart-lang/language#440): Remove when promotion works.
+      throw "unreachable";
+    }
     host = _makeHost(host, 0, _stringOrNullLength(host), false);
     // Special case this constructor for backwards compatibility.
     if (query == "") query = null;
@@ -1496,6 +1650,10 @@ class _Uri implements Uri {
     bool hasAuthority = (host != null);
     path = _makePath(
         path, 0, _stringOrNullLength(path), pathSegments, scheme, hasAuthority);
+    if (path == null) {
+      // TODO(dart-lang/language#440): Remove when promotion works.
+      throw "unreachable";
+    }
     if (scheme.isEmpty && host == null && !path.startsWith('/')) {
       bool allowScheme = scheme.isNotEmpty || host != null;
       path = _normalizeRelativePath(path, allowScheme);
@@ -1505,25 +1663,24 @@ class _Uri implements Uri {
     if (host == null && path.startsWith("//")) {
       host = "";
     }
-    return new _Uri._internal(
-        scheme, userInfo, host, port, path, query, fragment);
+    return _Uri._internal(scheme, userInfo, host, port, path, query, fragment);
   }
 
   /// Implementation of [Uri.http].
   factory _Uri.http(String authority, String unencodedPath,
-      [Map<String, String> queryParameters]) {
+      [Map<String, dynamic>? queryParameters]) {
     return _makeHttpUri("http", authority, unencodedPath, queryParameters);
   }
 
   /// Implementation of [Uri.https].
   factory _Uri.https(String authority, String unencodedPath,
-      [Map<String, String> queryParameters]) {
+      [Map<String, dynamic>? queryParameters]) {
     return _makeHttpUri("https", authority, unencodedPath, queryParameters);
   }
 
   String get authority {
     if (!hasAuthority) return "";
-    var sb = new StringBuffer();
+    var sb = StringBuffer();
     _writeAuthority(sb);
     return sb.toString();
   }
@@ -1531,19 +1688,19 @@ class _Uri implements Uri {
   String get userInfo => _userInfo;
 
   String get host {
-    if (_host == null) return "";
-    if (_host.startsWith('[')) {
-      return _host.substring(1, _host.length - 1);
+    String? host = _host;
+    if (host == null) return "";
+    if (host.startsWith('[')) {
+      return host.substring(1, host.length - 1);
     }
-    return _host;
+    return host;
   }
 
   int get port {
-    if (_port == null) return _defaultPort(scheme);
-    return _port;
+    return _port ?? _defaultPort(scheme);
   }
 
-  // The default port for the scheme of this Uri.
+  /// The default port for the scheme of this Uri.
   static int _defaultPort(String scheme) {
     if (scheme == "http") return 80;
     if (scheme == "https") return 443;
@@ -1592,25 +1749,23 @@ class _Uri implements Uri {
     return true;
   }
 
-  // Report a parse failure.
-  static void _fail(String uri, int index, String message) {
-    throw new FormatException(message, uri, index);
+  /// Report a parse failure.
+  static Never _fail(String uri, int index, String message) {
+    throw FormatException(message, uri, index);
   }
 
-  static Uri _makeHttpUri(String scheme, String authority, String unencodedPath,
-      Map<String, String> queryParameters) {
+  static _Uri _makeHttpUri(String scheme, String? authority,
+      String unencodedPath, Map<String, dynamic>? queryParameters) {
     var userInfo = "";
-    var host = null;
-    var port = null;
+    String? host;
+    int? port;
 
     if (authority != null && authority.isNotEmpty) {
       var hostStart = 0;
       // Split off the user info.
-      bool hasUserInfo = false;
       for (int i = 0; i < authority.length; i++) {
         const int atSign = 0x40;
         if (authority.codeUnitAt(i) == atSign) {
-          hasUserInfo = true;
           userInfo = authority.substring(0, i);
           hostStart = i + 1;
           break;
@@ -1620,23 +1775,31 @@ class _Uri implements Uri {
       if (hostStart < authority.length &&
           authority.codeUnitAt(hostStart) == _LEFT_BRACKET) {
         // IPv6 host.
+        int escapeForZoneID = -1;
         for (; hostEnd < authority.length; hostEnd++) {
-          if (authority.codeUnitAt(hostEnd) == _RIGHT_BRACKET) break;
+          int char = authority.codeUnitAt(hostEnd);
+          if (char == _PERCENT && escapeForZoneID < 0) {
+            escapeForZoneID = hostEnd;
+            if (authority.startsWith("25", hostEnd + 1)) {
+              hostEnd += 2; // Might as well skip the already checked escape.
+            }
+          } else if (char == _RIGHT_BRACKET) {
+            break;
+          }
         }
         if (hostEnd == authority.length) {
-          throw new FormatException(
+          throw FormatException(
               "Invalid IPv6 host entry.", authority, hostStart);
         }
-        Uri.parseIPv6Address(authority, hostStart + 1, hostEnd);
+        Uri.parseIPv6Address(authority, hostStart + 1,
+            (escapeForZoneID < 0) ? hostEnd : escapeForZoneID);
         hostEnd++; // Skip the closing bracket.
         if (hostEnd != authority.length &&
             authority.codeUnitAt(hostEnd) != _COLON) {
-          throw new FormatException(
-              "Invalid end of authority", authority, hostEnd);
+          throw FormatException("Invalid end of authority", authority, hostEnd);
         }
       }
       // Split host and port.
-      bool hasPort = false;
       for (; hostEnd < authority.length; hostEnd++) {
         if (authority.codeUnitAt(hostEnd) == _COLON) {
           var portString = authority.substring(hostEnd + 1);
@@ -1647,7 +1810,7 @@ class _Uri implements Uri {
       }
       host = authority.substring(hostStart, hostEnd);
     }
-    return new Uri(
+    return _Uri(
         scheme: scheme,
         userInfo: userInfo,
         host: host,
@@ -1657,64 +1820,64 @@ class _Uri implements Uri {
   }
 
   /// Implementation of [Uri.file].
-  factory _Uri.file(String path, {bool windows}) {
-    windows = (windows == null) ? _Uri._isWindows : windows;
-    return windows
+  factory _Uri.file(String path, {bool? windows}) {
+    return (windows ?? _Uri._isWindows)
         ? _makeWindowsFileUrl(path, false)
         : _makeFileUri(path, false);
   }
 
   /// Implementation of [Uri.directory].
-  factory _Uri.directory(String path, {bool windows}) {
-    windows = (windows == null) ? _Uri._isWindows : windows;
-    return windows ? _makeWindowsFileUrl(path, true) : _makeFileUri(path, true);
+  factory _Uri.directory(String path, {bool? windows}) {
+    return (windows ?? _Uri._isWindows)
+        ? _makeWindowsFileUrl(path, true)
+        : _makeFileUri(path, true);
   }
 
   /// Used internally in path-related constructors.
   external static bool get _isWindows;
 
-  static _checkNonWindowsPathReservedCharacters(
+  static void _checkNonWindowsPathReservedCharacters(
       List<String> segments, bool argumentError) {
-    segments.forEach((segment) {
+    for (var segment in segments) {
       if (segment.contains("/")) {
         if (argumentError) {
-          throw new ArgumentError("Illegal path character $segment");
+          throw ArgumentError("Illegal path character $segment");
         } else {
-          throw new UnsupportedError("Illegal path character $segment");
-        }
-      }
-    });
-  }
-
-  static _checkWindowsPathReservedCharacters(
-      List<String> segments, bool argumentError,
-      [int firstSegment = 0]) {
-    for (var segment in segments.skip(firstSegment)) {
-      if (segment.contains(new RegExp(r'["*/:<>?\\|]'))) {
-        if (argumentError) {
-          throw new ArgumentError("Illegal character in path");
-        } else {
-          throw new UnsupportedError("Illegal character in path");
+          throw UnsupportedError("Illegal path character $segment");
         }
       }
     }
   }
 
-  static _checkWindowsDriveLetter(int charCode, bool argumentError) {
+  static void _checkWindowsPathReservedCharacters(
+      List<String> segments, bool argumentError,
+      [int firstSegment = 0]) {
+    for (var segment in segments.skip(firstSegment)) {
+      if (segment.contains(RegExp(r'["*/:<>?\\|]'))) {
+        if (argumentError) {
+          throw ArgumentError("Illegal character in path");
+        } else {
+          throw UnsupportedError("Illegal character in path: $segment");
+        }
+      }
+    }
+  }
+
+  static void _checkWindowsDriveLetter(int charCode, bool argumentError) {
     if ((_UPPER_CASE_A <= charCode && charCode <= _UPPER_CASE_Z) ||
         (_LOWER_CASE_A <= charCode && charCode <= _LOWER_CASE_Z)) {
       return;
     }
     if (argumentError) {
-      throw new ArgumentError(
-          "Illegal drive letter " + new String.fromCharCode(charCode));
+      throw ArgumentError(
+          "Illegal drive letter " + String.fromCharCode(charCode));
     } else {
-      throw new UnsupportedError(
-          "Illegal drive letter " + new String.fromCharCode(charCode));
+      throw UnsupportedError(
+          "Illegal drive letter " + String.fromCharCode(charCode));
     }
   }
 
-  static _makeFileUri(String path, bool slashTerminated) {
+  static Uri _makeFileUri(String path, bool slashTerminated) {
     const String sep = "/";
     var segments = path.split(sep);
     if (slashTerminated && segments.isNotEmpty && segments.last.isNotEmpty) {
@@ -1722,10 +1885,10 @@ class _Uri implements Uri {
     }
     if (path.startsWith(sep)) {
       // Absolute file:// URI.
-      return new Uri(scheme: "file", pathSegments: segments);
+      return Uri(scheme: "file", pathSegments: segments);
     } else {
       // Relative URI.
-      return new Uri(pathSegments: segments);
+      return Uri(pathSegments: segments);
     }
   }
 
@@ -1738,7 +1901,7 @@ class _Uri implements Uri {
         if (path.length < 3 ||
             path.codeUnitAt(1) != _COLON ||
             path.codeUnitAt(2) != _BACKSLASH) {
-          throw new ArgumentError(
+          throw ArgumentError(
               r"Windows paths with \\?\ prefix must be absolute");
         }
       }
@@ -1749,8 +1912,7 @@ class _Uri implements Uri {
     if (path.length > 1 && path.codeUnitAt(1) == _COLON) {
       _checkWindowsDriveLetter(path.codeUnitAt(0), true);
       if (path.length == 2 || path.codeUnitAt(2) != _BACKSLASH) {
-        throw new ArgumentError(
-            "Windows paths with drive letter must be absolute");
+        throw ArgumentError("Windows paths with drive letter must be absolute");
       }
       // Absolute file://C:/ URI.
       var pathSegments = path.split(sep);
@@ -1758,7 +1920,7 @@ class _Uri implements Uri {
         pathSegments.add(""); // Extra separator at end.
       }
       _checkWindowsPathReservedCharacters(pathSegments, true, 1);
-      return new Uri(scheme: "file", pathSegments: pathSegments);
+      return Uri(scheme: "file", pathSegments: pathSegments);
     }
 
     if (path.startsWith(sep)) {
@@ -1773,8 +1935,7 @@ class _Uri implements Uri {
         if (slashTerminated && pathSegments.last.isNotEmpty) {
           pathSegments.add(""); // Extra separator at end.
         }
-        return new Uri(
-            scheme: "file", host: hostPart, pathSegments: pathSegments);
+        return Uri(scheme: "file", host: hostPart, pathSegments: pathSegments);
       } else {
         // Absolute file:// URI.
         var pathSegments = path.split(sep);
@@ -1782,7 +1943,7 @@ class _Uri implements Uri {
           pathSegments.add(""); // Extra separator at end.
         }
         _checkWindowsPathReservedCharacters(pathSegments, true);
-        return new Uri(scheme: "file", pathSegments: pathSegments);
+        return Uri(scheme: "file", pathSegments: pathSegments);
       }
     } else {
       // Relative URI.
@@ -1793,20 +1954,20 @@ class _Uri implements Uri {
           pathSegments.last.isNotEmpty) {
         pathSegments.add(""); // Extra separator at end.
       }
-      return new Uri(pathSegments: pathSegments);
+      return Uri(pathSegments: pathSegments);
     }
   }
 
   Uri replace(
-      {String scheme,
-      String userInfo,
-      String host,
-      int port,
-      String path,
-      Iterable<String> pathSegments,
-      String query,
-      Map<String, dynamic /*String|Iterable<String>*/ > queryParameters,
-      String fragment}) {
+      {String? scheme,
+      String? userInfo,
+      String? host,
+      int? port,
+      String? path,
+      Iterable<String>? pathSegments,
+      String? query,
+      Map<String, dynamic /*String|Iterable<String>*/ >? queryParameters,
+      String? fragment}) {
     // Set to true if the scheme has (potentially) changed.
     // In that case, the default port may also have changed and we need
     // to check even the existing port.
@@ -1817,12 +1978,14 @@ class _Uri implements Uri {
     } else {
       scheme = this.scheme;
     }
+
     bool isFile = (scheme == "file");
     if (userInfo != null) {
       userInfo = _makeUserInfo(userInfo, 0, userInfo.length);
     } else {
       userInfo = this._userInfo;
     }
+
     if (port != null) {
       port = _makePort(port, scheme);
     } else {
@@ -1845,11 +2008,12 @@ class _Uri implements Uri {
       path = _makePath(path, 0, _stringOrNullLength(path), pathSegments, scheme,
           hasAuthority);
     } else {
-      path = this.path;
-      if ((isFile || (hasAuthority && !path.isEmpty)) &&
-          !path.startsWith('/')) {
-        path = "/" + path;
+      var currentPath = this.path;
+      if ((isFile || (hasAuthority && !currentPath.isEmpty)) &&
+          !currentPath.startsWith('/')) {
+        currentPath = "/" + currentPath;
       }
+      path = currentPath;
     }
 
     if (query != null || queryParameters != null) {
@@ -1864,51 +2028,29 @@ class _Uri implements Uri {
       fragment = this._fragment;
     }
 
-    return new _Uri._internal(
-        scheme, userInfo, host, port, path, query, fragment);
+    return _Uri._internal(scheme, userInfo, host, port, path, query, fragment);
   }
 
   Uri removeFragment() {
     if (!this.hasFragment) return this;
-    return new _Uri._internal(
-        scheme, _userInfo, _host, _port, path, _query, null);
+    return _Uri._internal(scheme, _userInfo, _host, _port, path, _query, null);
   }
 
-  List<String> get pathSegments {
-    var result = _pathSegments;
-    if (result != null) return result;
-
-    var pathToSplit = path;
+  static List<String> _computePathSegments(String pathToSplit) {
     if (pathToSplit.isNotEmpty && pathToSplit.codeUnitAt(0) == _SLASH) {
       pathToSplit = pathToSplit.substring(1);
     }
-    result = (pathToSplit == "")
+    return (pathToSplit.isEmpty)
         ? const <String>[]
-        : new List<String>.unmodifiable(
+        : List<String>.unmodifiable(
             pathToSplit.split("/").map(Uri.decodeComponent));
-    _pathSegments = result;
-    return result;
   }
 
-  Map<String, String> get queryParameters {
-    if (_queryParameters == null) {
-      _queryParameters =
-          new UnmodifiableMapView<String, String>(Uri.splitQueryString(query));
-    }
-    return _queryParameters;
-  }
-
-  Map<String, List<String>> get queryParametersAll {
-    if (_queryParameterLists == null) {
-      Map queryParameterLists = _splitQueryStringAll(query);
-      for (var key in queryParameterLists.keys) {
-        queryParameterLists[key] =
-            new List<String>.unmodifiable(queryParameterLists[key]);
-      }
-      _queryParameterLists =
-          new Map<String, List<String>>.unmodifiable(queryParameterLists);
-    }
-    return _queryParameterLists;
+  static Map<String, List<String>> _computeQueryParametersAll(String? query) {
+    if (query == null || query.isEmpty) return const <String, List<String>>{};
+    Map<String, List<String>> queryParameterLists = _splitQueryStringAll(query);
+    queryParameterLists.updateAll(_toUnmodifiableStringList);
+    return Map<String, List<String>>.unmodifiable(queryParameterLists);
   }
 
   Uri normalizePath() {
@@ -1917,24 +2059,22 @@ class _Uri implements Uri {
     return this.replace(path: path);
   }
 
-  static int _makePort(int port, String scheme) {
+  static int? _makePort(int? port, String scheme) {
     // Perform scheme specific normalization.
     if (port != null && port == _defaultPort(scheme)) return null;
     return port;
   }
 
-  /**
-   * Check and normalize a host name.
-   *
-   * If the host name starts and ends with '[' and ']', it is considered an
-   * IPv6 address. If [strictIPv6] is false, the address is also considered
-   * an IPv6 address if it contains any ':' character.
-   *
-   * If it is not an IPv6 address, it is case- and escape-normalized.
-   * This escapes all characters not valid in a reg-name,
-   * and converts all non-escape upper-case letters to lower-case.
-   */
-  static String _makeHost(String host, int start, int end, bool strictIPv6) {
+  /// Check and normalize a host name.
+  ///
+  /// If the host name starts and ends with '[' and ']', it is considered an
+  /// IPv6 address. If [strictIPv6] is false, the address is also considered
+  /// an IPv6 address if it contains any ':' character.
+  ///
+  /// If it is not an IPv6 address, it is case- and escape-normalized.
+  /// This escapes all characters not valid in a reg-name,
+  /// and converts all non-escape upper-case letters to lower-case.
+  static String? _makeHost(String? host, int start, int end, bool strictIPv6) {
     // TODO(lrn): Should we normalize IPv6 addresses according to RFC 5952?
     if (host == null) return null;
     if (start == end) return "";
@@ -1943,35 +2083,133 @@ class _Uri implements Uri {
       if (host.codeUnitAt(end - 1) != _RIGHT_BRACKET) {
         _fail(host, start, 'Missing end `]` to match `[` in host');
       }
-      Uri.parseIPv6Address(host, start + 1, end - 1);
+      String zoneID = "";
+      int index = _checkZoneID(host, start + 1, end - 1);
+      if (index < end - 1) {
+        int zoneIDstart =
+            (host.startsWith("25", index + 1)) ? index + 3 : index + 1;
+        zoneID = _normalizeZoneID(host, zoneIDstart, end - 1, "%25");
+      }
+      Uri.parseIPv6Address(host, start + 1, index);
       // RFC 5952 requires hex digits to be lower case.
-      return host.substring(start, end).toLowerCase();
+      return host.substring(start, index).toLowerCase() + zoneID + ']';
     }
     if (!strictIPv6) {
       // TODO(lrn): skip if too short to be a valid IPv6 address?
       for (int i = start; i < end; i++) {
         if (host.codeUnitAt(i) == _COLON) {
-          Uri.parseIPv6Address(host, start, end);
-          return '[$host]';
+          String zoneID = "";
+          int index = _checkZoneID(host, start, end);
+          if (index < end) {
+            int zoneIDstart =
+                (host.startsWith("25", index + 1)) ? index + 3 : index + 1;
+            zoneID = _normalizeZoneID(host, zoneIDstart, end, "%25");
+          }
+          Uri.parseIPv6Address(host, start, index);
+          return '[${host.substring(start, index)}' + zoneID + ']';
         }
       }
     }
     return _normalizeRegName(host, start, end);
   }
 
+  /// RFC 6874 check for ZoneID
+  /// Return the index of first appeared `%`.
+  static int _checkZoneID(String host, int start, int end) {
+    int index = host.indexOf('%', start);
+    index = (index >= start && index < end) ? index : end;
+    return index;
+  }
+
+  static bool _isZoneIDChar(int char) {
+    return char < 127 && (_zoneIDTable[char >> 4] & (1 << (char & 0xf))) != 0;
+  }
+
+  /// Validates and does case- and percent-encoding normalization.
+  ///
+  /// The same as [_normalizeOrSubstring]
+  /// except this function does not convert characters to lower case.
+  /// The [host] must be an RFC6874 "ZoneID".
+  /// ZoneID = 1*(unreserved / pct-encoded)
+  static String _normalizeZoneID(String host, int start, int end,
+      [String prefix = '']) {
+    StringBuffer? buffer;
+    if (prefix != '') {
+      buffer = StringBuffer(prefix);
+    }
+    int sectionStart = start;
+    int index = start;
+    // Whether all characters between sectionStart and index are normalized,
+    bool isNormalized = true;
+
+    while (index < end) {
+      int char = host.codeUnitAt(index);
+      if (char == _PERCENT) {
+        String? replacement = _normalizeEscape(host, index, true);
+        if (replacement == null && isNormalized) {
+          index += 3;
+          continue;
+        }
+        buffer ??= StringBuffer();
+        String slice = host.substring(sectionStart, index);
+        buffer.write(slice);
+        int sourceLength = 3;
+        if (replacement == null) {
+          replacement = host.substring(index, index + 3);
+        } else if (replacement == "%") {
+          _fail(host, index, "ZoneID should not contain % anymore");
+        }
+        buffer.write(replacement);
+        index += sourceLength;
+        sectionStart = index;
+        isNormalized = true;
+      } else if (_isZoneIDChar(char)) {
+        if (isNormalized && _UPPER_CASE_A <= char && _UPPER_CASE_Z >= char) {
+          // Put initial slice in buffer and continue in non-normalized mode
+          buffer ??= StringBuffer();
+          if (sectionStart < index) {
+            buffer.write(host.substring(sectionStart, index));
+            sectionStart = index;
+          }
+          isNormalized = false;
+        }
+        index++;
+      } else {
+        int sourceLength = 1;
+        if ((char & 0xFC00) == 0xD800 && (index + 1) < end) {
+          int tail = host.codeUnitAt(index + 1);
+          if ((tail & 0xFC00) == 0xDC00) {
+            char = 0x10000 | ((char & 0x3ff) << 10) | (tail & 0x3ff);
+            sourceLength = 2;
+          }
+        }
+        String slice = host.substring(sectionStart, index);
+        (buffer ??= StringBuffer())
+          ..write(slice)
+          ..write(_escapeChar(char));
+        index += sourceLength;
+        sectionStart = index;
+      }
+    }
+    if (buffer == null) return host.substring(start, end);
+    if (sectionStart < end) {
+      String slice = host.substring(sectionStart, end);
+      buffer.write(slice);
+    }
+    return buffer.toString();
+  }
+
   static bool _isRegNameChar(int char) {
     return char < 127 && (_regNameTable[char >> 4] & (1 << (char & 0xf))) != 0;
   }
 
-  /**
-   * Validates and does case- and percent-encoding normalization.
-   *
-   * The [host] must be an RFC3986 "reg-name". It is converted
-   * to lower case, and percent escapes are converted to either
-   * lower case unreserved characters or upper case escapes.
-   */
+  /// Validates and does case- and percent-encoding normalization.
+  ///
+  /// The [host] must be an RFC3986 "reg-name". It is converted
+  /// to lower case, and percent escapes are converted to either
+  /// lower case unreserved characters or upper case escapes.
   static String _normalizeRegName(String host, int start, int end) {
-    StringBuffer buffer;
+    StringBuffer? buffer;
     int sectionStart = start;
     int index = start;
     // Whether all characters between sectionStart and index are normalized,
@@ -1981,12 +2219,12 @@ class _Uri implements Uri {
       int char = host.codeUnitAt(index);
       if (char == _PERCENT) {
         // The _regNameTable contains "%", so we check that first.
-        String replacement = _normalizeEscape(host, index, true);
+        String? replacement = _normalizeEscape(host, index, true);
         if (replacement == null && isNormalized) {
           index += 3;
           continue;
         }
-        if (buffer == null) buffer = new StringBuffer();
+        buffer ??= StringBuffer();
         String slice = host.substring(sectionStart, index);
         if (!isNormalized) slice = slice.toLowerCase();
         buffer.write(slice);
@@ -2004,7 +2242,7 @@ class _Uri implements Uri {
       } else if (_isRegNameChar(char)) {
         if (isNormalized && _UPPER_CASE_A <= char && _UPPER_CASE_Z >= char) {
           // Put initial slice in buffer and continue in non-normalized mode
-          if (buffer == null) buffer = new StringBuffer();
+          buffer ??= StringBuffer();
           if (sectionStart < index) {
             buffer.write(host.substring(sectionStart, index));
             sectionStart = index;
@@ -2023,11 +2261,11 @@ class _Uri implements Uri {
             sourceLength = 2;
           }
         }
-        if (buffer == null) buffer = new StringBuffer();
         String slice = host.substring(sectionStart, index);
         if (!isNormalized) slice = slice.toLowerCase();
-        buffer.write(slice);
-        buffer.write(_escapeChar(char));
+        (buffer ??= StringBuffer())
+          ..write(slice)
+          ..write(_escapeChar(char));
         index += sourceLength;
         sectionStart = index;
       }
@@ -2041,11 +2279,9 @@ class _Uri implements Uri {
     return buffer.toString();
   }
 
-  /**
-   * Validates scheme characters and does case-normalization.
-   *
-   * Schemes are converted to lower case. They cannot contain escapes.
-   */
+  /// Validates scheme characters and does case-normalization.
+  ///
+  /// Schemes are converted to lower case. They cannot contain escapes.
   static String _makeScheme(String scheme, int start, int end) {
     if (start == end) return "";
     final int firstCodeUnit = scheme.codeUnitAt(start);
@@ -2067,9 +2303,9 @@ class _Uri implements Uri {
     return _canonicalizeScheme(scheme);
   }
 
-  // Canonicalize a few often-used scheme strings.
-  //
-  // This improves memory usage and makes comparison faster.
+  /// Canonicalize a few often-used scheme strings.
+  ///
+  /// This improves memory usage and makes comparison faster.
   static String _canonicalizeScheme(String scheme) {
     if (scheme == "http") return "http";
     if (scheme == "file") return "file";
@@ -2078,26 +2314,26 @@ class _Uri implements Uri {
     return scheme;
   }
 
-  static String _makeUserInfo(String userInfo, int start, int end) {
+  static String _makeUserInfo(String? userInfo, int start, int end) {
     if (userInfo == null) return "";
     return _normalizeOrSubstring(userInfo, start, end, _userinfoTable);
   }
 
-  static String _makePath(String path, int start, int end,
-      Iterable<String> pathSegments, String scheme, bool hasAuthority) {
+  static String _makePath(String? path, int start, int end,
+      Iterable<String>? pathSegments, String scheme, bool hasAuthority) {
     bool isFile = (scheme == "file");
     bool ensureLeadingSlash = isFile || hasAuthority;
-    if (path == null && pathSegments == null) return isFile ? "/" : "";
-    if (path != null && pathSegments != null) {
-      throw new ArgumentError('Both path and pathSegments specified');
-    }
-    var result;
-    if (path != null) {
-      result = _normalizeOrSubstring(path, start, end, _pathCharOrSlashTable);
-    } else {
+    String result;
+    if (path == null) {
+      if (pathSegments == null) return isFile ? "/" : "";
       result = pathSegments
-          .map((s) => _uriEncode(_pathCharTable, s, UTF8, false))
+          .map((s) => _uriEncode(_pathCharTable, s, utf8, false))
           .join("/");
+    } else if (pathSegments != null) {
+      throw ArgumentError('Both path and pathSegments specified');
+    } else {
+      result = _normalizeOrSubstring(path, start, end, _pathCharOrSlashTable,
+          escapeDelimiters: true);
     }
     if (result.isEmpty) {
       if (isFile) return "/";
@@ -2120,20 +2356,21 @@ class _Uri implements Uri {
     return _removeDotSegments(path);
   }
 
-  static String _makeQuery(String query, int start, int end,
-      Map<String, dynamic /*String|Iterable<String>*/ > queryParameters) {
+  static String? _makeQuery(String? query, int start, int end,
+      Map<String, dynamic /*String|Iterable<String>*/ >? queryParameters) {
     if (query != null) {
       if (queryParameters != null) {
-        throw new ArgumentError('Both query and queryParameters specified');
+        throw ArgumentError('Both query and queryParameters specified');
       }
-      return _normalizeOrSubstring(query, start, end, _queryCharTable);
+      return _normalizeOrSubstring(query, start, end, _queryCharTable,
+          escapeDelimiters: true);
     }
     if (queryParameters == null) return null;
 
-    var result = new StringBuffer();
+    var result = StringBuffer();
     var separator = "";
 
-    void writeParameter(String key, String value) {
+    void writeParameter(String key, String? value) {
       result.write(separator);
       separator = "&";
       result.write(Uri.encodeQueryComponent(key));
@@ -2156,25 +2393,24 @@ class _Uri implements Uri {
     return result.toString();
   }
 
-  static String _makeFragment(String fragment, int start, int end) {
+  static String? _makeFragment(String? fragment, int start, int end) {
     if (fragment == null) return null;
-    return _normalizeOrSubstring(fragment, start, end, _queryCharTable);
+    return _normalizeOrSubstring(fragment, start, end, _queryCharTable,
+        escapeDelimiters: true);
   }
 
-  /**
-   * Performs RFC 3986 Percent-Encoding Normalization.
-   *
-   * Returns a replacement string that should be replace the original escape.
-   * Returns null if no replacement is necessary because the escape is
-   * not for an unreserved character and is already non-lower-case.
-   *
-   * Returns "%" if the escape is invalid (not two valid hex digits following
-   * the percent sign). The calling code should replace the percent
-   * sign with "%25", but leave the following two characters unmodified.
-   *
-   * If [lowerCase] is true, a single character returned is always lower case,
-   */
-  static String _normalizeEscape(String source, int index, bool lowerCase) {
+  /// Performs RFC 3986 Percent-Encoding Normalization.
+  ///
+  /// Returns a replacement string that should replace the original escape.
+  /// Returns null if no replacement is necessary because the escape is
+  /// not for an unreserved character and is already non-lower-case.
+  ///
+  /// Returns "%" if the escape is invalid (not two valid hex digits following
+  /// the percent sign). The calling code should replace the percent
+  /// sign with "%25", but leave the following two characters unmodified.
+  ///
+  /// If [lowerCase] is true, a single character returned is always lower case,
+  static String? _normalizeEscape(String source, int index, bool lowerCase) {
     assert(source.codeUnitAt(index) == _PERCENT);
     if (index + 2 >= source.length) {
       return "%"; // Marks the escape as invalid.
@@ -2191,7 +2427,7 @@ class _Uri implements Uri {
       if (lowerCase && _UPPER_CASE_A <= value && _UPPER_CASE_Z >= value) {
         value |= 0x20;
       }
-      return new String.fromCharCode(value);
+      return String.fromCharCode(value);
     }
     if (firstDigit >= _LOWER_CASE_A || secondDigit >= _LOWER_CASE_A) {
       // Either digit is lower case.
@@ -2207,7 +2443,7 @@ class _Uri implements Uri {
     List<int> codeUnits;
     if (char < 0x80) {
       // ASCII, a single percent encoded sequence.
-      codeUnits = new List(3);
+      codeUnits = Uint8List(3);
       codeUnits[0] = _PERCENT;
       codeUnits[1] = _hexDigits.codeUnitAt(char >> 4);
       codeUnits[2] = _hexDigits.codeUnitAt(char & 0xf);
@@ -2223,7 +2459,7 @@ class _Uri implements Uri {
           flag = 0xf0;
         }
       }
-      codeUnits = new List(3 * encodedBytes);
+      codeUnits = Uint8List(3 * encodedBytes);
       int index = 0;
       while (--encodedBytes >= 0) {
         int byte = ((char >> (6 * encodedBytes)) & 0x3f) | flag;
@@ -2234,36 +2470,34 @@ class _Uri implements Uri {
         flag = 0x80; // Following bytes have only high bit set.
       }
     }
-    return new String.fromCharCodes(codeUnits);
+    return String.fromCharCodes(codeUnits);
   }
 
-  /**
-   * Normalizes using [_normalize] or returns substring of original.
-   *
-   * If [_normalize] returns `null` (original content is already normalized),
-   * this methods returns the substring if [component] from [start] to [end].
-   */
+  /// Normalizes using [_normalize] or returns substring of original.
+  ///
+  /// If [_normalize] returns `null` (original content is already normalized),
+  /// this methods returns the substring if [component] from [start] to [end].
   static String _normalizeOrSubstring(
-      String component, int start, int end, List<int> charTable) {
-    return _normalize(component, start, end, charTable) ??
+      String component, int start, int end, List<int> charTable,
+      {bool escapeDelimiters = false}) {
+    return _normalize(component, start, end, charTable,
+            escapeDelimiters: escapeDelimiters) ??
         component.substring(start, end);
   }
 
-  /**
-   * Runs through component checking that each character is valid and
-   * normalize percent escapes.
-   *
-   * Uses [charTable] to check if a non-`%` character is allowed.
-   * Each `%` character must be followed by two hex digits.
-   * If the hex-digits are lower case letters, they are converted to
-   * upper case.
-   *
-   * Returns `null` if the original content was already normalized.
-   */
-  static String _normalize(
+  /// Runs through component checking that each character is valid and
+  /// normalizes percent escapes.
+  ///
+  /// Uses [charTable] to check if a non-`%` character is allowed.
+  /// Each `%` character must be followed by two hex digits.
+  /// If the hex-digits are lowercase letters, they are converted to
+  /// uppercase.
+  ///
+  /// Returns `null` if the original content was already normalized.
+  static String? _normalize(
       String component, int start, int end, List<int> charTable,
       {bool escapeDelimiters = false}) {
-    StringBuffer buffer;
+    StringBuffer? buffer;
     int sectionStart = start;
     int index = start;
     // Loop while characters are valid and escapes correct and upper-case.
@@ -2272,7 +2506,7 @@ class _Uri implements Uri {
       if (char < 127 && (charTable[char >> 4] & (1 << (char & 0x0f))) != 0) {
         index++;
       } else {
-        String replacement;
+        String? replacement;
         int sourceLength;
         if (char == _PERCENT) {
           replacement = _normalizeEscape(component, index, false);
@@ -2290,6 +2524,7 @@ class _Uri implements Uri {
           }
         } else if (!escapeDelimiters && _isGeneralDelimiter(char)) {
           _fail(component, index, "Invalid character");
+          throw "unreachable"; // TODO(lrn): Remove when Never-returning functions are recognized as throwing.
         } else {
           sourceLength = 1;
           if ((char & 0xFC00) == 0xD800) {
@@ -2305,9 +2540,9 @@ class _Uri implements Uri {
           }
           replacement = _escapeChar(char);
         }
-        if (buffer == null) buffer = new StringBuffer();
-        buffer.write(component.substring(sectionStart, index));
-        buffer.write(replacement);
+        (buffer ??= StringBuffer())
+          ..write(component.substring(sectionStart, index))
+          ..write(replacement);
         index += sourceLength;
         sectionStart = index;
       }
@@ -2330,9 +2565,7 @@ class _Uri implements Uri {
         ((_genDelimitersTable[ch >> 4] & (1 << (ch & 0x0f))) != 0);
   }
 
-  /**
-   * Returns whether the URI is absolute.
-   */
+  /// Whether the URI is absolute.
   bool get isAbsolute => scheme != "" && fragment == "";
 
   String _mergePaths(String base, String reference) {
@@ -2417,7 +2650,7 @@ class _Uri implements Uri {
   /// Removing the ".." from a "bar/foo/.." sequence results in "bar/"
   /// (trailing "/"). If the entire path is removed (because it contains as
   /// many ".." segments as real segments), the result is "./".
-  /// This is different from an empty string, which represents "no path",
+  /// This is different from an empty string, which represents "no path"
   /// when you resolve it against a base URI with a path with a non-empty
   /// final segment.
   static String _normalizeRelativePath(String path, bool allowScheme) {
@@ -2473,14 +2706,31 @@ class _Uri implements Uri {
     return resolveUri(Uri.parse(reference));
   }
 
+  // Returns the index of the `/` after the package name of a package URI.
+  //
+  // Returns negative if the URI is not a valid package URI:
+  // * Scheme must be "package".
+  // * No authority.
+  // * Path starts with "something"/
+  // * where "something" is not all "." characters,
+  // * and contains no escapes or colons.
+  //
+  // The characters are necessarily valid path characters.
+  static int _packageNameEnd(Uri uri, String path) {
+    if (uri.isScheme("package") && !uri.hasAuthority) {
+      return _skipPackageNameChars(path, 0, path.length);
+    }
+    return -1;
+  }
+
   Uri resolveUri(Uri reference) {
     // From RFC 3986.
     String targetScheme;
     String targetUserInfo = "";
-    String targetHost;
-    int targetPort;
+    String? targetHost;
+    int? targetPort;
     String targetPath;
-    String targetQuery;
+    String? targetQuery;
     if (reference.scheme.isNotEmpty) {
       targetScheme = reference.scheme;
       if (reference.hasAuthority) {
@@ -2513,7 +2763,22 @@ class _Uri implements Uri {
             targetQuery = this._query;
           }
         } else {
-          if (reference.hasAbsolutePath) {
+          String basePath = this.path;
+          int packageNameEnd = _packageNameEnd(this, basePath);
+          if (packageNameEnd > 0) {
+            assert(targetScheme == "package");
+            assert(!this.hasAuthority);
+            assert(!this.hasEmptyPath);
+            // Merging a path into a package URI.
+            String packageName = basePath.substring(0, packageNameEnd);
+            if (reference.hasAbsolutePath) {
+              targetPath = packageName + _removeDotSegments(reference.path);
+            } else {
+              targetPath = packageName +
+                  _removeDotSegments(_mergePaths(
+                      basePath.substring(packageName.length), reference.path));
+            }
+          } else if (reference.hasAbsolutePath) {
             targetPath = _removeDotSegments(reference.path);
           } else {
             // This is the RFC 3986 behavior for merging.
@@ -2549,9 +2814,9 @@ class _Uri implements Uri {
         }
       }
     }
-    String fragment = reference.hasFragment ? reference.fragment : null;
-    return new _Uri._internal(targetScheme, targetUserInfo, targetHost,
-        targetPort, targetPath, targetQuery, fragment);
+    String? fragment = reference.hasFragment ? reference.fragment : null;
+    return _Uri._internal(targetScheme, targetUserInfo, targetHost, targetPort,
+        targetPath, targetQuery, fragment);
   }
 
   bool get hasScheme => scheme.isNotEmpty;
@@ -2570,47 +2835,47 @@ class _Uri implements Uri {
 
   String get origin {
     if (scheme == "") {
-      throw new StateError("Cannot use origin without a scheme: $this");
+      throw StateError("Cannot use origin without a scheme: $this");
     }
     if (scheme != "http" && scheme != "https") {
-      throw new StateError(
+      throw StateError(
           "Origin is only applicable schemes http and https: $this");
     }
-    if (_host == null || _host == "") {
-      throw new StateError(
+    String? host = _host;
+    if (host == null || host == "") {
+      throw StateError(
           "A $scheme: URI should have a non-empty host name: $this");
     }
-    if (_port == null) return "$scheme://$_host";
-    return "$scheme://$_host:$_port";
+    int? port = _port;
+    if (port == null) return "$scheme://$host";
+    return "$scheme://$host:$port";
   }
 
-  String toFilePath({bool windows}) {
+  String toFilePath({bool? windows}) {
     if (scheme != "" && scheme != "file") {
-      throw new UnsupportedError(
-          "Cannot extract a file path from a $scheme URI");
+      throw UnsupportedError("Cannot extract a file path from a $scheme URI");
     }
     if (query != "") {
-      throw new UnsupportedError(
+      throw UnsupportedError(
           "Cannot extract a file path from a URI with a query component");
     }
     if (fragment != "") {
-      throw new UnsupportedError(
+      throw UnsupportedError(
           "Cannot extract a file path from a URI with a fragment component");
     }
-    if (windows == null) windows = _isWindows;
-    return windows ? _toWindowsFilePath(this) : _toFilePath();
+    return (windows ?? _isWindows) ? _toWindowsFilePath(this) : _toFilePath();
   }
 
   String _toFilePath() {
     if (hasAuthority && host != "") {
-      throw new UnsupportedError(
+      throw UnsupportedError(
           "Cannot extract a non-Windows file path from a file URI "
           "with an authority");
     }
     // Use path segments to have any escapes unescaped.
     var pathSegments = this.pathSegments;
     _checkNonWindowsPathReservedCharacters(pathSegments, false);
-    var result = new StringBuffer();
+    var result = StringBuffer();
     if (hasAbsolutePath) result.write("/");
     result.writeAll(pathSegments, "/");
     return result.toString();
@@ -2628,7 +2893,7 @@ class _Uri implements Uri {
     } else {
       _checkWindowsPathReservedCharacters(segments, false, 0);
     }
-    var result = new StringBuffer();
+    var result = StringBuffer();
     if (uri.hasAbsolutePath && !hasDriveLetter) result.write(r"\");
     if (uri.hasAuthority) {
       var host = uri.host;
@@ -2643,10 +2908,6 @@ class _Uri implements Uri {
     return result.toString();
   }
 
-  bool get _isPathAbsolute {
-    return path != null && path.startsWith('/');
-  }
-
   void _writeAuthority(StringSink ss) {
     if (_userInfo.isNotEmpty) {
       ss.write(_userInfo);
@@ -2659,24 +2920,22 @@ class _Uri implements Uri {
     }
   }
 
-  /**
-   * Access the structure of a `data:` URI.
-   *
-   * Returns a [UriData] object for `data:` URIs and `null` for all other
-   * URIs.
-   * The [UriData] object can be used to access the media type and data
-   * of a `data:` URI.
-   */
-  UriData get data => (scheme == "data") ? new UriData.fromUri(this) : null;
+  /// Access the structure of a `data:` URI.
+  ///
+  /// Returns a [UriData] object for `data:` URIs and `null` for all other
+  /// URIs.
+  /// The [UriData] object can be used to access the media type and data
+  /// of a `data:` URI.
+  UriData? get data => (scheme == "data") ? UriData.fromUri(this) : null;
 
-  String toString() {
-    return _text ??= _initializeText();
-  }
+  String toString() => _text;
 
   String _initializeText() {
-    assert(_text == null);
-    StringBuffer sb = new StringBuffer();
-    if (scheme.isNotEmpty) sb..write(scheme)..write(":");
+    StringBuffer sb = StringBuffer();
+    if (scheme.isNotEmpty)
+      sb
+        ..write(scheme)
+        ..write(":");
     if (hasAuthority || (scheme == "file")) {
       // File URIS always have the authority, even if it is empty.
       // The empty URI means "localhost".
@@ -2684,37 +2943,37 @@ class _Uri implements Uri {
       _writeAuthority(sb);
     }
     sb.write(path);
-    if (_query != null) sb..write("?")..write(_query);
-    if (_fragment != null) sb..write("#")..write(_fragment);
+    if (_query != null)
+      sb
+        ..write("?")
+        ..write(_query);
+    if (_fragment != null)
+      sb
+        ..write("#")
+        ..write(_fragment);
     return sb.toString();
   }
 
-  bool operator ==(other) {
+  bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    if (other is Uri) {
-      Uri uri = other;
-      return scheme == uri.scheme &&
-          hasAuthority == uri.hasAuthority &&
-          userInfo == uri.userInfo &&
-          host == uri.host &&
-          port == uri.port &&
-          path == uri.path &&
-          hasQuery == uri.hasQuery &&
-          query == uri.query &&
-          hasFragment == uri.hasFragment &&
-          fragment == uri.fragment;
-    }
-    return false;
+    return other is Uri &&
+        scheme == other.scheme &&
+        hasAuthority == other.hasAuthority &&
+        userInfo == other.userInfo &&
+        host == other.host &&
+        port == other.port &&
+        path == other.path &&
+        hasQuery == other.hasQuery &&
+        query == other.query &&
+        hasFragment == other.hasFragment &&
+        fragment == other.fragment;
   }
 
-  int get hashCode {
-    return _hashCodeCache ??= toString().hashCode;
-  }
+  static List<String> _createList() => <String>[];
 
-  static List _createList() => [];
-
-  static Map _splitQueryStringAll(String query, {Encoding encoding: UTF8}) {
-    Map result = {};
+  static Map<String, List<String>> _splitQueryStringAll(String query,
+      {Encoding encoding = utf8}) {
+    var result = <String, List<String>>{};
     int i = 0;
     int start = 0;
     int equalsIndex = -1;
@@ -2751,10 +3010,8 @@ class _Uri implements Uri {
   external static String _uriEncode(List<int> canonicalTable, String text,
       Encoding encoding, bool spaceToPlus);
 
-  /**
-   * Convert a byte (2 character hex sequence) in string [s] starting
-   * at position [pos] to its ordinal value
-   */
+  /// Convert a byte (2 character hex sequence) in string [s] starting
+  /// at position [pos] to its ordinal value
   static int _hexCharPairToByte(String s, int pos) {
     int byte = 0;
     for (int i = 0; i < 2; i++) {
@@ -2767,31 +3024,28 @@ class _Uri implements Uri {
         if (0x61 <= charCode && charCode <= 0x66) {
           byte = byte * 16 + charCode - 0x57;
         } else {
-          throw new ArgumentError("Invalid URL encoding");
+          throw ArgumentError("Invalid URL encoding");
         }
       }
     }
     return byte;
   }
 
-  /**
-   * Uri-decode a percent-encoded string.
-   *
-   * It unescapes the string [text] and returns the unescaped string.
-   *
-   * This function is similar to the JavaScript-function `decodeURI`.
-   *
-   * If [plusToSpace] is `true`, plus characters will be converted to spaces.
-   *
-   * The decoder will create a byte-list of the percent-encoded parts, and then
-   * decode the byte-list using [encoding]. The default encodings UTF-8.
-   */
+  /// Uri-decode a percent-encoded string.
+  ///
+  /// It unescapes the string [text] and returns the unescaped string.
+  ///
+  /// This function is similar to the JavaScript-function `decodeURI`.
+  ///
+  /// If [plusToSpace] is `true`, plus characters will be converted to spaces.
+  ///
+  /// The decoder will create a byte-list of the percent-encoded parts, and then
+  /// decode the byte-list using [encoding]. The default encoding is UTF-8.
   static String _uriDecode(
       String text, int start, int end, Encoding encoding, bool plusToSpace) {
     assert(0 <= start);
     assert(start <= end);
     assert(end <= text.length);
-    assert(encoding != null);
     // First check whether there is any characters which need special handling.
     bool simple = true;
     for (int i = start; i < end; i++) {
@@ -2805,21 +3059,21 @@ class _Uri implements Uri {
     }
     List<int> bytes;
     if (simple) {
-      if (UTF8 == encoding || LATIN1 == encoding || ASCII == encoding) {
+      if (utf8 == encoding || latin1 == encoding || ascii == encoding) {
         return text.substring(start, end);
       } else {
         bytes = text.substring(start, end).codeUnits;
       }
     } else {
-      bytes = new List();
+      bytes = <int>[];
       for (int i = start; i < end; i++) {
         var codeUnit = text.codeUnitAt(i);
         if (codeUnit > 127) {
-          throw new ArgumentError("Illegal percent encoding in URI");
+          throw ArgumentError("Illegal percent encoding in URI");
         }
         if (codeUnit == _PERCENT) {
           if (i + 3 > text.length) {
-            throw new ArgumentError('Truncated URI');
+            throw ArgumentError('Truncated URI');
           }
           bytes.add(_hexCharPairToByte(text, i + 1));
           i += 2;
@@ -2848,7 +3102,7 @@ class _Uri implements Uri {
   // be escaped or not.
 
   // The unreserved characters of RFC 3986.
-  static const _unreservedTable = const [
+  static const _unreservedTable = <int>[
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -2868,7 +3122,7 @@ class _Uri implements Uri {
   ];
 
   // The unreserved characters of RFC 2396.
-  static const _unreserved2396Table = const [
+  static const _unreserved2396Table = <int>[
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -2888,7 +3142,7 @@ class _Uri implements Uri {
   ];
 
   // Table of reserved characters specified by ECMAScript 5.
-  static const _encodeFullTable = const [
+  static const _encodeFullTable = <int>[
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -2908,7 +3162,7 @@ class _Uri implements Uri {
   ];
 
   // Characters allowed in the scheme.
-  static const _schemeTable = const [
+  static const _schemeTable = <int>[
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -2927,54 +3181,10 @@ class _Uri implements Uri {
     0x07ff, // 0x70 - 0x7f  1111111111100010
   ];
 
-  // Characters allowed in scheme except for upper case letters.
-  static const _schemeLowerTable = const [
-    //                     LSB            MSB
-    //                      |              |
-    0x0000, // 0x00 - 0x0f  0000000000000000
-    0x0000, // 0x10 - 0x1f  0000000000000000
-    //                                 + -.
-    0x6800, // 0x20 - 0x2f  0000000000010110
-    //                      0123456789
-    0x03ff, // 0x30 - 0x3f  1111111111000000
-    //
-    0x0000, // 0x40 - 0x4f  0111111111111111
-    //
-    0x0000, // 0x50 - 0x5f  1111111111100001
-    //                       abcdefghijklmno
-    0xfffe, // 0x60 - 0x6f  0111111111111111
-    //                      pqrstuvwxyz
-    0x07ff, // 0x70 - 0x7f  1111111111100010
-  ];
-
-  // Sub delimiter characters combined with unreserved as of 3986.
-  // sub-delims  = "!" / "$" / "&" / "'" / "(" / ")"
-  //         / "*" / "+" / "," / ";" / "="
-  // RFC 3986 section 2.3.
-  // unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
-  static const _subDelimitersTable = const [
-    //                     LSB            MSB
-    //                      |              |
-    0x0000, // 0x00 - 0x0f  0000000000000000
-    0x0000, // 0x10 - 0x1f  0000000000000000
-    //                       !  $ &'()*+,-.
-    0x7fd2, // 0x20 - 0x2f  0100101111111110
-    //                      0123456789 ; =
-    0x2bff, // 0x30 - 0x3f  1111111111010100
-    //                       ABCDEFGHIJKLMNO
-    0xfffe, // 0x40 - 0x4f  0111111111111111
-    //                      PQRSTUVWXYZ    _
-    0x87ff, // 0x50 - 0x5f  1111111111100001
-    //                       abcdefghijklmno
-    0xfffe, // 0x60 - 0x6f  0111111111111111
-    //                      pqrstuvwxyz   ~
-    0x47ff, // 0x70 - 0x7f  1111111111100010
-  ];
-
   // General delimiter characters, RFC 3986 section 2.2.
   // gen-delims  = ":" / "/" / "?" / "#" / "[" / "]" / "@"
   //
-  static const _genDelimitersTable = const [
+  static const _genDelimitersTable = <int>[
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -2996,7 +3206,7 @@ class _Uri implements Uri {
   // Characters allowed in the userinfo as of RFC 3986.
   // RFC 3986 Appendix A
   // userinfo = *( unreserved / pct-encoded / sub-delims / ':')
-  static const _userinfoTable = const [
+  static const _userinfoTable = <int>[
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -3018,7 +3228,7 @@ class _Uri implements Uri {
   // Characters allowed in the reg-name as of RFC 3986.
   // RFC 3986 Appendix A
   // reg-name = *( unreserved / pct-encoded / sub-delims )
-  static const _regNameTable = const [
+  static const _regNameTable = <int>[
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -3040,7 +3250,7 @@ class _Uri implements Uri {
   // Characters allowed in the path as of RFC 3986.
   // RFC 3986 section 3.3.
   // pchar = unreserved / pct-encoded / sub-delims / ":" / "@"
-  static const _pathCharTable = const [
+  static const _pathCharTable = <int>[
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -3061,7 +3271,7 @@ class _Uri implements Uri {
 
   // Characters allowed in the path as of RFC 3986.
   // RFC 3986 section 3.3 *and* slash.
-  static const _pathCharOrSlashTable = const [
+  static const _pathCharOrSlashTable = [
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -3084,7 +3294,7 @@ class _Uri implements Uri {
   // Characters allowed in the query as of RFC 3986.
   // RFC 3986 section 3.4.
   // query = *( pchar / "/" / "?" )
-  static const _queryCharTable = const [
+  static const _queryCharTable = [
     //                     LSB            MSB
     //                      |              |
     0x0000, // 0x00 - 0x0f  0000000000000000
@@ -3102,78 +3312,92 @@ class _Uri implements Uri {
     //                      pqrstuvwxyz   ~
     0x47ff, // 0x70 - 0x7f  1111111111100010
   ];
+
+  // Characters allowed in the ZoneID as of RFC 6874.
+  // ZoneID = 1*( unreserved / pct-encoded )
+  static const _zoneIDTable = <int>[
+    //                     LSB            MSB
+    //                      |              |
+    0x0000, // 0x00 - 0x0f  0000000000000000
+    0x0000, // 0x10 - 0x1f  0000000000000000
+    //                       !  $%&'()*+,-.
+    0x6000, // 0x20 - 0x2f  0000000000000110
+    //                      0123456789 ; =
+    0x03ff, // 0x30 - 0x3f  1111111111000000
+    //                       ABCDEFGHIJKLMNO
+    0xfffe, // 0x40 - 0x4f  0111111111111111
+    //                      PQRSTUVWXYZ    _
+    0x87ff, // 0x50 - 0x5f  1111111111100001
+    //                       abcdefghijklmno
+    0xfffe, // 0x60 - 0x6f  0111111111111111
+    //                      pqrstuvwxyz   ~
+    0x47ff, // 0x70 - 0x7f  1111111111100010
+  ];
 }
 
 // --------------------------------------------------------------------
 // Data URI
 // --------------------------------------------------------------------
 
-/**
- * A way to access the structure of a `data:` URI.
- *
- * Data URIs are non-hierarchical URIs that can contain any binary data.
- * They are defined by [RFC 2397](https://tools.ietf.org/html/rfc2397).
- *
- * This class allows parsing the URI text and extracting individual parts of the
- * URI, as well as building the URI text from structured parts.
- */
+/// A way to access the structure of a `data:` URI.
+///
+/// Data URIs are non-hierarchical URIs that can contain any binary data.
+/// They are defined by [RFC 2397](https://tools.ietf.org/html/rfc2397).
+///
+/// This class allows parsing the URI text, extracting individual parts of the
+/// URI, as well as building the URI text from structured parts.
 class UriData {
   static const int _noScheme = -1;
-  /**
-   * Contains the text content of a `data:` URI, with or without a
-   * leading `data:`.
-   *
-   * If [_separatorIndices] starts with `4` (the index of the `:`), then
-   * there is a leading `data:`, otherwise [_separatorIndices] starts with
-   * `-1`.
-   */
+
+  /// Contains the text content of a `data:` URI, with or without a
+  /// leading `data:`.
+  ///
+  /// If [_separatorIndices] starts with `4` (the index of the `:`), then
+  /// there is a leading `data:`, otherwise [_separatorIndices] starts with
+  /// `-1`.
   final String _text;
 
-  /**
-   * List of the separators (';', '=' and ',') in the text.
-   *
-   * Starts with the index of the `:` in `data:` of the mimeType.
-   * That is always either -1 or 4, depending on whether `_text` includes the
-   * `data:` scheme or not.
-   *
-   * The first speparator ends the mime type. We don't bother with finding
-   * the '/' inside the mime type.
-   *
-   * Each two separators after that marks a parameter key and value.
-   *
-   * If there is a single separator left, it ends the "base64" marker.
-   *
-   * So the following separators are found for a text:
-   * ```
-   * data:text/plain;foo=bar;base64,ARGLEBARGLE=
-   *     ^          ^   ^   ^      ^
-   * ```
-   */
+  /// List of the separators (';', '=' and ',') in the text.
+  ///
+  /// Starts with the index of the `:` in `data:` of the mimeType.
+  /// That is always either -1 or 4, depending on whether `_text` includes the
+  /// `data:` scheme or not.
+  ///
+  /// The first separator ends the mime type. We don't bother with finding
+  /// the '/' inside the mime type.
+  ///
+  /// Each two separators after that mark a parameter key and value.
+  ///
+  /// If there is a single separator left, it ends the "base64" marker.
+  ///
+  /// So the following separators are found for a text:
+  /// ```plaintext
+  /// data:text/plain;foo=bar;base64,ARGLEBARGLE=
+  ///     ^          ^   ^   ^      ^
+  /// ```
   final List<int> _separatorIndices;
 
-  /**
-   * Cache of the result returned by [uri].
-   */
-  Uri _uriCache;
+  /// Cache of the result returned by [uri].
+  Uri? _uriCache;
 
   UriData._(this._text, this._separatorIndices, this._uriCache);
 
-  /**
-   * Creates a `data:` URI containing the [content] string.
-   *
-   * Equivalent to `new Uri.dataFromString(...).data`, but may
-   * be more efficient if the [uri] itself isn't used.
-   */
+  // Avoid shadowing by argument.
+  static const Base64Codec _base64 = base64;
+
+  /// Creates a `data:` URI containing the [content] string.
+  ///
+  /// Equivalent to `Uri.dataFromString(...).data`, but may
+  /// be more efficient if the [uri] itself isn't used.
   factory UriData.fromString(String content,
-      {String mimeType,
-      Encoding encoding,
-      Map<String, String> parameters,
-      bool base64: false}) {
-    StringBuffer buffer = new StringBuffer();
+      {String? mimeType,
+      Encoding? encoding,
+      Map<String, String>? parameters,
+      bool base64 = false}) {
+    StringBuffer buffer = StringBuffer();
     List<int> indices = [_noScheme];
-    String charsetName;
-    String encodingName;
-    if (parameters != null) charsetName = parameters["charset"];
+    String? charsetName = parameters?["charset"];
+    String? encodingName;
     if (encoding == null) {
       if (charsetName != null) {
         encoding = Encoding.getByName(charsetName);
@@ -3182,31 +3406,29 @@ class UriData {
       // Non-null only if parameters does not contain "charset".
       encodingName = encoding.name;
     }
-    encoding ??= ASCII;
+    encoding ??= ascii;
     _writeUri(mimeType, encodingName, parameters, buffer, indices);
     indices.add(buffer.length);
     if (base64) {
       buffer.write(';base64,');
       indices.add(buffer.length - 1);
-      buffer.write(encoding.fuse(BASE64).encode(content));
+      buffer.write(encoding.fuse(_base64).encode(content));
     } else {
       buffer.write(',');
       _uriEncodeBytes(_uricTable, encoding.encode(content), buffer);
     }
-    return new UriData._(buffer.toString(), indices, null);
+    return UriData._(buffer.toString(), indices, null);
   }
 
-  /**
-   * Creates a `data:` URI containing an encoding of [bytes].
-   *
-   * Equivalent to `new Uri.dataFromBytes(...).data`, but may
-   * be more efficient if the [uri] itself isn't used.
-   */
+  /// Creates a `data:` URI containing an encoding of [bytes].
+  ///
+  /// Equivalent to `Uri.dataFromBytes(...).data`, but may
+  /// be more efficient if the [uri] itself isn't used.
   factory UriData.fromBytes(List<int> bytes,
-      {mimeType: "application/octet-stream",
-      Map<String, String> parameters,
-      percentEncoded: false}) {
-    StringBuffer buffer = new StringBuffer();
+      {String mimeType = "application/octet-stream",
+      Map<String, String>? parameters,
+      bool percentEncoded = false}) {
+    StringBuffer buffer = StringBuffer();
     List<int> indices = [_noScheme];
     _writeUri(mimeType, null, parameters, buffer, indices);
     indices.add(buffer.length);
@@ -3216,102 +3438,100 @@ class UriData {
     } else {
       buffer.write(';base64,');
       indices.add(buffer.length - 1);
-      BASE64.encoder
-          .startChunkedConversion(
-              new StringConversionSink.fromStringSink(buffer))
+      _base64.encoder
+          .startChunkedConversion(StringConversionSink.fromStringSink(buffer))
           .addSlice(bytes, 0, bytes.length, true);
     }
 
-    return new UriData._(buffer.toString(), indices, null);
+    return UriData._(buffer.toString(), indices, null);
   }
 
-  /**
-   * Creates a `DataUri` from a [Uri] which must have `data` as [Uri.scheme].
-   *
-   * The [uri] must have scheme `data` and no authority or fragment,
-   * and the path (concatenated with the query, if there is one) must be valid
-   * as data URI content with the same rules as [parse].
-   */
+  /// Creates a `DataUri` from a [Uri] which must have `data` as [Uri.scheme].
+  ///
+  /// The [uri] must have scheme `data` and no authority or fragment,
+  /// and the path (concatenated with the query, if there is one) must be valid
+  /// as data URI content with the same rules as [parse].
   factory UriData.fromUri(Uri uri) {
-    if (uri.scheme != "data") {
-      throw new ArgumentError.value(uri, "uri", "Scheme must be 'data'");
+    if (!uri.isScheme("data")) {
+      throw ArgumentError.value(uri, "uri", "Scheme must be 'data'");
     }
     if (uri.hasAuthority) {
-      throw new ArgumentError.value(
-          uri, "uri", "Data uri must not have authority");
+      throw ArgumentError.value(uri, "uri", "Data uri must not have authority");
     }
     if (uri.hasFragment) {
-      throw new ArgumentError.value(
+      throw ArgumentError.value(
           uri, "uri", "Data uri must not have a fragment part");
     }
     if (!uri.hasQuery) {
       return _parse(uri.path, 0, uri);
     }
     // Includes path and query (and leading "data:").
-    return _parse("$uri", 5, uri);
+    return _parse(uri.toString(), 5, uri);
   }
 
-  /**
-   * Writes the initial part of a `data:` uri, from after the "data:"
-   * until just before the ',' before the data, or before a `;base64,`
-   * marker.
-   *
-   * Of an [indices] list is passed, separator indices are stored in that
-   * list.
-   */
-  static void _writeUri(String mimeType, String charsetName,
-      Map<String, String> parameters, StringBuffer buffer, List indices) {
+  /// Writes the initial part of a `data:` uri, from after the "data:"
+  /// until just before the ',' before the data, or before a `;base64,`
+  /// marker.
+  ///
+  /// If an [indices] list is passed, separator indices are stored in that
+  /// list.
+  static void _writeUri(
+      String? mimeType,
+      String? charsetName,
+      Map<String, String>? parameters,
+      StringBuffer buffer,
+      List<int>? indices) {
     if (mimeType == null || mimeType == "text/plain") {
       mimeType = "";
     }
+
     if (mimeType.isEmpty || identical(mimeType, "application/octet-stream")) {
       buffer.write(mimeType); // Common cases need no escaping.
     } else {
       int slashIndex = _validateMimeType(mimeType);
       if (slashIndex < 0) {
-        throw new ArgumentError.value(
-            mimeType, "mimeType", "Invalid MIME type");
+        throw ArgumentError.value(mimeType, "mimeType", "Invalid MIME type");
       }
       buffer.write(_Uri._uriEncode(
-          _tokenCharTable, mimeType.substring(0, slashIndex), UTF8, false));
+          _tokenCharTable, mimeType.substring(0, slashIndex), utf8, false));
       buffer.write("/");
       buffer.write(_Uri._uriEncode(
-          _tokenCharTable, mimeType.substring(slashIndex + 1), UTF8, false));
+          _tokenCharTable, mimeType.substring(slashIndex + 1), utf8, false));
     }
     if (charsetName != null) {
-      if (indices != null) {
-        indices..add(buffer.length)..add(buffer.length + 8);
-      }
+      // TODO(39209): Use ?.. when sequences are properly supported.
+      if (indices != null)
+        indices
+          ..add(buffer.length)
+          ..add(buffer.length + 8);
       buffer.write(";charset=");
-      buffer.write(_Uri._uriEncode(_tokenCharTable, charsetName, UTF8, false));
+      buffer.write(_Uri._uriEncode(_tokenCharTable, charsetName, utf8, false));
     }
-    parameters?.forEach((var key, var value) {
+    parameters?.forEach((key, value) {
       if (key.isEmpty) {
-        throw new ArgumentError.value("", "Parameter names must not be empty");
+        throw ArgumentError.value("", "Parameter names must not be empty");
       }
       if (value.isEmpty) {
-        throw new ArgumentError.value(
+        throw ArgumentError.value(
             "", "Parameter values must not be empty", 'parameters["$key"]');
       }
-      if (indices != null) indices.add(buffer.length);
+      indices?.add(buffer.length);
       buffer.write(';');
       // Encode any non-RFC2045-token character and both '%' and '#'.
-      buffer.write(_Uri._uriEncode(_tokenCharTable, key, UTF8, false));
-      if (indices != null) indices.add(buffer.length);
+      buffer.write(_Uri._uriEncode(_tokenCharTable, key, utf8, false));
+      indices?.add(buffer.length);
       buffer.write('=');
-      buffer.write(_Uri._uriEncode(_tokenCharTable, value, UTF8, false));
+      buffer.write(_Uri._uriEncode(_tokenCharTable, value, utf8, false));
     });
   }
 
-  /**
-   * Checks mimeType is valid-ish (`token '/' token`).
-   *
-   * Returns the index of the slash, or -1 if the mime type is not
-   * considered valid.
-   *
-   * Currently only looks for slashes, all other characters will be
-   * percent-encoded as UTF-8 if necessary.
-   */
+  /// Checks mimeType is valid-ish (`token '/' token`).
+  ///
+  /// Returns the index of the slash, or -1 if the mime type is not
+  /// considered valid.
+  ///
+  /// Currently only looks for slashes, all other characters will be
+  /// percent-encoded as UTF-8 if necessary.
   static int _validateMimeType(String mimeType) {
     int slashIndex = -1;
     for (int i = 0; i < mimeType.length; i++) {
@@ -3326,32 +3546,32 @@ class UriData {
     return slashIndex;
   }
 
-  /**
-   * Parses a string as a `data` URI.
-   *
-   * The string must have the format:
-   *
-   * ```
-   * 'data:' (type '/' subtype)? (';' attribute '=' value)* (';base64')? ',' data
-   * ````
-   *
-   * where `type`, `subtype`, `attribute` and `value` are specified in RFC-2045,
-   * and `data` is a sequence of URI-characters (RFC-2396 `uric`).
-   *
-   * This means that all the characters must be ASCII, but the URI may contain
-   * percent-escapes for non-ASCII byte values that need an interpretation
-   * to be converted to the corresponding string.
-   *
-   * Parsing checks that Base64 encoded data is valid, and it normalizes it
-   * to use the default Base64 alphabet and to use padding.
-   * Non-Base64 data is escaped using percent-escapes as necessary to make
-   * it valid, and existing escapes are case normalized.
-   *
-   * Accessing the individual parts may fail later if they turn out to have
-   * content that can't be decoded successfully as a string, for example if
-   * existing percent escapes represent bytes that cannot be decoded
-   * by the chosen [Encoding] (see [contentAsString]).
-   */
+  /// Parses a string as a `data` URI.
+  ///
+  /// The string must have the format:
+  ///
+  /// ```plaintext
+  /// 'data:' (type '/' subtype)? (';' attribute '=' value)* (';base64')? ',' data
+  /// ````
+  ///
+  /// where `type`, `subtype`, `attribute` and `value` are specified in RFC-2045,
+  /// and `data` is a sequence of URI-characters (RFC-2396 `uric`).
+  ///
+  /// This means that all the characters must be ASCII, but the URI may contain
+  /// percent-escapes for non-ASCII byte values that need an interpretation
+  /// to be converted to the corresponding string.
+  ///
+  /// Parsing checks that Base64 encoded data is valid, and it normalizes it
+  /// to use the default Base64 alphabet and to use padding.
+  /// Non-Base64 data is escaped using percent-escapes as necessary to make
+  /// it valid, and existing escapes are case normalized.
+  ///
+  /// Accessing the individual parts may fail later if they turn out to have
+  /// content that cannot be decoded successfully as a string, for example if
+  /// existing percent escapes represent bytes that cannot be decoded
+  /// by the chosen [Encoding] (see [contentAsString]).
+  ///
+  /// A [FormatException] is thrown if [uri] is not a valid data URI.
   static UriData parse(String uri) {
     if (uri.length >= 5) {
       int dataDelta = _startsWithData(uri, 0);
@@ -3365,19 +3585,20 @@ class UriData {
         return _parse(uri.substring(5), 0, null);
       }
     }
-    throw new FormatException("Does not start with 'data:'", uri, 0);
+    throw FormatException("Does not start with 'data:'", uri, 0);
   }
 
-  /**
-   * The [Uri] that this `UriData` is giving access to.
-   *
-   * Returns a `Uri` with scheme `data` and the remainder of the data URI
-   * as path.
-   */
+  /// The [Uri] that this `UriData` is giving access to.
+  ///
+  /// Returns a `Uri` with scheme `data` and the remainder of the data URI
+  /// as path.
   Uri get uri {
-    if (_uriCache != null) return _uriCache;
+    return _uriCache ??= _computeUri();
+  }
+
+  Uri _computeUri() {
     String path = _text;
-    String query = null;
+    String? query;
     int colonIndex = _separatorIndices[0];
     int queryIndex = _text.indexOf('?', colonIndex + 1);
     int end = _text.length;
@@ -3388,48 +3609,43 @@ class UriData {
     }
     path = _Uri._normalizeOrSubstring(
         _text, colonIndex + 1, end, _Uri._pathCharOrSlashTable);
-    _uriCache = new _DataUri(this, path, query);
-    return _uriCache;
+    return _DataUri(this, path, query);
   }
 
-  /**
-   * The MIME type of the data URI.
-   *
-   * A data URI consists of a "media type" followed by data.
-   * The media type starts with a MIME type and can be followed by
-   * extra parameters.
-   * If the MIME type representation in the URI text contains URI escapes,
-   * they are unescaped in the returned string.
-   * If the value contain non-ASCII percent escapes, they are decoded as UTF-8.
-   *
-   * Example:
-   *
-   *     data:text/plain;charset=utf-8,Hello%20World!
-   *
-   * This data URI has the media type `text/plain;charset=utf-8`, which is the
-   * MIME type `text/plain` with the parameter `charset` with value `utf-8`.
-   * See [RFC 2045](https://tools.ietf.org/html/rfc2045) for more detail.
-   *
-   * If the first part of the data URI is empty, it defaults to `text/plain`.
-   */
+  /// The MIME type of the data URI.
+  ///
+  /// A data URI consists of a "media type" followed by data.
+  /// The media type starts with a MIME type and can be followed by
+  /// extra parameters.
+  /// If the MIME type representation in the URI text contains URI escapes,
+  /// they are unescaped in the returned string.
+  /// If the value contain non-ASCII percent escapes, they are decoded as UTF-8.
+  ///
+  /// Example:
+  /// ```
+  /// data:text/plain;charset=utf-8,Hello%20World!
+  /// ```
+  /// This data URI has the media type `text/plain;charset=utf-8`, which is the
+  /// MIME type `text/plain` with the parameter `charset` with value `utf-8`.
+  /// See [RFC 2045](https://tools.ietf.org/html/rfc2045) for more detail.
+  ///
+  /// If the first part of the data URI is empty, it defaults to `text/plain`.
   String get mimeType {
     int start = _separatorIndices[0] + 1;
     int end = _separatorIndices[1];
     if (start == end) return "text/plain";
-    return _Uri._uriDecode(_text, start, end, UTF8, false);
+    return _Uri._uriDecode(_text, start, end, utf8, false);
   }
 
-  /**
-   * The charset parameter of the media type.
-   *
-   * If the parameters of the media type contains a `charset` parameter
-   * then this returns its value, otherwise it returns `US-ASCII`,
-   * which is the default charset for data URIs.
-   * If the value contain non-ASCII percent escapes, they are decoded as UTF-8.
-   *
-   * If the MIME type representation in the URI text contains URI escapes,
-   * they are unescaped in the returned string.
-   */
+  /// The charset parameter of the media type.
+  ///
+  /// If the parameters of the media type contains a `charset` parameter
+  /// then this returns its value, otherwise it returns `US-ASCII`,
+  /// which is the default charset for data URIs.
+  /// If the values contain non-ASCII percent escapes, they are decoded as UTF-8.
+  ///
+  /// If the MIME type representation in the URI text contains URI escapes,
+  /// they are unescaped in the returned string.
   String get charset {
     int parameterStart = 1;
     int parameterEnd = _separatorIndices.length - 1; // The ',' before data.
@@ -3442,38 +3658,32 @@ class UriData {
       var keyEnd = _separatorIndices[i + 1];
       if (keyEnd == keyStart + 7 && _text.startsWith("charset", keyStart)) {
         return _Uri._uriDecode(
-            _text, keyEnd + 1, _separatorIndices[i + 2], UTF8, false);
+            _text, keyEnd + 1, _separatorIndices[i + 2], utf8, false);
       }
     }
     return "US-ASCII";
   }
 
-  /**
-   * Whether the data is Base64 encoded or not.
-   */
+  /// Whether the data is Base64 encoded or not.
   bool get isBase64 => _separatorIndices.length.isOdd;
 
-  /**
-   * The content part of the data URI, as its actual representation.
-   *
-   * This string may contain percent escapes.
-   */
+  /// The content part of the data URI, as its actual representation.
+  ///
+  /// This string may contain percent escapes.
   String get contentText => _text.substring(_separatorIndices.last + 1);
 
-  /**
-   * The content part of the data URI as bytes.
-   *
-   * If the data is Base64 encoded, it will be decoded to bytes.
-   *
-   * If the data is not Base64 encoded, it will be decoded by unescaping
-   * percent-escaped characters and returning byte values of each unescaped
-   * character. The bytes will not be, e.g., UTF-8 decoded.
-   */
-  List<int> contentAsBytes() {
+  /// The content part of the data URI as bytes.
+  ///
+  /// If the data is Base64 encoded, it will be decoded to bytes.
+  ///
+  /// If the data is not Base64 encoded, it will be decoded by unescaping
+  /// percent-escaped characters and returning byte values of each unescaped
+  /// character. The bytes will not be, e.g., UTF-8 decoded.
+  Uint8List contentAsBytes() {
     String text = _text;
     int start = _separatorIndices.last + 1;
     if (isBase64) {
-      return BASE64.decoder.convert(text, start);
+      return base64.decoder.convert(text, start);
     }
 
     // Not base64, do percent-decoding and return the remaining bytes.
@@ -3488,7 +3698,7 @@ class UriData {
       }
     }
     // Fill result array.
-    Uint8List result = new Uint8List(length);
+    Uint8List result = Uint8List(length);
     if (length == text.length) {
       result.setRange(0, length, text.codeUnits, start);
       return result;
@@ -3507,72 +3717,68 @@ class UriData {
             continue;
           }
         }
-        throw new FormatException("Invalid percent escape", text, i);
+        throw FormatException("Invalid percent escape", text, i);
       }
     }
     assert(index == result.length);
     return result;
   }
 
-  /**
-   * Returns a string created from the content of the data URI.
-   *
-   * If the content is Base64 encoded, it will be decoded to bytes and then
-   * decoded to a string using [encoding].
-   * If encoding is omitted, the value of a `charset` parameter is used
-   * if it is recognized by [Encoding.getByName], otherwise it defaults to
-   * the [ASCII] encoding, which is the default encoding for data URIs
-   * that do not specify an encoding.
-   *
-   * If the content is not Base64 encoded, it will first have percent-escapes
-   * converted to bytes and then the character codes and byte values are
-   * decoded using [encoding].
-   */
-  String contentAsString({Encoding encoding}) {
+  /// Creates a string from the content of the data URI.
+  ///
+  /// If the content is Base64 encoded, it will be decoded to bytes and then
+  /// decoded to a string using [encoding].
+  /// If encoding is omitted, the value of a `charset` parameter is used
+  /// if it is recognized by [Encoding.getByName]; otherwise it defaults to
+  /// the [ascii] encoding, which is the default encoding for data URIs
+  /// that do not specify an encoding.
+  ///
+  /// If the content is not Base64 encoded, it will first have percent-escapes
+  /// converted to bytes and then the character codes and byte values are
+  /// decoded using [encoding].
+  String contentAsString({Encoding? encoding}) {
     if (encoding == null) {
       var charset = this.charset; // Returns "US-ASCII" if not present.
       encoding = Encoding.getByName(charset);
       if (encoding == null) {
-        throw new UnsupportedError("Unknown charset: $charset");
+        throw UnsupportedError("Unknown charset: $charset");
       }
     }
     String text = _text;
     int start = _separatorIndices.last + 1;
     if (isBase64) {
-      var converter = BASE64.decoder.fuse(encoding.decoder);
+      var converter = base64.decoder.fuse(encoding.decoder);
       return converter.convert(text.substring(start));
     }
     return _Uri._uriDecode(text, start, text.length, encoding, false);
   }
 
-  /**
-   * A map representing the parameters of the media type.
-   *
-   * A data URI may contain parameters between the MIME type and the
-   * data. This converts these parameters to a map from parameter name
-   * to parameter value.
-   * The map only contains parameters that actually occur in the URI.
-   * The `charset` parameter has a default value even if it doesn't occur
-   * in the URI, which is reflected by the [charset] getter. This means that
-   * [charset] may return a value even if `parameters["charset"]` is `null`.
-   *
-   * If the values contain non-ASCII values or percent escapes,
-   * they are decoded as UTF-8.
-   */
+  /// A map representing the parameters of the media type.
+  ///
+  /// A data URI may contain parameters between the MIME type and the
+  /// data. This converts these parameters to a map from parameter name
+  /// to parameter value.
+  /// The map only contains parameters that actually occur in the URI.
+  /// The `charset` parameter has a default value even if it doesn't occur
+  /// in the URI, which is reflected by the [charset] getter. This means that
+  /// [charset] may return a value even if `parameters["charset"]` is `null`.
+  ///
+  /// If the values contain non-ASCII values or percent escapes,
+  /// they are decoded as UTF-8.
   Map<String, String> get parameters {
     var result = <String, String>{};
     for (int i = 3; i < _separatorIndices.length; i += 2) {
       var start = _separatorIndices[i - 2] + 1;
       var equals = _separatorIndices[i - 1];
       var end = _separatorIndices[i];
-      String key = _Uri._uriDecode(_text, start, equals, UTF8, false);
-      String value = _Uri._uriDecode(_text, equals + 1, end, UTF8, false);
+      String key = _Uri._uriDecode(_text, start, equals, utf8, false);
+      String value = _Uri._uriDecode(_text, equals + 1, end, utf8, false);
       result[key] = value;
     }
     return result;
   }
 
-  static UriData _parse(String text, int start, Uri sourceUri) {
+  static UriData _parse(String text, int start, Uri? sourceUri) {
     assert(start == 0 || start == 5);
     assert((start == 5) == text.startsWith("data:"));
 
@@ -3593,13 +3799,13 @@ class UriData {
           slashIndex = i;
           continue;
         }
-        throw new FormatException("Invalid MIME type", text, i);
+        throw FormatException("Invalid MIME type", text, i);
       }
     }
     if (slashIndex < 0 && i > start) {
       // An empty MIME type is allowed, but if non-empty it must contain
       // exactly one slash.
-      throw new FormatException("Invalid MIME type", text, i);
+      throw FormatException("Invalid MIME type", text, i);
     }
     while (char != comma) {
       // Parse parameters and/or "base64".
@@ -3622,7 +3828,7 @@ class UriData {
         if (char != comma ||
             i != lastSeparator + 7 /* "base64,".length */ ||
             !text.startsWith("base64", lastSeparator + 1)) {
-          throw new FormatException("Expecting '='", text, i);
+          throw FormatException("Expecting '='", text, i);
         }
         break;
       }
@@ -3630,7 +3836,7 @@ class UriData {
     indices.add(i);
     bool isBase64 = indices.length.isOdd;
     if (isBase64) {
-      text = BASE64.normalize(text, i + 1, text.length);
+      text = base64.normalize(text, i + 1, text.length);
     } else {
       // Validate "data" part, must only contain RFC 2396 'uric' characters
       // (reserved, unreserved, or escape sequences).
@@ -3641,14 +3847,12 @@ class UriData {
         text = text.replaceRange(i + 1, text.length, data);
       }
     }
-    return new UriData._(text, indices, sourceUri);
+    return UriData._(text, indices, sourceUri);
   }
 
-  /**
-   * Like [Uri._uriEncode] but takes the input as bytes, not a string.
-   *
-   * Encodes into [buffer] instead of creating its own buffer.
-   */
+  /// Like [Uri._uriEncode] but takes the input as bytes, not a string.
+  ///
+  /// Encodes into [buffer] instead of creating its own buffer.
   static void _uriEncodeBytes(
       List<int> canonicalTable, List<int> bytes, StringSink buffer) {
     // Encode the string into bytes then generate an ASCII only string
@@ -3670,7 +3874,7 @@ class UriData {
       for (int i = 0; i < bytes.length; i++) {
         var byte = bytes[i];
         if (byte < 0 || byte > 255) {
-          throw new ArgumentError.value(byte, "non-byte value");
+          throw ArgumentError.value(byte, "non-byte value");
         }
       }
     }
@@ -3686,7 +3890,7 @@ class UriData {
   // '(', ')', '<', '>', '@', ',', ';', ':', '\', '"', '/', '[, ']', '?', '='.
   //
   // In a data URI, we also need to escape '%' and '#' characters.
-  static const _tokenCharTable = const [
+  static const _tokenCharTable = [
     //                     LSB             MSB
     //                      |               |
     0x0000, // 0x00 - 0x0f  00000000 00000000
@@ -3714,26 +3918,6 @@ class UriData {
   //
   // This is the same characters as in a URI query (which is URI pchar plus '?')
   static const _uricTable = _Uri._queryCharTable;
-
-  // Characters allowed in base-64 encoding (alphanumeric, '/', '+' and '=').
-  static const _base64Table = const [
-    //                     LSB             MSB
-    //                      |               |
-    0x0000, // 0x00 - 0x0f  00000000 00000000
-    0x0000, // 0x10 - 0x1f  00000000 00000000
-    //                                  +   /
-    0x8800, // 0x20 - 0x2f  00000000 00010001
-    //                      01234567 89
-    0x03ff, // 0x30 - 0x3f  11111111 11000000
-    //                       ABCDEFG HIJKLMNO
-    0xfffe, // 0x40 - 0x4f  01111111 11111111
-    //                      PQRSTUVW XYZ
-    0x07ff, // 0x50 - 0x5f  11111111 11100000
-    //                       abcdefg hijklmno
-    0xfffe, // 0x60 - 0x6f  01111111 11111111
-    //                      pqrstuvw xyz
-    0x07ff, // 0x70 - 0x7f  11111111 11100000
-  ];
 }
 
 // --------------------------------------------------------------------
@@ -3773,7 +3957,7 @@ const int _nonSimpleEndStates = 14;
 // Initial state for scheme validation.
 const int _schemeStart = 20;
 
-/// Transition tables used to scan a URI to determine its structure.
+/// Transition tables are used to scan a URI to determine its structure.
 ///
 /// The tables represent a state machine with output.
 ///
@@ -3788,13 +3972,13 @@ const int _schemeStart = 20;
 /// and a 3-bit index into the output table.
 ///
 /// For URI scanning, only characters in the range U+0020 through U+007E are
-/// interesting, all characters outside that range are treated the same.
-/// The tables only contain 96 entries, representing that characters in the
+/// interesting; all characters outside that range are treated the same.
+/// The tables only contain 96 entries, representing the characters in the
 /// interesting range, plus one more to represent all values outside the range.
 /// The character entries are stored in one `Uint8List` per state, with the
 /// transition for a character at position `character ^ 0x60`,
 /// which maps the range U+0020 .. U+007F into positions 0 .. 95.
-/// All remaining characters are mapped to position 31 (`0x7f ^ 0x60`) which
+/// All remaining characters are mapped to position 31 (`0x7f ^ 0x60`), which
 /// represents the transition for all remaining characters.
 final List<Uint8List> _scannerTables = _createTables();
 
@@ -3917,8 +4101,7 @@ List<Uint8List> _createTables() {
   // excluding escapes.
   const pchar = "$unreserved$subDelims";
 
-  var tables =
-      new List<Uint8List>.generate(stateCount, (_) => new Uint8List(96));
+  var tables = List<Uint8List>.generate(stateCount, (_) => Uint8List(96));
 
   // Helper function which initialize the table for [state] with a default
   // transition and returns the table.
@@ -4106,7 +4289,7 @@ List<Uint8List> _createTables() {
 
 /// Scan a string using the [_scannerTables] state machine.
 ///
-/// Scans [uri] from [start] to [end], startig in state [state] and
+/// Scans [uri] from [start] to [end], starting in state [state] and
 /// writing output into [indices].
 ///
 /// Returns the final state.
@@ -4138,8 +4321,8 @@ class _SimpleUri implements Uri {
   /// The scheme is often used to distinguish URIs.
   /// To make comparisons more efficient, we cache the value, and
   /// canonicalize a few known types.
-  String _schemeCache;
-  int _hashCodeCache;
+  String? _schemeCache;
+  int? _hashCodeCache;
 
   _SimpleUri(
       this._uri,
@@ -4179,20 +4362,16 @@ class _SimpleUri implements Uri {
   }
 
   String get scheme {
+    return _schemeCache ??= _computeScheme();
+  }
+
+  String _computeScheme() {
     if (_schemeEnd <= 0) return "";
-    if (_schemeCache != null) return _schemeCache;
-    if (_isHttp) {
-      _schemeCache = "http";
-    } else if (_isHttps) {
-      _schemeCache = "https";
-    } else if (_isFile) {
-      _schemeCache = "file";
-    } else if (_isPackage) {
-      _schemeCache = "package";
-    } else {
-      _schemeCache = _uri.substring(0, _schemeEnd);
-    }
-    return _schemeCache;
+    if (_isHttp) return "http";
+    if (_isHttps) return "https";
+    if (_isFile) return "file";
+    if (_isPackage) return "package";
+    return _uri.substring(0, _schemeEnd);
   }
 
   String get authority =>
@@ -4220,14 +4399,14 @@ class _SimpleUri implements Uri {
     // Check original behavior - W3C spec is wonky!
     bool isHttp = _isHttp;
     if (_schemeEnd < 0) {
-      throw new StateError("Cannot use origin without a scheme: $this");
+      throw StateError("Cannot use origin without a scheme: $this");
     }
     if (!isHttp && !_isHttps) {
-      throw new StateError(
+      throw StateError(
           "Origin is only applicable to schemes http and https: $this");
     }
     if (_hostStart == _portStart) {
-      throw new StateError(
+      throw StateError(
           "A $scheme: URI should have a non-empty host name: $this");
     }
     if (_hostStart == _schemeEnd + 3) {
@@ -4252,22 +4431,20 @@ class _SimpleUri implements Uri {
       }
     }
     parts.add(_uri.substring(start, end));
-    return new List<String>.unmodifiable(parts);
+    return List<String>.unmodifiable(parts);
   }
 
   Map<String, String> get queryParameters {
     if (!hasQuery) return const <String, String>{};
-    return new UnmodifiableMapView<String, String>(Uri.splitQueryString(query));
+    return UnmodifiableMapView<String, String>(Uri.splitQueryString(query));
   }
 
   Map<String, List<String>> get queryParametersAll {
     if (!hasQuery) return const <String, List<String>>{};
-    Map queryParameterLists = _Uri._splitQueryStringAll(query);
-    for (var key in queryParameterLists.keys) {
-      queryParameterLists[key] =
-          new List<String>.unmodifiable(queryParameterLists[key]);
-    }
-    return new Map<String, List<String>>.unmodifiable(queryParameterLists);
+    Map<String, List<String>> queryParameterLists =
+        _Uri._splitQueryStringAll(query);
+    queryParameterLists.updateAll(_toUnmodifiableStringList);
+    return Map<String, List<String>>.unmodifiable(queryParameterLists);
   }
 
   bool _isPort(String port) {
@@ -4280,27 +4457,20 @@ class _SimpleUri implements Uri {
 
   Uri removeFragment() {
     if (!hasFragment) return this;
-    return new _SimpleUri(
-        _uri.substring(0, _fragmentStart),
-        _schemeEnd,
-        _hostStart,
-        _portStart,
-        _pathStart,
-        _queryStart,
-        _fragmentStart,
-        _schemeCache);
+    return _SimpleUri(_uri.substring(0, _fragmentStart), _schemeEnd, _hostStart,
+        _portStart, _pathStart, _queryStart, _fragmentStart, _schemeCache);
   }
 
   Uri replace(
-      {String scheme,
-      String userInfo,
-      String host,
-      int port,
-      String path,
-      Iterable<String> pathSegments,
-      String query,
-      Map<String, dynamic /*String|Iterable<String>*/ > queryParameters,
-      String fragment}) {
+      {String? scheme,
+      String? userInfo,
+      String? host,
+      int? port,
+      String? path,
+      Iterable<String>? pathSegments,
+      String? query,
+      Map<String, dynamic /*String|Iterable<String>*/ >? queryParameters,
+      String? fragment}) {
     bool schemeChanged = false;
     if (scheme != null) {
       scheme = _Uri._makeScheme(scheme, 0, scheme.length);
@@ -4358,8 +4528,7 @@ class _SimpleUri implements Uri {
       fragment = _uri.substring(_fragmentStart + 1);
     }
 
-    return new _Uri._internal(
-        scheme, userInfo, host, port, path, query, fragment);
+    return _Uri._internal(scheme, userInfo, host, port, path, query, fragment);
   }
 
   Uri resolve(String reference) {
@@ -4371,6 +4540,25 @@ class _SimpleUri implements Uri {
       return _simpleMerge(this, reference);
     }
     return _toNonSimple().resolveUri(reference);
+  }
+
+  // Returns the index of the `/` after the package name of a package URI.
+  //
+  // Returns negative if the URI is not a valid package URI:
+  // * Scheme must be "package".
+  // * No authority.
+  // * Path starts with "something"/
+  // * where "something" is not all "." characters,
+  // * and contains no escapes or colons.
+  //
+  // The characters are necessarily valid path characters.
+  static int _packageNameEnd(_SimpleUri uri) {
+    if (uri._isPackage && !uri.hasAuthority) {
+      // Becomes Non zero if seeing any non-dot character.
+      // Also guards against empty package names.
+      return _skipPackageNameChars(uri._uri, uri._pathStart, uri._queryStart);
+    }
+    return -1;
   }
 
   // Merge two simple URIs. This should always result in a prefix of
@@ -4394,7 +4582,7 @@ class _SimpleUri implements Uri {
         var delta = base._schemeEnd + 1;
         var newUri = base._uri.substring(0, base._schemeEnd + 1) +
             ref._uri.substring(ref._schemeEnd + 1);
-        return new _SimpleUri(
+        return _SimpleUri(
             newUri,
             base._schemeEnd,
             ref._hostStart + delta,
@@ -4413,7 +4601,7 @@ class _SimpleUri implements Uri {
         int delta = base._queryStart - ref._queryStart;
         var newUri = base._uri.substring(0, base._queryStart) +
             ref._uri.substring(ref._queryStart);
-        return new _SimpleUri(
+        return _SimpleUri(
             newUri,
             base._schemeEnd,
             base._hostStart,
@@ -4427,7 +4615,7 @@ class _SimpleUri implements Uri {
         int delta = base._fragmentStart - ref._fragmentStart;
         var newUri = base._uri.substring(0, base._fragmentStart) +
             ref._uri.substring(ref._fragmentStart);
-        return new _SimpleUri(
+        return _SimpleUri(
             newUri,
             base._schemeEnd,
             base._hostStart,
@@ -4440,10 +4628,13 @@ class _SimpleUri implements Uri {
       return base.removeFragment();
     }
     if (ref.hasAbsolutePath) {
-      var delta = base._pathStart - ref._pathStart;
-      var newUri = base._uri.substring(0, base._pathStart) +
+      int basePathStart = base._pathStart;
+      int packageNameEnd = _packageNameEnd(this);
+      if (packageNameEnd > 0) basePathStart = packageNameEnd;
+      var delta = basePathStart - ref._pathStart;
+      var newUri = base._uri.substring(0, basePathStart) +
           ref._uri.substring(ref._pathStart);
-      return new _SimpleUri(
+      return _SimpleUri(
           newUri,
           base._schemeEnd,
           base._hostStart,
@@ -4463,7 +4654,7 @@ class _SimpleUri implements Uri {
       var delta = base._pathStart - refStart + 1;
       var newUri = "${base._uri.substring(0, base._pathStart)}/"
           "${ref._uri.substring(refStart)}";
-      return new _SimpleUri(
+      return _SimpleUri(
           newUri,
           base._schemeEnd,
           base._hostStart,
@@ -4488,7 +4679,12 @@ class _SimpleUri implements Uri {
     String refUri = ref._uri;
     int baseStart = base._pathStart;
     int baseEnd = base._queryStart;
-    while (baseUri.startsWith("../", baseStart)) baseStart += 3;
+    int packageNameEnd = _packageNameEnd(this);
+    if (packageNameEnd >= 0) {
+      baseStart = packageNameEnd; // At the `/` after the first package name.
+    } else {
+      while (baseUri.startsWith("../", baseStart)) baseStart += 3;
+    }
     int refStart = ref._pathStart;
     int refEnd = ref._queryStart;
 
@@ -4542,7 +4738,7 @@ class _SimpleUri implements Uri {
     var newUri = "${base._uri.substring(0, baseEnd)}$insert"
         "${ref._uri.substring(refStart)}";
 
-    return new _SimpleUri(
+    return _SimpleUri(
         newUri,
         base._schemeEnd,
         base._hostStart,
@@ -4553,34 +4749,34 @@ class _SimpleUri implements Uri {
         base._schemeCache);
   }
 
-  String toFilePath({bool windows}) {
+  String toFilePath({bool? windows}) {
     if (_schemeEnd >= 0 && !_isFile) {
-      throw new UnsupportedError(
-          "Cannot extract a file path from a $scheme URI");
+      throw UnsupportedError("Cannot extract a file path from a $scheme URI");
     }
     if (_queryStart < _uri.length) {
       if (_queryStart < _fragmentStart) {
-        throw new UnsupportedError(
+        throw UnsupportedError(
             "Cannot extract a file path from a URI with a query component");
       }
-      throw new UnsupportedError(
+      throw UnsupportedError(
           "Cannot extract a file path from a URI with a fragment component");
     }
-    if (windows == null) windows = _Uri._isWindows;
-    return windows ? _Uri._toWindowsFilePath(this) : _toFilePath();
+    return (windows ?? _Uri._isWindows)
+        ? _Uri._toWindowsFilePath(this)
+        : _toFilePath();
   }
 
   String _toFilePath() {
     if (_hostStart < _portStart) {
       // Has authority and non-empty host.
-      throw new UnsupportedError(
+      throw UnsupportedError(
           "Cannot extract a non-Windows file path from a file URI "
           "with an authority");
     }
     return this.path;
   }
 
-  UriData get data {
+  UriData? get data {
     assert(scheme != "data");
     return null;
   }
@@ -4589,12 +4785,11 @@ class _SimpleUri implements Uri {
 
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    if (other is Uri) return _uri == other.toString();
-    return false;
+    return other is Uri && _uri == other.toString();
   }
 
   Uri _toNonSimple() {
-    return new _Uri._internal(
+    return _Uri._internal(
         this.scheme,
         this.userInfo,
         this.hasAuthority ? this.host : null,
@@ -4611,10 +4806,10 @@ class _SimpleUri implements Uri {
 class _DataUri extends _Uri {
   final UriData _data;
 
-  _DataUri(this._data, String path, String query)
-      : super._internal("data", null, null, null, path, query, null);
+  _DataUri(this._data, String path, String? query)
+      : super._internal("data", "", null, null, path, query, null);
 
-  UriData get data => _data;
+  UriData? get data => _data;
 }
 
 /// Checks whether [text] starts with "data:" at position [start].
@@ -4636,4 +4831,29 @@ int _startsWithData(String text, int start) {
 }
 
 /// Helper function returning the length of a string, or `0` for `null`.
-int _stringOrNullLength(String s) => (s == null) ? 0 : s.length;
+int _stringOrNullLength(String? s) => (s == null) ? 0 : s.length;
+
+List<String> _toUnmodifiableStringList(String key, List<String> list) =>
+    List<String>.unmodifiable(list);
+
+/// Counts valid package name characters in [source].
+///
+/// If [source] starts at [start] with a valid package name,
+/// followed by a `/`, no later than [end],
+/// then the position of the `/` is returned.
+/// If not, a negative value is returned.
+/// (Assumes source characters are valid path characters.)
+/// A name only consisting of `.` characters is not a valid
+/// package name.
+int _skipPackageNameChars(String source, int start, int end) {
+  // Becomes non-zero when seeing a non-dot character.
+  // Also guards against empty package names.
+  var dots = 0;
+  for (var i = start; i < end; i++) {
+    var char = source.codeUnitAt(i);
+    if (char == _SLASH) return (dots != 0) ? i : -1;
+    if (char == _PERCENT || char == _COLON) return -1;
+    dots |= char ^ _DOT;
+  }
+  return -1;
+}

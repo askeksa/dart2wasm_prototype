@@ -6,30 +6,36 @@ part of repositories;
 
 class AllocationProfileRepository implements M.AllocationProfileRepository {
   static const _api = '_getAllocationProfile';
+  static const _defaultsApi = '_getDefaultClassesAliases';
 
   Future<M.AllocationProfile> get(M.IsolateRef i,
-      {bool gc: false, bool reset: false}) async {
+      {bool gc: false, bool reset: false, bool combine: false}) async {
     assert(gc != null);
     assert(reset != null);
     S.Isolate isolate = i as S.Isolate;
     assert(isolate != null);
     var params = {};
-    if (gc == true) {
-      params['gc'] = 'full';
+    if (gc) {
+      params['gc'] = 'true';
     }
-    if (reset == true) {
+    if (reset) {
       params['reset'] = true;
     }
-    final response = await isolate.invokeRpc(_api, params);
-    isolate.updateHeapsFromMap(response['heaps']);
+    final dynamic response = await isolate.invokeRpc(_api, params);
+    Map? defaults;
+    if (combine) {
+      defaults = await isolate.vm.invokeRpcNoUpgrade(_defaultsApi, {});
+      defaults = defaults['map'];
+    }
+    isolate.updateHeapsFromMap(response['_heaps']);
     for (S.ServiceMap clsAllocations in response['members']) {
       S.Class cls = clsAllocations['class'];
       if (cls == null) {
         continue;
       }
-      cls.newSpace.update(clsAllocations['new']);
-      cls.oldSpace.update(clsAllocations['old']);
+      cls.newSpace.update(clsAllocations['_new']);
+      cls.oldSpace.update(clsAllocations['_old']);
     }
-    return new AllocationProfile(response);
+    return new AllocationProfile(response, defaults: defaults);
   }
 }

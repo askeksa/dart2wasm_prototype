@@ -4,14 +4,14 @@
 
 #ifndef RUNTIME_VM_DEOPT_INSTRUCTIONS_H_
 #define RUNTIME_VM_DEOPT_INSTRUCTIONS_H_
+#if !defined(DART_PRECOMPILED_RUNTIME)
 
 #include "vm/allocation.h"
-#include "vm/assembler.h"
 #include "vm/code_descriptors.h"
+#include "vm/compiler/backend/flow_graph_compiler.h"
+#include "vm/compiler/backend/locations.h"
 #include "vm/deferred_objects.h"
-#include "vm/flow_graph_compiler.h"
 #include "vm/growable_array.h"
-#include "vm/locations.h"
 #include "vm/object.h"
 #include "vm/runtime_entry.h"
 #include "vm/stack_frame.h"
@@ -27,7 +27,7 @@ class TimelineEvent;
 
 // Holds all data relevant for execution of deoptimization instructions.
 // Structure is allocated in C-heap.
-class DeoptContext {
+class DeoptContext : public MallocAllocated {
  public:
   enum DestFrameOptions {
     kDestIsOriginalFrame,  // Replace the original frame with deopt frame.
@@ -51,23 +51,16 @@ class DeoptContext {
   intptr_t* GetSourceFrameAddressAt(intptr_t index) const {
     ASSERT(source_frame_ != NULL);
     ASSERT((0 <= index) && (index < source_frame_size_));
-#if !defined(TARGET_ARCH_DBC)
     // Convert FP relative index to SP relative one.
     index = source_frame_size_ - 1 - index;
-#endif  // !defined(TARGET_ARCH_DBC)
     return &source_frame_[index];
   }
 
   // Returns index in stack slot notation where -1 is the first argument
-  // For DBC returns index directly relative to FP.
   intptr_t GetStackSlot(intptr_t index) const {
     ASSERT((0 <= index) && (index < source_frame_size_));
     index -= num_args_;
-#if defined(TARGET_ARCH_DBC)
-    return index < 0 ? index - kDartFrameFixedSize : index;
-#else
     return index < 0 ? index : index - kDartFrameFixedSize;
-#endif  // defined(TARGET_ARCH_DBC)
   }
 
   intptr_t GetSourceFp() const;
@@ -77,7 +70,7 @@ class DeoptContext {
   intptr_t GetCallerFp() const;
   void SetCallerFp(intptr_t callers_fp);
 
-  RawObject* ObjectAt(intptr_t index) const {
+  ObjectPtr ObjectAt(intptr_t index) const {
     const ObjectPool& object_pool = ObjectPool::Handle(object_pool_);
     return object_pool.ObjectAt(index);
   }
@@ -85,28 +78,16 @@ class DeoptContext {
   intptr_t RegisterValue(Register reg) const {
     ASSERT(reg >= 0);
     ASSERT(reg < kNumberOfCpuRegisters);
-#if !defined(TARGET_ARCH_DBC)
     ASSERT(cpu_registers_ != NULL);
     return cpu_registers_[reg];
-#else
-    // On DBC registers and stack slots are the same.
-    const intptr_t stack_index = num_args_ + kDartFrameFixedSize + reg;
-    return *GetSourceFrameAddressAt(stack_index);
-#endif  // !defined(TARGET_ARCH_DBC)
   }
 
   double FpuRegisterValue(FpuRegister reg) const {
     ASSERT(FlowGraphCompiler::SupportsUnboxedDoubles());
     ASSERT(fpu_registers_ != NULL);
     ASSERT(reg >= 0);
-#if !defined(TARGET_ARCH_DBC)
     ASSERT(reg < kNumberOfFpuRegisters);
     return *reinterpret_cast<double*>(&fpu_registers_[reg]);
-#else
-    // On DBC registers and stack slots are the same.
-    const intptr_t stack_index = num_args_ + kDartFrameFixedSize + reg;
-    return *reinterpret_cast<double*>(GetSourceFrameAddressAt(stack_index));
-#endif
   }
 
   simd128_value_t FpuRegisterValueAsSimd128(FpuRegister reg) const {
@@ -126,16 +107,10 @@ class DeoptContext {
   // part of the frame because it contains saved caller PC and FP that
   // deoptimization will fill in.
   intptr_t* FrameBase(const StackFrame* frame) {
-#if !defined(TARGET_ARCH_DBC)
     // SP of the deoptimization frame is the lowest slot because
     // stack is growing downwards.
     return reinterpret_cast<intptr_t*>(frame->sp() -
                                        (kDartFrameFixedSize * kWordSize));
-#else
-    // First argument is the lowest slot because stack is growing upwards.
-    return reinterpret_cast<intptr_t*>(
-        frame->fp() - (kDartFrameFixedSize + num_args_) * kWordSize);
-#endif  // !defined(TARGET_ARCH_DBC)
   }
 
   void set_dest_frame(const StackFrame* frame) {
@@ -149,7 +124,7 @@ class DeoptContext {
   intptr_t source_frame_size() const { return source_frame_size_; }
   intptr_t dest_frame_size() const { return dest_frame_size_; }
 
-  RawCode* code() const { return code_; }
+  CodePtr code() const { return code_; }
 
   bool is_lazy_deopt() const { return is_lazy_deopt_; }
 
@@ -160,66 +135,68 @@ class DeoptContext {
     return (deopt_flags_ & flag) != 0;
   }
 
-  RawTypedData* deopt_info() const { return deopt_info_; }
+  TypedDataPtr deopt_info() const { return deopt_info_; }
 
   // Fills the destination frame but defers materialization of
   // objects.
   void FillDestFrame();
 
-  // Allocate and prepare exceptions metadata for TrySync
-  intptr_t* CatchEntryState(intptr_t num_vars);
+  // Convert deoptimization instructions to a list of moves that need
+  // to be executed when entering catch entry block from this deoptimization
+  // point.
+  const CatchEntryMoves* ToCatchEntryMoves(intptr_t num_vars);
 
   // Materializes all deferred objects.  Returns the total number of
   // artificial arguments used during deoptimization.
   intptr_t MaterializeDeferredObjects();
 
-  RawArray* DestFrameAsArray();
+  ArrayPtr DestFrameAsArray();
 
   void VisitObjectPointers(ObjectPointerVisitor* visitor);
 
   void DeferMaterializedObjectRef(intptr_t idx, intptr_t* slot) {
     deferred_slots_ = new DeferredObjectRef(
-        idx, reinterpret_cast<RawObject**>(slot), deferred_slots_);
+        idx, reinterpret_cast<ObjectPtr*>(slot), deferred_slots_);
   }
 
-  void DeferMaterialization(double value, RawDouble** slot) {
+  void DeferMaterialization(double value, DoublePtr* slot) {
     deferred_slots_ = new DeferredDouble(
-        value, reinterpret_cast<RawObject**>(slot), deferred_slots_);
+        value, reinterpret_cast<ObjectPtr*>(slot), deferred_slots_);
   }
 
-  void DeferMintMaterialization(int64_t value, RawMint** slot) {
+  void DeferMintMaterialization(int64_t value, MintPtr* slot) {
     deferred_slots_ = new DeferredMint(
-        value, reinterpret_cast<RawObject**>(slot), deferred_slots_);
+        value, reinterpret_cast<ObjectPtr*>(slot), deferred_slots_);
   }
 
-  void DeferMaterialization(simd128_value_t value, RawFloat32x4** slot) {
+  void DeferMaterialization(simd128_value_t value, Float32x4Ptr* slot) {
     deferred_slots_ = new DeferredFloat32x4(
-        value, reinterpret_cast<RawObject**>(slot), deferred_slots_);
+        value, reinterpret_cast<ObjectPtr*>(slot), deferred_slots_);
   }
 
-  void DeferMaterialization(simd128_value_t value, RawFloat64x2** slot) {
+  void DeferMaterialization(simd128_value_t value, Float64x2Ptr* slot) {
     deferred_slots_ = new DeferredFloat64x2(
-        value, reinterpret_cast<RawObject**>(slot), deferred_slots_);
+        value, reinterpret_cast<ObjectPtr*>(slot), deferred_slots_);
   }
 
-  void DeferMaterialization(simd128_value_t value, RawInt32x4** slot) {
+  void DeferMaterialization(simd128_value_t value, Int32x4Ptr* slot) {
     deferred_slots_ = new DeferredInt32x4(
-        value, reinterpret_cast<RawObject**>(slot), deferred_slots_);
+        value, reinterpret_cast<ObjectPtr*>(slot), deferred_slots_);
   }
 
   void DeferRetAddrMaterialization(intptr_t index,
                                    intptr_t deopt_id,
                                    intptr_t* slot) {
     deferred_slots_ = new DeferredRetAddr(
-        index, deopt_id, reinterpret_cast<RawObject**>(slot), deferred_slots_);
+        index, deopt_id, reinterpret_cast<ObjectPtr*>(slot), deferred_slots_);
   }
 
   void DeferPcMarkerMaterialization(intptr_t index, intptr_t* slot) {
     deferred_slots_ = new DeferredPcMarker(
-        index, reinterpret_cast<RawObject**>(slot), deferred_slots_);
+        index, reinterpret_cast<ObjectPtr*>(slot), deferred_slots_);
   }
 
-  void DeferPpMaterialization(intptr_t index, RawObject** slot) {
+  void DeferPpMaterialization(intptr_t index, ObjectPtr* slot) {
     deferred_slots_ = new DeferredPp(index, slot, deferred_slots_);
   }
 
@@ -233,12 +210,6 @@ class DeoptContext {
   intptr_t* GetDestFrameAddressAt(intptr_t index) const {
     ASSERT(dest_frame_ != NULL);
     ASSERT((0 <= index) && (index < dest_frame_size_));
-#if defined(TARGET_ARCH_DBC)
-    // Stack on DBC is growing upwards but we record deopt commands
-    // in the same order we record them on other architectures as if
-    // the stack was growing downwards.
-    index = dest_frame_size_ - 1 - index;
-#endif  // defined(TARGET_ARCH_DBC)
     return &dest_frame_[index];
   }
 
@@ -258,9 +229,9 @@ class DeoptContext {
 
   intptr_t DeferredObjectsCount() const { return deferred_objects_count_; }
 
-  RawCode* code_;
-  RawObjectPool* object_pool_;
-  RawTypedData* deopt_info_;
+  CodePtr code_;
+  ObjectPoolPtr object_pool_;
+  TypedDataPtr deopt_info_;
   bool dest_frame_is_allocated_;
   intptr_t* dest_frame_;
   intptr_t dest_frame_size_;
@@ -334,11 +305,10 @@ class DeoptInstr : public ZoneAllocated {
 
   virtual void Execute(DeoptContext* deopt_context, intptr_t* dest_addr) = 0;
 
-  // Convert DeoptInstr to TrySync metadata entry.
-  virtual CatchEntryStatePair ToCatchEntryStatePair(DeoptContext* deopt_context,
-                                                    intptr_t dest_slot) {
+  virtual CatchEntryMove ToCatchEntryMove(DeoptContext* deopt_context,
+                                          intptr_t dest_slot) {
     UNREACHABLE();
-    return CatchEntryStatePair();
+    return CatchEntryMove();
   }
 
   virtual DeoptInstr::Kind kind() const = 0;
@@ -373,7 +343,6 @@ class DeoptInstr : public ZoneAllocated {
   DISALLOW_COPY_AND_ASSIGN(DeoptInstr);
 };
 
-
 // Helper class that allows to read a value of the given register from
 // the DeoptContext as the specified type.
 // It calls different method depending on which kind of register (cpu/fpu) and
@@ -395,14 +364,12 @@ struct RegisterReader<FpuRegister, double> {
   }
 };
 
-
 template <>
 struct RegisterReader<FpuRegister, simd128_value_t> {
   static simd128_value_t Read(DeoptContext* context, FpuRegister reg) {
     return context->FpuRegisterValueAsSimd128(reg);
   }
 };
-
 
 // Class that encapsulates reading and writing of values that were either in
 // the registers in the optimized code or were spilled from those registers
@@ -421,7 +388,8 @@ class RegisterSource {
       : source_index_(source_index) {}
 
   RegisterSource(Kind kind, intptr_t index)
-      : source_index_(KindField::encode(kind) | RawIndexField::encode(index)) {}
+      : source_index_(KindField::encode(kind) |
+                      UntaggedIndexField::encode(index)) {}
 
   template <typename T>
   T Value(DeoptContext* context) const {
@@ -435,11 +403,8 @@ class RegisterSource {
   }
 
   intptr_t StackSlot(DeoptContext* context) const {
-    if (is_register()) {
-      return raw_index();  // in DBC stack slots are registers.
-    } else {
-      return context->GetStackSlot(raw_index());
-    }
+    ASSERT(!is_register());
+    return context->GetStackSlot(raw_index());
   }
 
   intptr_t source_index() const { return source_index_; }
@@ -454,29 +419,31 @@ class RegisterSource {
 
  private:
   class KindField : public BitField<intptr_t, intptr_t, 0, 1> {};
-  class RawIndexField
+  class UntaggedIndexField
       : public BitField<intptr_t, intptr_t, 1, kBitsPerWord - 1> {};
 
   bool is_register() const {
     return KindField::decode(source_index_) == kRegister;
   }
-  intptr_t raw_index() const { return RawIndexField::decode(source_index_); }
+  intptr_t raw_index() const {
+    return UntaggedIndexField::decode(source_index_);
+  }
 
   RegisterType reg() const { return static_cast<RegisterType>(raw_index()); }
 
-  static const char* Name(Register reg) { return Assembler::RegisterName(reg); }
+  static const char* Name(Register reg) {
+    return RegisterNames::RegisterName(reg);
+  }
 
   static const char* Name(FpuRegister fpu_reg) {
-    return Assembler::FpuRegisterName(fpu_reg);
+    return RegisterNames::FpuRegisterName(fpu_reg);
   }
 
   const intptr_t source_index_;
 };
 
-
 typedef RegisterSource<Register> CpuRegisterSource;
 typedef RegisterSource<FpuRegister> FpuRegisterSource;
-
 
 // Builds a deoptimization info table, one DeoptInfo at a time.  Call AddXXX
 // methods in the order of their target, starting wih deoptimized code
@@ -485,7 +452,9 @@ typedef RegisterSource<FpuRegister> FpuRegisterSource;
 // the heap and reset the builder's internal state for the next DeoptInfo.
 class DeoptInfoBuilder : public ValueObject {
  public:
-  DeoptInfoBuilder(Zone* zone, const intptr_t num_args, Assembler* assembler);
+  DeoptInfoBuilder(Zone* zone,
+                   const intptr_t num_args,
+                   compiler::Assembler* assembler);
 
   // Return address before instruction.
   void AddReturnAddress(const Function& function,
@@ -514,7 +483,7 @@ class DeoptInfoBuilder : public ValueObject {
   // Returns the index of the next stack slot. Used for verification.
   intptr_t EmitMaterializationArguments(intptr_t dest_index);
 
-  RawTypedData* CreateDeoptInfo(const Array& deopt_table);
+  TypedDataPtr CreateDeoptInfo(const Array& deopt_table);
 
   // Mark the actual start of the frame description after all materialization
   // instructions were emitted. Used for verification purposes.
@@ -552,7 +521,7 @@ class DeoptInfoBuilder : public ValueObject {
 
   GrowableArray<DeoptInstr*> instructions_;
   const intptr_t num_args_;
-  Assembler* assembler_;
+  compiler::Assembler* assembler_;
 
   // Used to compress entries by sharing suffixes.
   TrieNode* trie_root_;
@@ -563,7 +532,6 @@ class DeoptInfoBuilder : public ValueObject {
 
   DISALLOW_COPY_AND_ASSIGN(DeoptInfoBuilder);
 };
-
 
 // Utilities for managing the deopt table and its entries.  The table is
 // stored in an Array in the heap.  It consists of triples of (PC offset,
@@ -594,8 +562,8 @@ class DeoptTable : public AllStatic {
                        TypedData* info,
                        Smi* reason_and_flags);
 
-  static RawSmi* EncodeReasonAndFlags(ICData::DeoptReasonId reason,
-                                      uint32_t flags) {
+  static SmiPtr EncodeReasonAndFlags(ICData::DeoptReasonId reason,
+                                     uint32_t flags) {
     return Smi::New(ReasonField::encode(reason) | FlagsField::encode(flags));
   }
 
@@ -606,6 +574,50 @@ class DeoptTable : public AllStatic {
   static const intptr_t kEntrySize = 3;
 };
 
+// Holds deopt information at one deoptimization point. The information consists
+// of two parts:
+//  - first a prefix consisting of kMaterializeObject instructions describing
+//    objects which had their allocation removed as part of AllocationSinking
+//    pass and have to be materialized;
+//  - followed by a list of DeoptInstr objects, specifying transformation
+//    information for each slot in unoptimized frame(s).
+// Arguments for object materialization (class of instance to be allocated and
+// field-value pairs) are added as artificial slots to the expression stack
+// of the bottom-most frame. They are removed from the stack at the very end
+// of deoptimization by the deoptimization stub.
+class DeoptInfo : public AllStatic {
+ public:
+  // Size of the frame part of the translation not counting kMaterializeObject
+  // instructions in the prefix.
+  static intptr_t FrameSize(const TypedData& packed);
+
+  // Returns the number of kMaterializeObject instructions in the prefix.
+  static intptr_t NumMaterializations(const GrowableArray<DeoptInstr*>&);
+
+  // Unpack the entire translation into an array of deoptimization
+  // instructions.  This copies any shared suffixes into the array.
+  static void Unpack(const Array& table,
+                     const TypedData& packed,
+                     GrowableArray<DeoptInstr*>* instructions);
+
+  // Size of the frame part of the translation not counting kMaterializeObject
+  // instructions in the prefix.
+  static const char* ToCString(const Array& table, const TypedData& packed);
+
+  // Returns true iff decompression yields the same instructions as the
+  // original.
+  static bool VerifyDecompression(const GrowableArray<DeoptInstr*>& original,
+                                  const Array& deopt_table,
+                                  const TypedData& packed);
+
+ private:
+  static void UnpackInto(const Array& table,
+                         const TypedData& packed,
+                         GrowableArray<DeoptInstr*>* instructions,
+                         intptr_t length);
+};
+
 }  // namespace dart
 
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 #endif  // RUNTIME_VM_DEOPT_INSTRUCTIONS_H_

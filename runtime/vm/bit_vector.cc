@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/bit_vector.h"
-
+#include "vm/log.h"
 #include "vm/os.h"
 
 namespace dart {
@@ -32,7 +32,6 @@ void BitVector::Iterator::Advance() {
   current_word_ = current_word_ >> 1;
 }
 
-
 bool BitVector::Equals(const BitVector& other) const {
   if (length_ != other.length_) return false;
   intptr_t i = 0;
@@ -40,14 +39,15 @@ bool BitVector::Equals(const BitVector& other) const {
     if (data_[i] != other.data_[i]) return false;
   }
   if (i < data_length_) {
+    if (length_ % kBitsPerWord == 0) return data_[i] == other.data_[i];
+
     // Don't compare bits beyond length_.
-    const intptr_t shift_size = (kBitsPerWord - length_) & (kBitsPerWord - 1);
+    const intptr_t shift_size = kBitsPerWord - (length_ % kBitsPerWord);
     const uword mask = static_cast<uword>(-1) >> shift_size;
     if ((data_[i] & mask) != (other.data_[i] & mask)) return false;
   }
   return true;
 }
-
 
 bool BitVector::AddAll(const BitVector* from) {
   ASSERT(data_length_ == from->data_length_);
@@ -62,7 +62,6 @@ bool BitVector::AddAll(const BitVector* from) {
   }
   return changed;
 }
-
 
 bool BitVector::RemoveAll(const BitVector* from) {
   ASSERT(data_length_ == from->data_length_);
@@ -91,14 +90,12 @@ bool BitVector::KillAndAdd(BitVector* kill, BitVector* gen) {
   return changed;
 }
 
-
 void BitVector::Intersect(const BitVector* other) {
   ASSERT(other->length() == length());
   for (intptr_t i = 0; i < data_length_; i++) {
     data_[i] = data_[i] & other->data_[i];
   }
 }
-
 
 bool BitVector::IsEmpty() const {
   for (intptr_t i = 0; i < data_length_; i++) {
@@ -109,13 +106,12 @@ bool BitVector::IsEmpty() const {
   return true;
 }
 
-
 void BitVector::Print() const {
-  OS::Print("[");
+  THR_Print("[");
   for (intptr_t i = 0; i < length_; i++) {
-    OS::Print(Contains(i) ? "1" : "0");
+    THR_Print(Contains(i) ? "1" : "0");
   }
-  OS::Print("]");
+  THR_Print("]");
 }
 
 }  // namespace dart

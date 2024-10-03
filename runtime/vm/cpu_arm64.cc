@@ -12,64 +12,74 @@
 #include "vm/simulator.h"
 
 #if !defined(USING_SIMULATOR)
-#include <sys/syscall.h> /* NOLINT */
-#include <unistd.h>      /* NOLINT */
+#if !defined(DART_HOST_OS_FUCHSIA)
+#include <sys/syscall.h>
+#else
+#include <zircon/syscalls.h>
+#endif
+#include <unistd.h>
+#endif
+
+#if defined(DART_HOST_OS_MACOS) || defined(DART_HOST_OS_IOS)
+#include <libkern/OSCacheControl.h>
 #endif
 
 namespace dart {
 
 void CPU::FlushICache(uword start, uword size) {
-#if HOST_OS_IOS
-  // Precompilation never patches code so there should be no I cache flushes.
+#if defined(DART_PRECOMPILED_RUNTIME)
   UNREACHABLE();
-#endif
-
-#if !defined(USING_SIMULATOR) && !HOST_OS_IOS
+#elif !defined(USING_SIMULATOR)
   // Nothing to do. Flushing no instructions.
   if (size == 0) {
     return;
   }
 
 // ARM recommends using the gcc intrinsic __clear_cache on Linux and Android.
-// blogs.arm.com/software-enablement/141-caches-and-self-modifying-code/
-#if defined(HOST_OS_ANDROID) || defined(HOST_OS_FUCHSIA) ||                    \
-    defined(HOST_OS_LINUX)
-  extern void __clear_cache(char*, char*);
+//
+// https://community.arm.com/developer/ip-products/processors/b/processors-ip-blog/posts/caches-and-self-modifying-code
+//
+// On iOS we use sys_icache_invalidate from Darwin. See:
+//
+// https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/sys_icache_invalidate.3.html
+#if defined(DART_HOST_OS_MACOS) || defined(DART_HOST_OS_IOS)
+  sys_icache_invalidate(reinterpret_cast<void*>(start), size);
+#elif defined(DART_HOST_OS_ANDROID) || defined(DART_HOST_OS_LINUX)
   char* beg = reinterpret_cast<char*>(start);
   char* end = reinterpret_cast<char*>(start + size);
-  ::__clear_cache(beg, end);
+  __builtin___clear_cache(beg, end);
+#elif defined(DART_HOST_OS_FUCHSIA)
+  zx_status_t result = zx_cache_flush(reinterpret_cast<const void*>(start),
+                                      size, ZX_CACHE_FLUSH_INSN);
+  ASSERT(result == ZX_OK);
 #else
-#error FlushICache only tested/supported on Android, Fuchsia, and Linux
+#error FlushICache not implemented for this OS
 #endif
 
 #endif
 }
-
 
 const char* CPU::Id() {
   return
 #if defined(USING_SIMULATOR)
       "sim"
-#endif  // !defined(HOST_ARCH_ARM64)
+#endif  // !defined(USING_SIMULATOR)
       "arm64";
 }
-
 
 const char* HostCPUFeatures::hardware_ = NULL;
 #if defined(DEBUG)
 bool HostCPUFeatures::initialized_ = false;
 #endif
 
-
 #if !defined(USING_SIMULATOR)
-void HostCPUFeatures::InitOnce() {
-  CpuInfo::InitOnce();
+void HostCPUFeatures::Init() {
+  CpuInfo::Init();
   hardware_ = CpuInfo::GetCpuModel();
 #if defined(DEBUG)
   initialized_ = true;
 #endif
 }
-
 
 void HostCPUFeatures::Cleanup() {
   DEBUG_ASSERT(initialized_);
@@ -84,14 +94,13 @@ void HostCPUFeatures::Cleanup() {
 
 #else  // !defined(USING_SIMULATOR)
 
-void HostCPUFeatures::InitOnce() {
-  CpuInfo::InitOnce();
+void HostCPUFeatures::Init() {
+  CpuInfo::Init();
   hardware_ = CpuInfo::GetCpuModel();
 #if defined(DEBUG)
   initialized_ = true;
 #endif
 }
-
 
 void HostCPUFeatures::Cleanup() {
   DEBUG_ASSERT(initialized_);

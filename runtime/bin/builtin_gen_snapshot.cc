@@ -2,8 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "include/dart_api.h"
@@ -25,13 +25,14 @@ static struct NativeEntries {
   int argument_count_;
 } BuiltinEntries[] = {BUILTIN_NATIVE_LIST(REGISTER_FUNCTION)};
 
-
 Dart_NativeFunction Builtin::NativeLookup(Dart_Handle name,
                                           int argument_count,
                                           bool* auto_setup_scope) {
   const char* function_name = NULL;
   Dart_Handle result = Dart_StringToCString(name, &function_name);
-  DART_CHECK_VALID(result);
+  if (Dart_IsError(result)) {
+    Dart_PropagateError(result);
+  }
   ASSERT(function_name != NULL);
   ASSERT(auto_setup_scope != NULL);
   *auto_setup_scope = true;
@@ -46,7 +47,6 @@ Dart_NativeFunction Builtin::NativeLookup(Dart_Handle name,
   return IONativeLookup(name, argument_count, auto_setup_scope);
 }
 
-
 const uint8_t* Builtin::NativeSymbol(Dart_NativeFunction nf) {
   int num_entries = sizeof(BuiltinEntries) / sizeof(struct NativeEntries);
   for (int i = 0; i < num_entries; i++) {
@@ -57,7 +57,6 @@ const uint8_t* Builtin::NativeSymbol(Dart_NativeFunction nf) {
   }
   return IONativeSymbol(nf);
 }
-
 
 // Implementation of native functions which are used for some
 // test/debug functionality in standalone dart mode.

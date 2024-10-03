@@ -1,16 +1,18 @@
-// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:analysis_server/src/protocol_server.dart';
 import 'package:analysis_server/src/provisional/completion/dart/completion_dart.dart';
+import 'package:analysis_server/src/services/completion/dart/completion_manager.dart';
 import 'package:analysis_server/src/services/completion/dart/label_contributor.dart';
+import 'package:analysis_server/src/services/completion/dart/suggestion_builder.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'completion_contributor_util.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(LabelContributorTest);
   });
@@ -19,13 +21,10 @@ main() {
 @reflectiveTest
 class LabelContributorTest extends DartCompletionContributorTest {
   CompletionSuggestion assertSuggestLabel(String name,
-      {int relevance: DART_RELEVANCE_DEFAULT,
-      CompletionSuggestionKind kind: CompletionSuggestionKind.IDENTIFIER}) {
-    CompletionSuggestion cs =
-        assertSuggest(name, csKind: kind, relevance: relevance);
+      {CompletionSuggestionKind kind = CompletionSuggestionKind.IDENTIFIER}) {
+    var cs = assertSuggest(name, csKind: kind);
     expect(cs.returnType, isNull);
-    Element element = cs.element;
-    expect(element, isNotNull);
+    var element = cs.element!;
     expect(element.flags, 0);
     expect(element.kind, equals(ElementKind.LABEL));
     expect(element.name, equals(name));
@@ -36,11 +35,14 @@ class LabelContributorTest extends DartCompletionContributorTest {
   }
 
   @override
-  DartCompletionContributor createContributor() {
-    return new LabelContributor();
+  DartCompletionContributor createContributor(
+    DartCompletionRequest request,
+    SuggestionBuilder builder,
+  ) {
+    return LabelContributor(request, builder);
   }
 
-  test_break_ignores_outer_functions_using_closure() async {
+  Future<void> test_break_ignores_outer_functions_using_closure() async {
     addTestSource('''
 void main() {
   foo: while (true) {
@@ -56,7 +58,7 @@ void main() {
     assertNotSuggested('foo');
   }
 
-  test_break_ignores_outer_functions_using_local_function() async {
+  Future<void> test_break_ignores_outer_functions_using_local_function() async {
     addTestSource('''
 void main() {
   foo: while (true) {
@@ -72,7 +74,7 @@ void main() {
     assertNotSuggested('foo');
   }
 
-  test_break_ignores_toplevel_variables() async {
+  Future<void> test_break_ignores_toplevel_variables() async {
     addTestSource('''
 int x;
 void main() {
@@ -85,7 +87,7 @@ void main() {
     assertNotSuggested('x');
   }
 
-  test_break_ignores_unrelated_statements() async {
+  Future<void> test_break_ignores_unrelated_statements() async {
     addTestSource('''
 void main() {
   foo: while (true) {}
@@ -101,7 +103,7 @@ void main() {
     assertNotSuggested('bar');
   }
 
-  test_break_to_enclosing_loop() async {
+  Future<void> test_break_to_enclosing_loop() async {
     addTestSource('''
 void main() {
   foo: while (true) {
@@ -116,7 +118,7 @@ void main() {
     assertSuggestLabel('bar');
   }
 
-  test_continue_from_loop_to_switch() async {
+  Future<void> test_continue_from_loop_to_switch() async {
     addTestSource('''
 void main() {
   switch (x) {
@@ -138,7 +140,7 @@ void main() {
     assertSuggestLabel('baz');
   }
 
-  test_continue_from_switch_to_loop() async {
+  Future<void> test_continue_from_switch_to_loop() async {
     addTestSource('''
 void main() {
   foo: while (true) {
@@ -153,7 +155,8 @@ void main() {
     assertSuggestLabel('foo');
   }
 
-  test_continue_ignores_outer_functions_using_closure_with_loop() async {
+  Future<void>
+      test_continue_ignores_outer_functions_using_closure_with_loop() async {
     addTestSource('''
 void main() {
   foo: while (true) {
@@ -169,7 +172,8 @@ void main() {
     assertNotSuggested('foo');
   }
 
-  test_continue_ignores_outer_functions_using_closure_with_switch() async {
+  Future<void>
+      test_continue_ignores_outer_functions_using_closure_with_switch() async {
     addTestSource('''
 void main() {
   switch (x) {
@@ -186,7 +190,8 @@ void main() {
     assertNotSuggested('foo');
   }
 
-  test_continue_ignores_outer_functions_using_local_function_with_loop() async {
+  Future<void>
+      test_continue_ignores_outer_functions_using_local_function_with_loop() async {
     addTestSource('''
 void main() {
   foo: while (true) {
@@ -202,7 +207,8 @@ void main() {
     assertNotSuggested('foo');
   }
 
-  test_continue_ignores_outer_functions_using_local_function_with_switch() async {
+  Future<void>
+      test_continue_ignores_outer_functions_using_local_function_with_switch() async {
     addTestSource('''
 void main() {
   switch (x) {
@@ -219,7 +225,7 @@ void main() {
     assertNotSuggested('foo');
   }
 
-  test_continue_ignores_unrelated_statements() async {
+  Future<void> test_continue_ignores_unrelated_statements() async {
     addTestSource('''
 void main() {
   foo: while (true) {}
@@ -235,7 +241,7 @@ void main() {
     assertNotSuggested('bar');
   }
 
-  test_continue_to_earlier_case() async {
+  Future<void> test_continue_to_earlier_case() async {
     addTestSource('''
 void main() {
   switch (x) {
@@ -250,7 +256,7 @@ void main() {
     assertSuggestLabel('foo');
   }
 
-  test_continue_to_enclosing_loop() async {
+  Future<void> test_continue_to_enclosing_loop() async {
     addTestSource('''
 void main() {
   foo: while (true) {
@@ -265,7 +271,7 @@ void main() {
     assertSuggestLabel('bar');
   }
 
-  test_continue_to_enclosing_switch() async {
+  Future<void> test_continue_to_enclosing_switch() async {
     addTestSource('''
 void main() {
   switch (x) {
@@ -288,7 +294,7 @@ void main() {
     assertSuggestLabel('baz');
   }
 
-  test_continue_to_later_case() async {
+  Future<void> test_continue_to_later_case() async {
     addTestSource('''
 void main() {
   switch (x) {
@@ -303,7 +309,7 @@ void main() {
     assertSuggestLabel('foo');
   }
 
-  test_continue_to_same_case() async {
+  Future<void> test_continue_to_same_case() async {
     addTestSource('''
 void main() {
   switch (x) {

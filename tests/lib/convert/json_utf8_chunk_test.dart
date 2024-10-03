@@ -8,8 +8,6 @@ import "package:expect/expect.dart";
 import "dart:convert";
 import "unicode_tests.dart" show UNICODE_TESTS;
 
-bool badFormat(e) => e is FormatException;
-
 main() {
   testNumbers();
   testStrings();
@@ -33,7 +31,7 @@ void jsonParse(testName, check, action, [bool allowMalformed = false]) {
     check(value);
   });
   var decoderSink =
-      JSON.decoder.startChunkedConversion(sink).asUtf8Sink(allowMalformed);
+      json.decoder.startChunkedConversion(sink).asUtf8Sink(allowMalformed);
   try {
     action(decoderSink);
   } on FormatException catch (e, s) {
@@ -83,10 +81,10 @@ void testNumbers() {
     "0.0e0",
     "9.9E9",
     "0",
-    "9"
-        "1234.56789123456701418035663664340972900390625",
+    "9",
+    "1234.56789123456701418035663664340972900390625",
     "1.2345678912345671e-14",
-    "99999999999999999999"
+    "9223372036854775807"
   ]) {
     var expected = num.parse(number);
     for (int i = 1; i < number.length - 1; i++) {
@@ -150,7 +148,7 @@ void testKeywords() {
 // Tests combinations of numbers, strings and keywords.
 void testAll() {
   var s = r'{"":[true,false,42, -33e-3,null,"\u0080"], "z": 0}';
-  bool check(o) {
+  void check(o) {
     if (o is Map) {
       Expect.equals(2, o.length);
       Expect.equals(0, o["z"]);
@@ -203,7 +201,7 @@ void jsonMalformedTest(name, expect, codes) {
         Expect.equals(expect, value, tag);
       });
       var decoderSink =
-          JSON.decoder.startChunkedConversion(sink).asUtf8Sink(true);
+          json.decoder.startChunkedConversion(sink).asUtf8Sink(true);
       try {
         action(decoderSink);
       } catch (e, s) {
@@ -216,10 +214,10 @@ void jsonMalformedTest(name, expect, codes) {
         Expect.fail(tag);
       });
       var decoderSink =
-          JSON.decoder.startChunkedConversion(sink).asUtf8Sink(false);
+          json.decoder.startChunkedConversion(sink).asUtf8Sink(false);
       Expect.throws(() {
         action(decoderSink);
-      }, null, tag);
+      }, (_) => true, tag);
     }
   }
 
@@ -254,10 +252,10 @@ void jsonThrows(String name, String codeString) {
       Expect.fail(tag);
     });
     var decoderSink =
-        JSON.decoder.startChunkedConversion(sink).asUtf8Sink(true);
+        json.decoder.startChunkedConversion(sink).asUtf8Sink(true);
     Expect.throws(() {
       action(decoderSink);
-    }, null, tag);
+    }, (_) => true, tag);
   }
 
   var codes = codeString.codeUnits;
@@ -286,69 +284,69 @@ void jsonThrows(String name, String codeString) {
 void testMalformed() {
   // Overlong encodings.
   jsonMalformedTest(
-      "overlong-0-2", "@\uFFFD@", [0x22, 0x40, 0xc0, 0x80, 0x40, 0x22]);
-  jsonMalformedTest(
-      "overlong-0-3", "@\uFFFD@", [0x22, 0x40, 0xe0, 0x80, 0x80, 0x40, 0x22]);
-  jsonMalformedTest("overlong-0-4", "@\uFFFD@",
+      "overlong-0-2", "@\uFFFD\uFFFD@", [0x22, 0x40, 0xc0, 0x80, 0x40, 0x22]);
+  jsonMalformedTest("overlong-0-3", "@\uFFFD\uFFFD\uFFFD@",
+      [0x22, 0x40, 0xe0, 0x80, 0x80, 0x40, 0x22]);
+  jsonMalformedTest("overlong-0-4", "@\uFFFD\uFFFD\uFFFD\uFFFD@",
       [0x22, 0x40, 0xf0, 0x80, 0x80, 0x80, 0x40, 0x22]);
 
   jsonMalformedTest(
-      "overlong-7f-2", "@\uFFFD@", [0x22, 0x40, 0xc1, 0xbf, 0x40, 0x22]);
-  jsonMalformedTest(
-      "overlong-7f-3", "@\uFFFD@", [0x22, 0x40, 0xe0, 0x81, 0xbf, 0x40, 0x22]);
-  jsonMalformedTest("overlong-7f-4", "@\uFFFD@",
+      "overlong-7f-2", "@\uFFFD\uFFFD@", [0x22, 0x40, 0xc1, 0xbf, 0x40, 0x22]);
+  jsonMalformedTest("overlong-7f-3", "@\uFFFD\uFFFD\uFFFD@",
+      [0x22, 0x40, 0xe0, 0x81, 0xbf, 0x40, 0x22]);
+  jsonMalformedTest("overlong-7f-4", "@\uFFFD\uFFFD\uFFFD\uFFFD@",
       [0x22, 0x40, 0xf0, 0x80, 0x81, 0xbf, 0x40, 0x22]);
 
-  jsonMalformedTest(
-      "overlong-80-3", "@\uFFFD@", [0x22, 0x40, 0xe0, 0x82, 0x80, 0x40, 0x22]);
-  jsonMalformedTest("overlong-80-4", "@\uFFFD@",
+  jsonMalformedTest("overlong-80-3", "@\uFFFD\uFFFD\uFFFD@",
+      [0x22, 0x40, 0xe0, 0x82, 0x80, 0x40, 0x22]);
+  jsonMalformedTest("overlong-80-4", "@\uFFFD\uFFFD\uFFFD\uFFFD@",
       [0x22, 0x40, 0xf0, 0x80, 0x82, 0x80, 0x40, 0x22]);
 
-  jsonMalformedTest(
-      "overlong-7ff-3", "@\uFFFD@", [0x22, 0x40, 0xe0, 0x9f, 0xbf, 0x40, 0x22]);
-  jsonMalformedTest("overlong-7ff-4", "@\uFFFD@",
+  jsonMalformedTest("overlong-7ff-3", "@\uFFFD\uFFFD\uFFFD@",
+      [0x22, 0x40, 0xe0, 0x9f, 0xbf, 0x40, 0x22]);
+  jsonMalformedTest("overlong-7ff-4", "@\uFFFD\uFFFD\uFFFD\uFFFD@",
       [0x22, 0x40, 0xf0, 0x80, 0x9f, 0xbf, 0x40, 0x22]);
 
-  jsonMalformedTest("overlong-800-4", "@\uFFFD@",
+  jsonMalformedTest("overlong-800-4", "@\uFFFD\uFFFD\uFFFD\uFFFD@",
       [0x22, 0x40, 0xf0, 0x80, 0xa0, 0x80, 0x40, 0x22]);
-  jsonMalformedTest("overlong-ffff-4", "@\uFFFD@",
+  jsonMalformedTest("overlong-ffff-4", "@\uFFFD\uFFFD\uFFFD\uFFFD@",
       [0x22, 0x40, 0xf0, 0x8f, 0xbf, 0xbf, 0x40, 0x22]);
 
   // Unterminated multibyte sequences.
   jsonMalformedTest(
       "unterminated-2-normal", "@\uFFFD@", [0x22, 0x40, 0xc0, 0x40, 0x22]);
 
-  jsonMalformedTest("unterminated-3-normal", "@\uFFFD@",
+  jsonMalformedTest("unterminated-3-normal", "@\uFFFD\uFFFD@",
       [0x22, 0x40, 0xe0, 0x80, 0x40, 0x22]);
 
-  jsonMalformedTest("unterminated-4-normal", "@\uFFFD@",
+  jsonMalformedTest("unterminated-4-normal", "@\uFFFD\uFFFD\uFFFD@",
       [0x22, 0x40, 0xf0, 0x80, 0x80, 0x40, 0x22]);
 
   jsonMalformedTest("unterminated-2-multi", "@\uFFFD\x80@",
       [0x22, 0x40, 0xc0, 0xc2, 0x80, 0x40, 0x22]);
 
-  jsonMalformedTest("unterminated-3-multi", "@\uFFFD\x80@",
+  jsonMalformedTest("unterminated-3-multi", "@\uFFFD\uFFFD\x80@",
       [0x22, 0x40, 0xe0, 0x80, 0xc2, 0x80, 0x40, 0x22]);
 
-  jsonMalformedTest("unterminated-4-multi", "@\uFFFD\x80@",
+  jsonMalformedTest("unterminated-4-multi", "@\uFFFD\uFFFD\uFFFD\x80@",
       [0x22, 0x40, 0xf0, 0x80, 0x80, 0xc2, 0x80, 0x40, 0x22]);
 
   jsonMalformedTest("unterminated-2-escape", "@\uFFFD\n@",
       [0x22, 0x40, 0xc0, 0x5c, 0x6e, 0x40, 0x22]);
 
-  jsonMalformedTest("unterminated-3-escape", "@\uFFFD\n@",
+  jsonMalformedTest("unterminated-3-escape", "@\uFFFD\uFFFD\n@",
       [0x22, 0x40, 0xe0, 0x80, 0x5c, 0x6e, 0x40, 0x22]);
 
-  jsonMalformedTest("unterminated-4-escape", "@\uFFFD\n@",
+  jsonMalformedTest("unterminated-4-escape", "@\uFFFD\uFFFD\uFFFD\n@",
       [0x22, 0x40, 0xf0, 0x80, 0x80, 0x5c, 0x6e, 0x40, 0x22]);
 
   jsonMalformedTest("unterminated-2-end", "@\uFFFD", [0x22, 0x40, 0xc0, 0x22]);
 
   jsonMalformedTest(
-      "unterminated-3-end", "@\uFFFD", [0x22, 0x40, 0xe0, 0x80, 0x22]);
+      "unterminated-3-end", "@\uFFFD\uFFFD", [0x22, 0x40, 0xe0, 0x80, 0x22]);
 
-  jsonMalformedTest(
-      "unterminated-4-end", "@\uFFFD", [0x22, 0x40, 0xf0, 0x80, 0x80, 0x22]);
+  jsonMalformedTest("unterminated-4-end", "@\uFFFD\uFFFD\uFFFD",
+      [0x22, 0x40, 0xf0, 0x80, 0x80, 0x22]);
 
   // Unexpected continuation byte
   // - after a normal character.
@@ -374,13 +372,13 @@ void testMalformed() {
       "leading-2", "@\uFFFD\x80@", [0x22, 0x40, 0xc0, 0xc2, 0x80, 0x40, 0x22]);
   jsonMalformedTest("leading-3-1", "@\uFFFD\x80@",
       [0x22, 0x40, 0xe0, 0xc2, 0x80, 0x40, 0x22]);
-  jsonMalformedTest("leading-3-2", "@\uFFFD\x80@",
+  jsonMalformedTest("leading-3-2", "@\uFFFD\uFFFD\x80@",
       [0x22, 0x40, 0xe0, 0x80, 0xc2, 0x80, 0x40, 0x22]);
   jsonMalformedTest("leading-4-1", "@\uFFFD\x80@",
       [0x22, 0x40, 0xf0, 0xc2, 0x80, 0x40, 0x22]);
-  jsonMalformedTest("leading-4-2", "@\uFFFD\x80@",
+  jsonMalformedTest("leading-4-2", "@\uFFFD\uFFFD\x80@",
       [0x22, 0x40, 0xf0, 0x80, 0xc2, 0x80, 0x40, 0x22]);
-  jsonMalformedTest("leading-4-3", "@\uFFFD\x80@",
+  jsonMalformedTest("leading-4-3", "@\uFFFD\uFFFD\uFFFD\x80@",
       [0x22, 0x40, 0xf0, 0x80, 0x80, 0xc2, 0x80, 0x40, 0x22]);
 
   // Overlong encodings of ASCII outside of strings always fail.

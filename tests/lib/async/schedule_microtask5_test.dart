@@ -4,42 +4,42 @@
 
 library run_async_test;
 
-import "package:expect/expect.dart";
 import 'dart:async';
-import 'package:unittest/unittest.dart';
+import 'package:async_helper/async_helper.dart';
+import "package:expect/expect.dart";
 
 main() {
-  test("run async timer after async test", () {
-    // Check that Timers don't run before the async callbacks.
-    bool timerCallbackExecuted = false;
+  // Check that Timers don't run before the async callbacks.
+  bool timerCallbackExecuted = false;
 
-    scheduleMicrotask(expectAsync(() {
+  scheduleMicrotask(() {
+    Expect.isFalse(timerCallbackExecuted);
+  });
+
+  asyncStart();
+  Timer.run(() {
+    timerCallbackExecuted = true;
+    asyncEnd();
+  });
+
+  scheduleMicrotask(() {
+    Expect.isFalse(timerCallbackExecuted);
+  });
+
+  scheduleMicrotask(() {
+    // Busy loop.
+    var sum = 1;
+    var sw = new Stopwatch()..start();
+    while (sw.elapsedMilliseconds < 5) {
+      sum++;
+    }
+    if (sum == 0) throw "bad"; // Just to use the result.
+    scheduleMicrotask(() {
       Expect.isFalse(timerCallbackExecuted);
-    }));
+    });
+  });
 
-    Timer.run(expectAsync(() {
-      timerCallbackExecuted = true;
-    }));
-
-    scheduleMicrotask(expectAsync(() {
-      Expect.isFalse(timerCallbackExecuted);
-    }));
-
-    scheduleMicrotask(expectAsync(() {
-      // Busy loop.
-      var sum = 1;
-      var sw = new Stopwatch()..start();
-      while (sw.elapsedMilliseconds < 5) {
-        sum++;
-      }
-      if (sum == 0) throw "bad"; // Just to use the result.
-      scheduleMicrotask(expectAsync(() {
-        Expect.isFalse(timerCallbackExecuted);
-      }));
-    }));
-
-    scheduleMicrotask(expectAsync(() {
-      Expect.isFalse(timerCallbackExecuted);
-    }));
+  scheduleMicrotask(() {
+    Expect.isFalse(timerCallbackExecuted);
   });
 }

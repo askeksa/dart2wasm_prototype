@@ -2,32 +2,32 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#include "platform/assert.h"
 #include "vm/class_finalizer.h"
+#include "platform/assert.h"
 #include "vm/symbols.h"
 #include "vm/unit_test.h"
 
 namespace dart {
 
-
-static RawClass* CreateTestClass(const char* name) {
-  const String& class_name =
-      String::Handle(Symbols::New(Thread::Current(), name));
+static ClassPtr CreateTestClass(const char* name) {
+  Thread* thread = Thread::Current();
+  const String& class_name = String::Handle(Symbols::New(thread, name));
   const Script& script = Script::Handle();
   const Class& cls = Class::Handle(Class::New(
       Library::Handle(), class_name, script, TokenPosition::kNoSource));
   cls.set_interfaces(Object::empty_array());
+  SafepointWriteRwLocker ml(thread, thread->isolate_group()->program_lock());
+  cls.set_is_declaration_loaded();
   cls.SetFunctions(Object::empty_array());
   cls.SetFields(Object::empty_array());
-  return cls.raw();
+  return cls.ptr();
 }
 
-
-TEST_CASE(ClassFinalizer) {
+ISOLATE_UNIT_TEST_CASE(ClassFinalizer) {
   Zone* zone = thread->zone();
-  Isolate* isolate = thread->isolate();
-  ObjectStore* object_store = isolate->object_store();
-  const GrowableObjectArray& pending_classes =
+  auto isolate_group = thread->isolate_group();
+  ObjectStore* object_store = isolate_group->object_store();
+  const auto& pending_classes =
       GrowableObjectArray::Handle(zone, object_store->pending_classes());
   GrowableArray<const Class*> classes_1;
   classes_1.Add(&Class::Handle(CreateTestClass("BMW")));
@@ -50,57 +50,6 @@ TEST_CASE(ClassFinalizer) {
     EXPECT(classes_2[i]->is_type_finalized());
   }
   EXPECT(ClassFinalizer::AllClassesFinalized());
-  EXPECT(ClassFinalizer::ProcessPendingClasses());
-}
-
-
-TEST_CASE(ClassFinalize_Cycles) {
-  Zone* zone = thread->zone();
-  Isolate* isolate = thread->isolate();
-  ObjectStore* object_store = isolate->object_store();
-  const GrowableObjectArray& pending_classes =
-      GrowableObjectArray::Handle(zone, object_store->pending_classes());
-  GrowableArray<const Class*> classes;
-  classes.Add(&Class::Handle(CreateTestClass("Jungfrau")));
-  pending_classes.Add(*classes[0]);
-  classes.Add(&Class::Handle(CreateTestClass("Eiger")));
-  pending_classes.Add(*classes[1]);
-  // Create a cycle.
-  classes[0]->set_super_type(
-      Type::Handle(Type::NewNonParameterizedType(*classes[1])));
-  classes[1]->set_super_type(
-      Type::Handle(Type::NewNonParameterizedType(*classes[0])));
-  EXPECT(!ClassFinalizer::ProcessPendingClasses());
-}
-
-
-static RawLibrary* NewLib(const char* url_chars) {
-  String& url = String::ZoneHandle(Symbols::New(Thread::Current(), url_chars));
-  return Library::New(url);
-}
-
-
-TEST_CASE(ClassFinalize_Resolve) {
-  Zone* zone = thread->zone();
-  Isolate* isolate = thread->isolate();
-  ObjectStore* object_store = isolate->object_store();
-  const GrowableObjectArray& pending_classes =
-      GrowableObjectArray::Handle(zone, object_store->pending_classes());
-  Class& rhb = Class::Handle(CreateTestClass("RhB"));
-  pending_classes.Add(rhb);
-  Class& sbb = Class::Handle(CreateTestClass("SBB"));
-  pending_classes.Add(sbb);
-  Library& lib = Library::Handle(NewLib("TestLib"));
-  lib.AddClass(rhb);
-  lib.AddClass(sbb);
-  const String& superclass_name = String::Handle(sbb.Name());
-  const UnresolvedClass& unresolved =
-      UnresolvedClass::Handle(UnresolvedClass::New(
-          LibraryPrefix::Handle(), superclass_name, TokenPosition::kNoSource));
-  const TypeArguments& type_arguments = TypeArguments::Handle();
-  rhb.set_super_type(
-      Type::Handle(Type::New(Object::Handle(unresolved.raw()), type_arguments,
-                             TokenPosition::kNoSource)));
   EXPECT(ClassFinalizer::ProcessPendingClasses());
 }
 

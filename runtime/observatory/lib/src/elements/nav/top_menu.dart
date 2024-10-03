@@ -6,19 +6,16 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/src/elements/helpers/nav_menu.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 import 'package:observatory/src/elements/nav/menu_item.dart';
 
-class NavTopMenuElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<NavTopMenuElement>('nav-top-menu',
-      dependencies: const [NavMenuItemElement.tag]);
-
-  RenderingScheduler _r;
+class NavTopMenuElement extends CustomElement implements Renderable {
+  late RenderingScheduler<NavTopMenuElement> _r;
 
   Stream<RenderedEvent<NavTopMenuElement>> get onRendered => _r.onRendered;
 
-  Iterable<Element> _content = const [];
+  Iterable<Element> _content = const <Element>[];
 
   Iterable<Element> get content => _content;
 
@@ -27,13 +24,13 @@ class NavTopMenuElement extends HtmlElement implements Renderable {
     _r.dirty();
   }
 
-  factory NavTopMenuElement({RenderingQueue queue}) {
-    NavTopMenuElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+  factory NavTopMenuElement({RenderingQueue? queue}) {
+    NavTopMenuElement e = new NavTopMenuElement.created();
+    e._r = new RenderingScheduler<NavTopMenuElement>(e, queue: queue);
     return e;
   }
 
-  NavTopMenuElement.created() : super.created();
+  NavTopMenuElement.created() : super.created('nav-top-menu');
 
   @override
   void attached() {
@@ -45,13 +42,15 @@ class NavTopMenuElement extends HtmlElement implements Renderable {
   void detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
   }
 
   void render() {
-    final content = ([
-      new NavMenuItemElement('Connect to a VM', link: Uris.vmConnect()),
+    final content = (<Element>[
+      new NavMenuItemElement('Connect to a VM', link: Uris.vmConnect()).element,
     ]..addAll(_content));
-    children = [navMenu('Observatory', link: Uris.vm(), content: content)];
+    children = <Element>[
+      navMenu('Observatory', link: Uris.vm(), content: content)
+    ];
   }
 }

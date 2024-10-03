@@ -1,7 +1,7 @@
 // Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
+// @dart=2.9
 /*@testedFeatures=inference*/
 library test;
 
@@ -11,7 +11,9 @@ class A {
   void m() {}
 }
 
-var /*@topType=A*/ v = new A()
-  ..a = 1
-  ..b. /*@target=List::add*/ add(2)
-  .. /*@target=A::m*/ m();
+var v = new A()
+  .. /*@target=A.a*/ a = 1
+  .. /*@target=A.b*/ b. /*@target=List.add*/ add(2)
+  .. /*@target=A.m*/ m();
+
+main() {}

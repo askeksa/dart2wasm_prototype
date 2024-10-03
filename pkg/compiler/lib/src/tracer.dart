@@ -4,43 +4,36 @@
 
 library tracer;
 
-import '../compiler_new.dart' as api;
-import 'compiler.dart' show Compiler;
-import 'js_backend/namer.dart' show Namer;
+import 'package:kernel/text/indentation.dart' show Indentation;
+
+import '../compiler.dart' as api;
+import 'options.dart' show CompilerOptions;
 import 'ssa/nodes.dart' as ssa show HGraph;
 import 'ssa/ssa_tracer.dart' show HTracer;
-import 'util/util.dart' show Indentation;
-import 'world.dart' show ClosedWorld;
+import 'world.dart' show JClosedWorld;
 
-/**
- * If non-null, we only trace methods whose name match the regexp defined by the
- * given pattern.
- */
-String get TRACE_FILTER_PATTERN =>
-    TRACE_FILTER_PATTERN_FROM_ENVIRONMENT ?? TRACE_FILTER_PATTERN_FOR_TEST;
-
-const String TRACE_FILTER_PATTERN_FROM_ENVIRONMENT =
-    const String.fromEnvironment("DUMP_IR");
 String TRACE_FILTER_PATTERN_FOR_TEST;
 
-/**
- * Dumps the intermediate representation after each phase in a format
- * readable by IR Hydra.
- */
+/// Dumps the intermediate representation after each phase in a format
+/// readable by IR Hydra.
 class Tracer extends TracerUtil {
-  final ClosedWorld closedWorld;
-  final Namer namer;
+  final JClosedWorld closedWorld;
   bool traceActive = false;
+  @override
   final api.OutputSink output;
   final RegExp traceFilter;
 
-  Tracer(this.closedWorld, this.namer, Compiler compiler)
-      : traceFilter = TRACE_FILTER_PATTERN == null
-            ? null
-            : new RegExp(TRACE_FILTER_PATTERN),
-        output = TRACE_FILTER_PATTERN != null
-            ? compiler.outputProvider('dart', 'cfg', api.OutputType.debug)
-            : null;
+  Tracer._(this.closedWorld, this.traceFilter, this.output);
+
+  factory Tracer(JClosedWorld closedWorld, CompilerOptions options,
+      api.CompilerOutput compilerOutput) {
+    String pattern = options.dumpSsaPattern ?? TRACE_FILTER_PATTERN_FOR_TEST;
+    if (pattern == null) return Tracer._(closedWorld, null, null);
+    var traceFilter = RegExp(pattern);
+    var output =
+        compilerOutput.createOutputSink('', 'cfg', api.OutputType.debug);
+    return Tracer._(closedWorld, traceFilter, output);
+  }
 
   bool get isEnabled => traceFilter != null;
 
@@ -51,15 +44,20 @@ class Tracer extends TracerUtil {
     tag("compilation", () {
       printProperty("name", methodName);
       printProperty("method", methodName);
-      printProperty("date", new DateTime.now().millisecondsSinceEpoch);
+      printProperty("date", DateTime.now().millisecondsSinceEpoch);
     });
   }
 
   void traceGraph(String name, var irObject) {
     if (!traceActive) return;
     if (irObject is ssa.HGraph) {
-      new HTracer(output, closedWorld, namer).traceGraph(name, irObject);
+      HTracer(output, closedWorld).traceGraph(name, irObject);
     }
+  }
+
+  void traceJavaScriptText(String name, String Function() getText) {
+    if (!traceActive) return;
+    HTracer(output, closedWorld).traceJavaScriptText(name, getText());
   }
 
   void close() {
@@ -71,7 +69,7 @@ class Tracer extends TracerUtil {
 
 abstract class TracerUtil {
   api.OutputSink get output;
-  final Indentation _ind = new Indentation();
+  final Indentation _ind = Indentation();
 
   void tag(String tagName, Function f) {
     println("begin_$tagName");

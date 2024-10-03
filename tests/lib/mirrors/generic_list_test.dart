@@ -4,14 +4,13 @@
 
 library test.superclass;
 
-@MirrorsUsed(targets: const ["test.superclass", "dart.core"])
 import 'dart:mirrors';
 import 'package:expect/expect.dart';
 
 class Foo<T> {
   List<T> makeList() {
     if (new DateTime.now().millisecondsSinceEpoch == 42) return [];
-    return new List<T>();
+    return <T>[];
   }
 }
 

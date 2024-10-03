@@ -6,7 +6,7 @@ import 'dart:async';
 import 'dart:html';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 
 enum ProfileTreeMode {
   code,
@@ -18,11 +18,8 @@ class StackTraceTreeConfigChangedEvent {
   StackTraceTreeConfigChangedEvent(this.element);
 }
 
-class StackTraceTreeConfigElement extends HtmlElement implements Renderable {
-  static const tag =
-      const Tag<StackTraceTreeConfigElement>('stack-trace-tree-config');
-
-  RenderingScheduler<StackTraceTreeConfigElement> _r;
+class StackTraceTreeConfigElement extends CustomElement implements Renderable {
+  late RenderingScheduler<StackTraceTreeConfigElement> _r;
 
   Stream<RenderedEvent<StackTraceTreeConfigElement>> get onRendered =>
       _r.onRendered;
@@ -40,12 +37,12 @@ class StackTraceTreeConfigElement extends HtmlElement implements Renderable {
   Stream<StackTraceTreeConfigChangedEvent> get onFilterChange =>
       _onFilterChange.stream;
 
-  bool _showMode;
-  bool _showDirection;
-  bool _showFilter;
-  ProfileTreeMode _mode;
-  M.ProfileTreeDirection _direction;
-  String _filter;
+  late bool _showMode;
+  late bool _showDirection;
+  late bool _showFilter;
+  late ProfileTreeMode _mode;
+  late M.ProfileTreeDirection _direction;
+  late String _filter;
 
   bool get showMode => _showMode;
   bool get showDirection => _showDirection;
@@ -71,15 +68,15 @@ class StackTraceTreeConfigElement extends HtmlElement implements Renderable {
       String filter: '',
       ProfileTreeMode mode: ProfileTreeMode.function,
       M.ProfileTreeDirection direction: M.ProfileTreeDirection.exclusive,
-      RenderingQueue queue}) {
+      RenderingQueue? queue}) {
     assert(showMode != null);
     assert(showDirection != null);
     assert(showFilter != null);
     assert(mode != null);
     assert(direction != null);
     assert(filter != null);
-    StackTraceTreeConfigElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    StackTraceTreeConfigElement e = new StackTraceTreeConfigElement.created();
+    e._r = new RenderingScheduler<StackTraceTreeConfigElement>(e, queue: queue);
     e._showMode = showMode;
     e._showDirection = showDirection;
     e._showFilter = showFilter;
@@ -89,7 +86,8 @@ class StackTraceTreeConfigElement extends HtmlElement implements Renderable {
     return e;
   }
 
-  StackTraceTreeConfigElement.created() : super.created();
+  StackTraceTreeConfigElement.created()
+      : super.created('stack-trace-tree-config');
 
   @override
   void attached() {
@@ -105,15 +103,15 @@ class StackTraceTreeConfigElement extends HtmlElement implements Renderable {
   }
 
   void render() {
-    children = [
+    children = <Element>[
       new DivElement()
         ..classes = ['content-centered-big']
-        ..children = [
+        ..children = <Element>[
           new HeadingElement.h2()..text = 'Tree display',
           new HRElement(),
           new DivElement()
             ..classes = ['row']
-            ..children = [
+            ..children = <Element>[
               new DivElement()
                 ..classes = ['memberList']
                 ..children = _createMembers()
@@ -127,7 +125,7 @@ class StackTraceTreeConfigElement extends HtmlElement implements Renderable {
     if (_showMode) {
       members.add(new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'Mode',
@@ -139,7 +137,7 @@ class StackTraceTreeConfigElement extends HtmlElement implements Renderable {
     if (_showDirection) {
       members.add(new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'Call Tree Direction',
@@ -151,7 +149,7 @@ class StackTraceTreeConfigElement extends HtmlElement implements Renderable {
     if (showFilter) {
       members.add(new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'Call Tree Filter'

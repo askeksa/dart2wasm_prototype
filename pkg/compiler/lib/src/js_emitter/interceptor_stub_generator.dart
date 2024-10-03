@@ -6,73 +6,63 @@ library dart2js.js_emitter.interceptor_stub_generator;
 
 import 'package:js_runtime/shared/embedded_names.dart' as embeddedNames;
 
-import '../common_elements.dart';
+import '../common/elements.dart';
 import '../constants/values.dart';
 import '../elements/entities.dart';
 import '../elements/types.dart' show InterfaceType;
 import '../js/js.dart' as jsAst;
 import '../js/js.dart' show js;
 import '../js_backend/namer.dart' show Namer;
-import '../js_backend/constant_handler_javascript.dart'
-    show JavaScriptConstantCompiler;
 import '../js_backend/custom_elements_analysis.dart'
     show CustomElementsCodegenAnalysis;
 import '../js_backend/native_data.dart';
 import '../js_backend/interceptor_data.dart';
 import '../native/enqueue.dart';
-import '../options.dart';
+import '../universe/codegen_world_builder.dart';
 import '../universe/selector.dart' show Selector;
-import '../universe/world_builder.dart' show CodegenWorldBuilder;
-import '../world.dart' show ClosedWorld;
+import '../world.dart' show JClosedWorld;
 
-import 'code_emitter_task.dart' show CodeEmitterTask, Emitter;
+import 'code_emitter_task.dart' show Emitter;
 
 class InterceptorStubGenerator {
-  final CompilerOptions _options;
   final CommonElements _commonElements;
-  final CodeEmitterTask _emitterTask;
+  final Emitter _emitter;
   final NativeCodegenEnqueuer _nativeCodegenEnqueuer;
-  final JavaScriptConstantCompiler _constants;
   final Namer _namer;
-  final OneShotInterceptorData _oneShotInterceptorData;
   final CustomElementsCodegenAnalysis _customElementsCodegenAnalysis;
-  final CodegenWorldBuilder _codegenWorldBuilder;
-  final ClosedWorld _closedWorld;
+  final CodegenWorld _codegenWorld;
+  final JClosedWorld _closedWorld;
 
   InterceptorStubGenerator(
-      this._options,
       this._commonElements,
-      this._emitterTask,
+      this._emitter,
       this._nativeCodegenEnqueuer,
-      this._constants,
       this._namer,
-      this._oneShotInterceptorData,
       this._customElementsCodegenAnalysis,
-      this._codegenWorldBuilder,
+      this._codegenWorld,
       this._closedWorld);
 
   NativeData get _nativeData => _closedWorld.nativeData;
 
   InterceptorData get _interceptorData => _closedWorld.interceptorData;
 
-  Emitter get _emitter => _emitterTask.emitter;
+  jsAst.Expression generateGetInterceptorMethod(
+      SpecializedGetInterceptor interceptor) {
+    Set<ClassEntity> classes = interceptor.classes;
 
-  jsAst.Expression generateGetInterceptorMethod(Set<ClassEntity> classes) {
     jsAst.Expression interceptorFor(ClassEntity cls) {
-      return _emitterTask.interceptorPrototypeAccess(cls);
+      return _emitter.interceptorPrototypeAccess(cls);
     }
 
-    /**
-     * Build a JavaScrit AST node for doing a type check on
-     * [cls]. [cls] must be a non-native interceptor class.
-     */
+    /// Build a JavaScript AST node for doing a type check on
+    /// [cls]. [cls] must be a non-native interceptor class.
     jsAst.Statement buildInterceptorCheck(ClassEntity cls) {
       jsAst.Expression condition;
       assert(_interceptorData.isInterceptedClass(cls));
       if (cls == _commonElements.jsBoolClass) {
         condition = js('(typeof receiver) == "boolean"');
       } else if (cls == _commonElements.jsIntClass ||
-          cls == _commonElements.jsDoubleClass ||
+          cls == _commonElements.jsNumNotIntClass ||
           cls == _commonElements.jsNumberClass) {
         throw 'internal error';
       } else if (cls == _commonElements.jsArrayClass ||
@@ -92,7 +82,7 @@ class InterceptorStubGenerator {
 
     bool hasArray = false;
     bool hasBool = false;
-    bool hasDouble = false;
+    bool hasNumNotInt = false;
     bool hasInt = false;
     bool hasNull = false;
     bool hasNumber = false;
@@ -108,8 +98,8 @@ class InterceptorStubGenerator {
         hasArray = true;
       else if (cls == _commonElements.jsBoolClass)
         hasBool = true;
-      else if (cls == _commonElements.jsDoubleClass)
-        hasDouble = true;
+      else if (cls == _commonElements.jsNumNotIntClass)
+        hasNumNotInt = true;
       else if (cls == _commonElements.jsIntClass)
         hasInt = true;
       else if (cls == _commonElements.jsNullClass)
@@ -133,7 +123,7 @@ class InterceptorStubGenerator {
         }
       }
     }
-    if (hasDouble) {
+    if (hasNumNotInt) {
       hasNumber = true;
     }
     if (hasInt) hasNumber = true;
@@ -143,27 +133,27 @@ class InterceptorStubGenerator {
       hasNative = anyNativeClasses;
     }
 
-    List<jsAst.Statement> statements = <jsAst.Statement>[];
+    List<jsAst.Statement> statements = [];
 
     if (hasNumber) {
       jsAst.Statement whenNumber;
 
-      /// Note: there are two number classes in play: Dart's [num],
-      /// and JavaScript's Number (typeof receiver == 'number').  This
-      /// is the fallback used when we have determined that receiver
-      /// is a JavaScript Number.
-      jsAst.Expression interceptorForNumber = interceptorFor(hasDouble
-          ? _commonElements.jsDoubleClass
-          : _commonElements.jsNumberClass);
-
       if (hasInt) {
-        whenNumber = js.statement(
-            '''{
+        whenNumber = js.statement('''{
             if (Math.floor(receiver) == receiver) return #;
             return #;
-        }''',
-            [interceptorFor(_commonElements.jsIntClass), interceptorForNumber]);
+        }''', [
+          interceptorFor(_commonElements.jsIntClass),
+          interceptorFor(_commonElements.jsNumNotIntClass)
+        ]);
       } else {
+        // If we don't have methods defined on the JSInt interceptor, use the
+        // JSNumber interceptor, unless we have a method defined only for
+        // non-integral values.
+        jsAst.Expression interceptorForNumber = interceptorFor(hasNumNotInt
+            ? _commonElements.jsNumNotIntClass
+            : _commonElements.jsNumberClass);
+
         whenNumber = js.statement('return #', interceptorForNumber);
       }
       statements
@@ -191,25 +181,22 @@ class InterceptorStubGenerator {
     }
 
     if (hasNative) {
-      statements.add(js.statement(
-          r'''{
+      statements.add(js.statement(r'''{
           if (typeof receiver != "object") {
               if (typeof receiver == "function" ) return #;
               return receiver;
           }
           if (receiver instanceof #) return receiver;
           return #(receiver);
-      }''',
-          [
-            interceptorFor(_commonElements.jsJavaScriptFunctionClass),
-            _emitter.constructorAccess(_commonElements.objectClass),
-            _emitter.staticFunctionAccess(
-                _commonElements.getNativeInterceptorMethod)
-          ]));
+      }''', [
+        interceptorFor(_commonElements.jsJavaScriptFunctionClass),
+        _emitter.constructorAccess(_commonElements.objectClass),
+        _emitter
+            .staticFunctionAccess(_commonElements.getNativeInterceptorMethod)
+      ]));
     } else {
       ClassEntity jsUnknown = _commonElements.jsUnknownJavaScriptObjectClass;
-      if (_codegenWorldBuilder.directlyInstantiatedClasses
-          .contains(jsUnknown)) {
+      if (_codegenWorld.directlyInstantiatedClasses.contains(jsUnknown)) {
         statements.add(js.statement('if (!(receiver instanceof #)) return #;', [
           _emitter.constructorAccess(_commonElements.objectClass),
           interceptorFor(jsUnknown)
@@ -219,7 +206,7 @@ class InterceptorStubGenerator {
       statements.add(js.statement('return receiver'));
     }
 
-    return js('''function(receiver) { #; }''', new jsAst.Block(statements));
+    return js('''function(receiver) { #; }''', jsAst.Block(statements));
   }
 
   jsAst.Call _generateIsJsIndexableCall(
@@ -231,13 +218,12 @@ class InterceptorStubGenerator {
     // We pass the dispatch property record to the isJsIndexable
     // helper rather than reading it inside the helper to increase the
     // chance of making the dispatch record access monomorphic.
-    jsAst.PropertyAccess record =
-        new jsAst.PropertyAccess(use2, dispatchProperty);
+    jsAst.PropertyAccess record = jsAst.PropertyAccess(use2, dispatchProperty);
 
-    List<jsAst.Expression> arguments = <jsAst.Expression>[use1, record];
+    List<jsAst.Expression> arguments = [use1, record];
     FunctionEntity helper = _commonElements.isJsIndexable;
     jsAst.Expression helperExpression = _emitter.staticFunctionAccess(helper);
-    return new jsAst.Call(helperExpression, arguments);
+    return jsAst.Call(helperExpression, arguments);
   }
 
   // Returns a statement that takes care of performance critical
@@ -256,7 +242,7 @@ class InterceptorStubGenerator {
       }
       if (!classes.contains(_commonElements.jsIntClass) &&
           !classes.contains(_commonElements.jsNumberClass) &&
-          !classes.contains(_commonElements.jsDoubleClass)) {
+          !classes.contains(_commonElements.jsNumNotIntClass)) {
         return null;
       }
       if (selector.argumentCount == 1) {
@@ -308,21 +294,29 @@ class InterceptorStubGenerator {
       bool containsJsIndexable = _closedWorld
               .isImplemented(_commonElements.jsIndexingBehaviorInterface) &&
           classes.any((cls) {
-            return _closedWorld.isSubtypeOf(
-                cls, _commonElements.jsIndexingBehaviorInterface);
+            return _closedWorld.classHierarchy
+                .isSubtypeOf(cls, _commonElements.jsIndexingBehaviorInterface);
           });
       // The index set operator requires a check on its set value in
       // checked mode, so we don't optimize the interceptor if the
       // _compiler has type assertions enabled.
       if (selector.isIndexSet &&
-          (_options.enableTypeAssertions || !containsArray)) {
+          // TODO(johnniwinther): Support annotations on the possible targets
+          // and used their parameter check policy here.
+          (_closedWorld.annotationsData
+                  .getParameterCheckPolicy(null)
+                  .isEmitted ||
+              !containsArray)) {
         return null;
       }
       if (!containsArray && !containsString) {
         return null;
       }
       jsAst.Expression arrayCheck = js('receiver.constructor == Array');
-      jsAst.Expression indexableCheck =
+
+      // Lazy generation of the indexable check. If indexable behavior isn't
+      // used, the isJsIndexable function isn't part of the closed world.
+      jsAst.Expression genericIndexableCheck() =>
           _generateIsJsIndexableCall(js('receiver'), js('receiver'));
 
       jsAst.Expression orExp(left, right) {
@@ -340,17 +334,15 @@ class InterceptorStubGenerator {
         }
 
         if (containsJsIndexable) {
-          typeCheck = orExp(typeCheck, indexableCheck);
+          typeCheck = orExp(typeCheck, genericIndexableCheck());
         }
 
-        return js.statement(
-            '''
+        return js.statement('''
           if (typeof a0 === "number")
             if (#)
               if ((a0 >>> 0) === a0 && a0 < receiver.length)
                 return receiver[a0];
-          ''',
-            typeCheck);
+          ''', typeCheck);
       } else {
         jsAst.Expression typeCheck;
         if (containsArray) {
@@ -358,30 +350,39 @@ class InterceptorStubGenerator {
         }
 
         if (containsJsIndexable) {
-          typeCheck = orExp(typeCheck, indexableCheck);
+          typeCheck = orExp(typeCheck, genericIndexableCheck());
         }
 
-        return js.statement(
-            r'''
+        return js.statement(r'''
           if (typeof a0 === "number")
             if (# && !receiver.immutable$list &&
                 (a0 >>> 0) === a0 && a0 < receiver.length)
               return receiver[a0] = a1;
-          ''',
-            typeCheck);
+          ''', typeCheck);
+      }
+    } else if (selector.isCall) {
+      if (selector.name == 'abs' && selector.argumentCount == 0) {
+        return js.statement(r'''
+          if (typeof receiver === "number") return Math.abs(receiver);
+        ''');
+      }
+    } else if (selector.isGetter) {
+      if (selector.name == 'sign') {
+        return js.statement(r'''
+          if (typeof receiver === "number")
+             return receiver > 0 ? 1 : receiver < 0 ? -1 : receiver;
+        ''');
       }
     }
     return null;
   }
 
-  jsAst.Expression generateOneShotInterceptor(jsAst.Name name) {
-    Selector selector =
-        _oneShotInterceptorData.getOneShotInterceptorSelector(name);
-    Set<ClassEntity> classes =
-        _interceptorData.getInterceptedClassesOn(selector.name, _closedWorld);
+  jsAst.Expression generateOneShotInterceptor(OneShotInterceptor interceptor) {
+    Selector selector = interceptor.selector;
+    Set<ClassEntity> classes = interceptor.classes;
     jsAst.Name getInterceptorName = _namer.nameForGetInterceptor(classes);
 
-    List<String> parameterNames = <String>[];
+    List<String> parameterNames = [];
     parameterNames.add('receiver');
 
     if (selector.isSetter) {
@@ -390,15 +391,17 @@ class InterceptorStubGenerator {
       for (int i = 0; i < selector.argumentCount; i++) {
         parameterNames.add('a$i');
       }
+      for (int i = 1; i <= selector.typeArgumentCount; i++) {
+        parameterNames.add('\$T$i');
+      }
     }
 
     jsAst.Name invocationName = _namer.invocationName(selector);
-    String globalObject =
-        _namer.globalObjectForLibrary(_commonElements.interceptorsLibrary);
+    var globalObject = _namer.readGlobalObjectForInterceptors();
 
     jsAst.Statement optimizedPath =
         _fastPathForOneShotInterceptor(selector, classes);
-    if (optimizedPath == null) optimizedPath = js.statement(';');
+    optimizedPath ??= js.statement(';');
 
     return js('function(#) { #; return #.#(receiver).#(#) }', [
       parameterNames,
@@ -415,9 +418,9 @@ class InterceptorStubGenerator {
     CustomElementsCodegenAnalysis analysis = _customElementsCodegenAnalysis;
     if (!analysis.needsTable) return null;
 
-    List<jsAst.Expression> elements = <jsAst.Expression>[];
-    List<ConstantValue> constants =
-        _constants.getConstantsForEmission(_emitter.compareConstants);
+    List<jsAst.Expression> elements = [];
+    Iterable<ConstantValue> constants =
+        _codegenWorld.getConstantsForEmission(_emitter.compareConstants);
     for (ConstantValue constant in constants) {
       if (constant is TypeConstantValue &&
           constant.representedType is InterfaceType) {
@@ -443,17 +446,17 @@ class InterceptorStubGenerator {
         //     {"": A.A$, "foo": A.A$foo, "bar": A.A$bar}
         //
         // We expect most of the time the map will be a singleton.
-        var properties = [];
+        var properties = <jsAst.Property>[];
         for (ConstructorEntity member in analysis.constructors(classElement)) {
-          properties.add(new jsAst.Property(
+          properties.add(jsAst.Property(
               js.string(member.name), _emitter.staticFunctionAccess(member)));
         }
 
-        var map = new jsAst.ObjectInitializer(properties);
+        var map = jsAst.ObjectInitializer(properties);
         elements.add(map);
       }
     }
 
-    return new jsAst.ArrayInitializer(elements);
+    return jsAst.ArrayInitializer(elements);
   }
 }

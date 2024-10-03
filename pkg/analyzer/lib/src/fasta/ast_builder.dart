@@ -1,251 +1,619 @@
-// Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2016, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library fasta.analyzer.ast_builder;
-
-import 'package:analyzer/analyzer.dart';
-import 'package:analyzer/dart/ast/ast_factory.dart' show AstFactory;
-import 'package:analyzer/dart/ast/standard_ast_factory.dart' as standard;
-import 'package:analyzer/dart/ast/token.dart' as analyzer show Token;
-import 'package:analyzer/dart/ast/token.dart' show Token, TokenType;
-import 'package:analyzer/dart/element/element.dart' show Element;
-import 'package:front_end/src/fasta/parser/parser.dart'
-    show FormalParameterType, MemberKind, Parser;
-import 'package:front_end/src/fasta/scanner/string_scanner.dart';
-import 'package:front_end/src/fasta/scanner/token.dart'
-    show BeginGroupToken, CommentToken;
-import 'package:front_end/src/scanner/token.dart' as analyzer;
-
-import 'package:front_end/src/fasta/errors.dart' show internalError;
-import 'package:front_end/src/fasta/fasta_codes.dart'
-    show FastaMessage, codeExpectedExpression, codeExpectedFunctionBody;
-import 'package:front_end/src/fasta/kernel/kernel_builder.dart'
-    show Builder, KernelLibraryBuilder, ProcedureBuilder, Scope;
-import 'package:front_end/src/fasta/parser/identifier_context.dart'
-    show IdentifierContext;
-import 'package:front_end/src/fasta/quote.dart';
-import 'package:front_end/src/fasta/source/scope_listener.dart'
-    show JumpTargetKind, NullValue, ScopeListener;
-import 'analyzer.dart' show toKernel;
-import 'element_store.dart'
+import 'package:_fe_analyzer_shared/src/messages/codes.dart'
     show
-        AnalyzerLocalVariableElemment,
-        AnalyzerParameterElement,
-        ElementStore,
-        KernelClassElement;
+        LocatedMessage,
+        Message,
+        MessageCode,
+        messageAbstractClassMember,
+        messageAbstractLateField,
+        messageAbstractStaticField,
+        messageConstConstructorWithBody,
+        messageConstFactory,
+        messageConstructorWithTypeParameters,
+        messageDirectiveAfterDeclaration,
+        messageExpectedStatement,
+        messageExternalField,
+        messageExternalLateField,
+        messageFieldInitializerOutsideConstructor,
+        messageIllegalAssignmentToNonAssignable,
+        messageInterpolationInUri,
+        messageInvalidInitializer,
+        messageInvalidSuperInInitializer,
+        messageInvalidThisInInitializer,
+        messageMissingAssignableSelector,
+        messageNativeClauseShouldBeAnnotation,
+        messageOperatorWithTypeParameters,
+        messagePositionalAfterNamedArgument,
+        templateDuplicateLabelInSwitchStatement,
+        templateExpectedButGot,
+        templateExpectedIdentifier,
+        templateExperimentNotEnabled,
+        templateExtraneousModifier,
+        templateInternalProblemUnhandled,
+        templateUnexpectedToken;
+import 'package:_fe_analyzer_shared/src/parser/parser.dart'
+    show
+        Assert,
+        BlockKind,
+        ConstructorReferenceContext,
+        DeclarationKind,
+        FormalParameterKind,
+        IdentifierContext,
+        MemberKind,
+        optional,
+        Parser;
+import 'package:_fe_analyzer_shared/src/parser/quote.dart';
+import 'package:_fe_analyzer_shared/src/parser/stack_listener.dart'
+    show NullValue, StackListener;
+import 'package:_fe_analyzer_shared/src/scanner/errors.dart'
+    show translateErrorToken;
+import 'package:_fe_analyzer_shared/src/scanner/scanner.dart' hide StringToken;
+import 'package:_fe_analyzer_shared/src/scanner/token.dart'
+    show KeywordToken, StringToken, SyntheticStringToken, SyntheticToken;
+import 'package:_fe_analyzer_shared/src/scanner/token_constants.dart';
+import 'package:analyzer/dart/analysis/features.dart';
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/token.dart' show Token, TokenType;
+import 'package:analyzer/error/listener.dart';
+import 'package:analyzer/src/dart/analysis/experiments.dart';
+import 'package:analyzer/src/dart/ast/ast.dart'
+    show
+        ArgumentListImpl,
+        ClassDeclarationImpl,
+        CompilationUnitImpl,
+        ConstructorNameImpl,
+        ConstructorSelectorImpl,
+        EnumConstantArgumentsImpl,
+        EnumConstantDeclarationImpl,
+        EnumDeclarationImpl,
+        ExtensionDeclarationImpl,
+        ImportDirectiveImpl,
+        MethodInvocationImpl,
+        MixinDeclarationImpl,
+        SimpleIdentifierImpl,
+        TypeArgumentListImpl,
+        TypeParameterImpl;
+import 'package:analyzer/src/dart/ast/ast_factory.dart';
 import 'package:analyzer/src/dart/error/syntactic_errors.dart';
-import 'token_utils.dart' show toAnalyzerToken, toAnalyzerCommentToken;
+import 'package:analyzer/src/fasta/error_converter.dart';
+import 'package:analyzer/src/generated/utilities_dart.dart';
+import 'package:analyzer/src/summary2/ast_binary_tokens.dart';
+import 'package:collection/collection.dart';
+import 'package:pub_semver/pub_semver.dart';
 
-class AstBuilder extends ScopeListener {
-  final AstFactory ast = standard.astFactory;
+const _invalidCollectionElement = _InvalidCollectionElement._();
 
-  final ErrorReporter errorReporter;
-  final KernelLibraryBuilder library;
-  final Builder member;
-  final ElementStore elementStore;
+/// A parser listener that builds the analyzer's AST structure.
+class AstBuilder extends StackListener {
+  final AstFactoryImpl ast = astFactory;
+
+  final FastaErrorReporter errorReporter;
+  final Uri fileUri;
+  ScriptTag? scriptTag;
+  final List<Directive> directives = <Directive>[];
+  final List<CompilationUnitMember> declarations = <CompilationUnitMember>[];
 
   @override
   final Uri uri;
 
-  /**
-   * The [Parser] that uses this listener, used to parse optional parts, e.g.
-   * `native` support.
-   */
-  Parser parser;
+  /// The parser that uses this listener, used to parse optional parts, e.g.
+  /// `native` support.
+  late Parser parser;
 
-  bool parseGenericMethodComments = false;
+  /// The class currently being parsed, or `null` if no class is being parsed.
+  ClassDeclarationImpl? classDeclaration;
 
-  /// The name of the class currently being parsed, or `null` if no class is
-  /// being parsed.
-  String className;
+  /// The mixin currently being parsed, or `null` if no mixin is being parsed.
+  MixinDeclarationImpl? mixinDeclaration;
 
-  AstBuilder(this.errorReporter, this.library, this.member, this.elementStore,
-      Scope scope,
-      [Uri uri])
-      : uri = uri ?? library.fileUri,
-        super(scope);
+  /// The extension currently being parsed, or `null` if none.
+  ExtensionDeclarationImpl? extensionDeclaration;
 
-  createJumpTarget(JumpTargetKind kind, int charOffset) {
-    // TODO(ahe): Implement jump targets.
+  /// The enum currently being parsed, or `null` if none.
+  EnumDeclarationImpl? enumDeclaration;
+
+  /// If true, this is building a full AST. Otherwise, only create method
+  /// bodies.
+  final bool isFullAst;
+
+  /// `true` if the `native` clause is allowed
+  /// in class, method, and function declarations.
+  ///
+  /// This is being replaced by the @native(...) annotation.
+  //
+  // TODO(danrubel) Move this flag to a better location
+  // and should only be true if either:
+  // * The current library is a platform library
+  // * The current library has an import that uses the scheme "dart-ext".
+  bool allowNativeClause = false;
+
+  StringLiteral? nativeName;
+
+  bool parseFunctionBodies = true;
+
+  /// `true` if non-nullable behavior is enabled.
+  final bool enableNonNullable;
+
+  /// `true` if spread-collections behavior is enabled
+  final bool enableSpreadCollections;
+
+  /// `true` if control-flow-collections behavior is enabled
+  final bool enableControlFlowCollections;
+
+  /// `true` if triple-shift behavior is enabled
+  final bool enableTripleShift;
+
+  /// `true` if nonfunction-type-aliases behavior is enabled
+  final bool enableNonFunctionTypeAliases;
+
+  /// `true` if variance behavior is enabled
+  final bool enableVariance;
+
+  /// `true` if constructor tearoffs are enabled
+  final bool enableConstructorTearoffs;
+
+  /// `true` if extension types are enabled
+  final bool enableExtensionTypes;
+
+  /// `true` if named arguments anywhere are enabled
+  final bool enableNamedArgumentsAnywhere;
+
+  /// `true` if super parameters are enabled
+  final bool enableSuperParameters;
+
+  /// `true` if enhanced enums are enabled
+  final bool enableEnhancedEnums;
+
+  /// `true` if macros are enabled
+  final bool enableMacros;
+
+  final FeatureSet _featureSet;
+
+  AstBuilder(ErrorReporter? errorReporter, this.fileUri, this.isFullAst,
+      this._featureSet,
+      [Uri? uri])
+      : errorReporter = FastaErrorReporter(errorReporter),
+        enableNonNullable = _featureSet.isEnabled(Feature.non_nullable),
+        enableSpreadCollections =
+            _featureSet.isEnabled(Feature.spread_collections),
+        enableControlFlowCollections =
+            _featureSet.isEnabled(Feature.control_flow_collections),
+        enableTripleShift = _featureSet.isEnabled(Feature.triple_shift),
+        enableNonFunctionTypeAliases =
+            _featureSet.isEnabled(Feature.nonfunction_type_aliases),
+        enableVariance = _featureSet.isEnabled(Feature.variance),
+        enableConstructorTearoffs =
+            _featureSet.isEnabled(Feature.constructor_tearoffs),
+        enableExtensionTypes = _featureSet.isEnabled(Feature.extension_types),
+        enableNamedArgumentsAnywhere =
+            _featureSet.isEnabled(Feature.named_arguments_anywhere),
+        enableSuperParameters = _featureSet.isEnabled(Feature.super_parameters),
+        enableEnhancedEnums = _featureSet.isEnabled(Feature.enhanced_enums),
+        enableMacros = _featureSet.isEnabled(Feature.macros),
+        uri = uri ?? fileUri;
+
+  NodeList<ClassMember> get currentDeclarationMembers {
+    if (classDeclaration != null) {
+      return classDeclaration!.members;
+    } else if (mixinDeclaration != null) {
+      return mixinDeclaration!.members;
+    } else if (extensionDeclaration != null) {
+      return extensionDeclaration!.members;
+    } else {
+      return enumDeclaration!.members;
+    }
+  }
+
+  SimpleIdentifier? get currentDeclarationName {
+    if (classDeclaration != null) {
+      return classDeclaration!.name;
+    } else if (mixinDeclaration != null) {
+      return mixinDeclaration!.name;
+    } else if (extensionDeclaration != null) {
+      return extensionDeclaration!.name;
+    } else {
+      return enumDeclaration!.name;
+    }
+  }
+
+  @override
+  void addProblem(Message message, int charOffset, int length,
+      {bool wasHandled = false, List<LocatedMessage>? context}) {
+    if (directives.isEmpty &&
+        (message.code.analyzerCodes
+                ?.contains('NON_PART_OF_DIRECTIVE_IN_PART') ??
+            false)) {
+      message = messageDirectiveAfterDeclaration;
+    }
+    errorReporter.reportMessage(message, charOffset, length);
+  }
+
+  @override
+  void beginAsOperatorType(Token asOperator) {}
+
+  @override
+  void beginCascade(Token token) {
+    assert(optional('..', token) || optional('?..', token));
+    debugEvent("beginCascade");
+
+    var expression = pop() as Expression;
+    push(token);
+    if (expression is CascadeExpression) {
+      push(expression);
+    } else {
+      push(ast.cascadeExpression(expression, <Expression>[]));
+    }
+    push(NullValue.CascadeReceiver);
+  }
+
+  @override
+  void beginClassDeclaration(
+      Token begin, Token? abstractToken, Token? macroToken, Token name) {
+    assert(classDeclaration == null &&
+        mixinDeclaration == null &&
+        extensionDeclaration == null);
+    push(_Modifiers()..abstractKeyword = abstractToken);
+    if (macroToken != null && !enableMacros) {
+      var feature = ExperimentalFeatures.macros;
+      handleRecoverableError(
+          templateExperimentNotEnabled.withArguments(
+            feature.enableString,
+            _versionAsString(ExperimentStatus.currentVersion),
+          ),
+          macroToken,
+          macroToken);
+      // Pretend that 'macro' didn't occur while this feature is incomplete.
+      macroToken = null;
+    }
+    push(macroToken ?? NullValue.Token);
+  }
+
+  @override
+  void beginCompilationUnit(Token token) {
+    push(token);
+  }
+
+  @override
+  void beginEnum(Token enumKeyword) {}
+
+  @override
+  void beginExtensionDeclaration(Token extensionKeyword, Token? nameToken) {
+    assert(optional('extension', extensionKeyword));
+    assert(classDeclaration == null &&
+        mixinDeclaration == null &&
+        extensionDeclaration == null);
+    debugEvent("ExtensionHeader");
+
+    var typeParameters = pop() as TypeParameterList?;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, extensionKeyword);
+
+    SimpleIdentifier? name;
+    if (nameToken != null) {
+      name = ast.simpleIdentifier(nameToken, isDeclaration: true);
+    }
+
+    extensionDeclaration = ast.extensionDeclaration(
+      comment: comment,
+      metadata: metadata,
+      extensionKeyword: extensionKeyword,
+      typeKeyword: null,
+      name: name,
+      typeParameters: typeParameters,
+      onKeyword: Tokens.on_(),
+      extendedType: ast.namedType(
+        name: _tmpSimpleIdentifier(),
+      ), // extendedType is set in [endExtensionDeclaration]
+      showClause: null,
+      hideClause: null,
+      leftBracket: Tokens.openCurlyBracket(),
+      rightBracket: Tokens.closeCurlyBracket(),
+      members: [],
+    );
+
+    declarations.add(extensionDeclaration!);
+  }
+
+  @override
+  void beginFactoryMethod(DeclarationKind declarationKind, Token lastConsumed,
+      Token? externalToken, Token? constToken) {
+    push(_Modifiers()
+      ..externalKeyword = externalToken
+      ..finalConstOrVarKeyword = constToken);
+  }
+
+  @override
+  void beginFormalParameter(Token token, MemberKind kind, Token? requiredToken,
+      Token? covariantToken, Token? varFinalOrConst) {
+    push(_Modifiers()
+      ..covariantKeyword = covariantToken
+      ..finalConstOrVarKeyword = varFinalOrConst
+      ..requiredToken = requiredToken);
+  }
+
+  @override
+  void beginFormalParameterDefaultValueExpression() {}
+
+  @override
+  void beginIfControlFlow(Token ifToken) {
+    push(ifToken);
+  }
+
+  @override
+  void beginIsOperatorType(Token asOperator) {}
+
+  @override
+  void beginLiteralString(Token literalString) {
+    assert(identical(literalString.kind, STRING_TOKEN));
+    debugEvent("beginLiteralString");
+
+    push(literalString);
+  }
+
+  @override
+  void beginMetadataStar(Token token) {
+    debugEvent("beginMetadataStar");
+  }
+
+  @override
+  void beginMethod(
+      DeclarationKind declarationKind,
+      Token? externalToken,
+      Token? staticToken,
+      Token? covariantToken,
+      Token? varFinalOrConst,
+      Token? getOrSet,
+      Token name) {
+    _Modifiers modifiers = _Modifiers();
+    if (externalToken != null) {
+      assert(externalToken.isModifier);
+      modifiers.externalKeyword = externalToken;
+    }
+    if (staticToken != null) {
+      assert(staticToken.isModifier);
+      String? className = currentDeclarationName?.name;
+      if (name.lexeme != className || getOrSet != null) {
+        modifiers.staticKeyword = staticToken;
+      }
+    }
+    if (covariantToken != null) {
+      assert(covariantToken.isModifier);
+      modifiers.covariantKeyword = covariantToken;
+    }
+    if (varFinalOrConst != null) {
+      assert(varFinalOrConst.isModifier);
+      modifiers.finalConstOrVarKeyword = varFinalOrConst;
+    }
+    push(modifiers);
+  }
+
+  @override
+  void beginMixinDeclaration(Token mixinKeyword, Token name) {
+    assert(classDeclaration == null &&
+        mixinDeclaration == null &&
+        extensionDeclaration == null);
+  }
+
+  @override
+  void beginNamedMixinApplication(
+      Token begin, Token? abstractToken, Token? macroToken, Token name) {
+    push(_Modifiers()..abstractKeyword = abstractToken);
+    if (macroToken != null && !enableMacros) {
+      var feature = ExperimentalFeatures.macros;
+      handleRecoverableError(
+          templateExperimentNotEnabled.withArguments(
+            feature.enableString,
+            _versionAsString(ExperimentStatus.currentVersion),
+          ),
+          macroToken,
+          macroToken);
+      // Pretend that 'macro' didn't occur while this feature is incomplete.
+      macroToken = null;
+    }
+    push(macroToken ?? NullValue.Token);
+  }
+
+  @override
+  void beginTopLevelMethod(Token lastConsumed, Token? externalToken) {
+    push(_Modifiers()..externalKeyword = externalToken);
+  }
+
+  @override
+  void beginTypeVariable(Token token) {
+    debugEvent("beginTypeVariable");
+    var name = pop() as SimpleIdentifier;
+    var metadata = pop() as List<Annotation>?;
+
+    var comment = _findComment(metadata, name.beginToken);
+    var typeParameter = ast.typeParameter(comment, metadata, name, null, null);
+    push(typeParameter);
+  }
+
+  @override
+  void beginVariablesDeclaration(
+      Token token, Token? lateToken, Token? varFinalOrConst) {
+    debugEvent("beginVariablesDeclaration");
+    if (varFinalOrConst != null || lateToken != null) {
+      push(_Modifiers()
+        ..finalConstOrVarKeyword = varFinalOrConst
+        ..lateToken = lateToken);
+    } else {
+      push(NullValue.Modifiers);
+    }
+  }
+
+  ConstructorInitializer? buildInitializer(Object initializerObject) {
+    if (initializerObject is FunctionExpressionInvocation) {
+      Expression function = initializerObject.function;
+      if (function is SuperExpression) {
+        return ast.superConstructorInvocation(
+            function.superKeyword, null, null, initializerObject.argumentList);
+      }
+      if (function is ThisExpression) {
+        return ast.redirectingConstructorInvocation(
+            function.thisKeyword, null, null, initializerObject.argumentList);
+      }
+      return null;
+    }
+
+    if (initializerObject is MethodInvocation) {
+      var target = initializerObject.target;
+      if (target is SuperExpression) {
+        return ast.superConstructorInvocation(
+            target.superKeyword,
+            initializerObject.operator,
+            initializerObject.methodName,
+            initializerObject.argumentList);
+      }
+      if (target is ThisExpression) {
+        return ast.redirectingConstructorInvocation(
+            target.thisKeyword,
+            initializerObject.operator,
+            initializerObject.methodName,
+            initializerObject.argumentList);
+      }
+      return buildInitializerTargetExpressionRecovery(
+          target, initializerObject);
+    }
+
+    if (initializerObject is PropertyAccess) {
+      return buildInitializerTargetExpressionRecovery(
+          initializerObject.target, initializerObject);
+    }
+
+    if (initializerObject is AssignmentExpression) {
+      Token? thisKeyword;
+      Token? period;
+      SimpleIdentifier fieldName;
+      Expression left = initializerObject.leftHandSide;
+      if (left is PropertyAccess) {
+        var target = left.target;
+        if (target is ThisExpression) {
+          thisKeyword = target.thisKeyword;
+          period = left.operator;
+        } else {
+          assert(target is SuperExpression);
+          // Recovery:
+          // Parser has reported FieldInitializedOutsideDeclaringClass.
+        }
+        fieldName = left.propertyName;
+      } else if (left is SimpleIdentifier) {
+        fieldName = left;
+      } else {
+        // Recovery:
+        // Parser has reported invalid assignment.
+        var superExpression = left as SuperExpression;
+        fieldName = ast.simpleIdentifier(superExpression.superKeyword);
+      }
+      return ast.constructorFieldInitializer(thisKeyword, period, fieldName,
+          initializerObject.operator, initializerObject.rightHandSide);
+    }
+
+    if (initializerObject is AssertInitializer) {
+      return initializerObject;
+    }
+
+    if (initializerObject is IndexExpression) {
+      return buildInitializerTargetExpressionRecovery(
+          initializerObject.target, initializerObject);
+    }
+
+    if (initializerObject is CascadeExpression) {
+      return buildInitializerTargetExpressionRecovery(
+          initializerObject.target, initializerObject);
+    }
+
     return null;
   }
 
-  void beginLiteralString(Token token) {
-    debugEvent("beginLiteralString");
-    push(token);
-  }
-
-  void handleNamedArgument(Token colon) {
-    debugEvent("NamedArgument");
-    Expression expression = pop();
-    SimpleIdentifier name = pop();
-    push(ast.namedExpression(
-        ast.label(name, toAnalyzerToken(colon)), expression));
-  }
-
-  @override
-  void handleNoConstructorReferenceContinuationAfterTypeArguments(Token token) {
-    debugEvent("NoConstructorReferenceContinuationAfterTypeArguments");
-    push(NullValue.ConstructorReferenceContinuationAfterTypeArguments);
-  }
-
-  @override
-  void endConstructorReference(
-      Token start, Token periodBeforeName, Token endToken) {
-    debugEvent("ConstructorReference");
-    SimpleIdentifier constructorName = pop();
-    TypeArgumentList typeArguments = pop();
-    Identifier typeNameIdentifier = pop();
-    push(ast.constructorName(ast.typeName(typeNameIdentifier, typeArguments),
-        toAnalyzerToken(periodBeforeName), constructorName));
-  }
-
-  @override
-  void endConstExpression(Token token) {
-    debugEvent("ConstExpression");
-    _handleInstanceCreation(token);
-  }
-
-  @override
-  void endConstLiteral(Token token) {
-    debugEvent("endConstLiteral");
-  }
-
-  void _handleInstanceCreation(Token token) {
-    MethodInvocation arguments = pop();
-    ConstructorName constructorName = pop();
-    push(ast.instanceCreationExpression(
-        toAnalyzerToken(token), constructorName, arguments.argumentList));
-  }
-
-  @override
-  void endNewExpression(Token token) {
-    debugEvent("NewExpression");
-    _handleInstanceCreation(token);
-  }
-
-  @override
-  void handleParenthesizedExpression(BeginGroupToken token) {
-    debugEvent("ParenthesizedExpression");
-    Expression expression = pop();
-    push(ast.parenthesizedExpression(
-        toAnalyzerToken(token), expression, toAnalyzerToken(token.endGroup)));
-  }
-
-  void handleStringPart(Token token) {
-    debugEvent("StringPart");
-    push(token);
-  }
-
-  void doStringPart(Token token) {
-    push(ast.simpleStringLiteral(toAnalyzerToken(token), token.lexeme));
-  }
-
-  void endLiteralString(int interpolationCount, Token endToken) {
-    debugEvent("endLiteralString");
-    if (interpolationCount == 0) {
-      Token token = pop();
-      String value = unescapeString(token.lexeme);
-      push(ast.simpleStringLiteral(toAnalyzerToken(token), value));
-    } else {
-      List parts = popList(1 + interpolationCount * 2);
-      Token first = parts.first;
-      Token last = parts.last;
-      Quote quote = analyzeQuote(first.lexeme);
-      List<InterpolationElement> elements = <InterpolationElement>[];
-      elements.add(ast.interpolationString(toAnalyzerToken(first),
-          unescapeFirstStringPart(first.lexeme, quote)));
-      for (int i = 1; i < parts.length - 1; i++) {
-        var part = parts[i];
-        if (part is Token) {
-          elements
-              .add(ast.interpolationString(toAnalyzerToken(part), part.lexeme));
-        } else if (part is Expression) {
-          elements.add(ast.interpolationExpression(null, part, null));
-        } else {
-          internalError(
-              "Unexpected part in string interpolation: ${part.runtimeType}");
-        }
-      }
-      elements.add(ast.interpolationString(
-          toAnalyzerToken(last), unescapeLastStringPart(last.lexeme, quote)));
-      push(ast.stringInterpolation(elements));
-    }
-  }
-
-  void handleScript(Token token) {
-    debugEvent("Script");
-    push(ast.scriptTag(toAnalyzerToken(token)));
-  }
-
-  void handleStringJuxtaposition(int literalCount) {
-    debugEvent("StringJuxtaposition");
-    push(ast.adjacentStrings(popList(literalCount)));
-  }
-
-  void endArguments(int count, Token beginToken, Token endToken) {
-    debugEvent("Arguments");
-    List expressions = popList(count);
-    ArgumentList arguments = ast.argumentList(
-        toAnalyzerToken(beginToken), expressions, toAnalyzerToken(endToken));
-    push(ast.methodInvocation(null, null, null, null, arguments));
-  }
-
-  void handleIdentifier(Token token, IdentifierContext context) {
-    debugEvent("handleIdentifier");
-    analyzer.Token analyzerToken = toAnalyzerToken(token);
-
-    if (context.inSymbol) {
-      push(analyzerToken);
-      return;
-    }
-
-    SimpleIdentifier identifier = ast.simpleIdentifier(analyzerToken,
-        isDeclaration: context.inDeclaration);
-    if (context.inLibraryOrPartOfDeclaration) {
-      if (!context.isContinuation) {
-        push([identifier]);
+  ConstructorInitializer? buildInitializerTargetExpressionRecovery(
+      Expression? target, Object initializerObject) {
+    ArgumentList? argumentList;
+    while (true) {
+      if (target is FunctionExpressionInvocation) {
+        argumentList = target.argumentList;
+        target = target.function;
+      } else if (target is MethodInvocation) {
+        argumentList = target.argumentList;
+        target = target.target;
+      } else if (target is PropertyAccess) {
+        argumentList = null;
+        target = target.target;
       } else {
-        push(identifier);
+        break;
       }
-    } else if (context == IdentifierContext.enumValueDeclaration) {
-      // TODO(paulberry): analyzer's ASTs allow for enumerated values to have
-      // metadata, but the spec doesn't permit it.
-      List<Annotation> metadata;
-      Comment comment = _toAnalyzerComment(token.precedingComments);
-      push(ast.enumConstantDeclaration(comment, metadata, identifier));
-    } else {
-      if (context.isScopeReference) {
-        String name = token.lexeme;
-        Builder builder = scope.lookup(name, token.charOffset, uri);
-        if (builder != null) {
-          Element element = elementStore[builder];
-          assert(element != null);
-          identifier.staticElement = element;
+    }
+    if (target is SuperExpression) {
+      // TODO(danrubel): Consider generating this error in the parser
+      // This error is also reported in the body builder
+      handleRecoverableError(messageInvalidSuperInInitializer,
+          target.superKeyword, target.superKeyword);
+      return ast.superConstructorInvocation(target.superKeyword, null, null,
+          argumentList ?? _syntheticArgumentList(target.superKeyword));
+    } else if (target is ThisExpression) {
+      // TODO(danrubel): Consider generating this error in the parser
+      // This error is also reported in the body builder
+      handleRecoverableError(messageInvalidThisInInitializer,
+          target.thisKeyword, target.thisKeyword);
+      return ast.redirectingConstructorInvocation(target.thisKeyword, null,
+          null, argumentList ?? _syntheticArgumentList(target.thisKeyword));
+    }
+    return null;
+  }
+
+  void checkFieldFormalParameters(FormalParameterList? parameterList) {
+    var parameters = parameterList?.parameters;
+    if (parameters != null) {
+      parameters.forEach((FormalParameter param) {
+        if (param is FieldFormalParameter) {
+          // This error is reported in the BodyBuilder.endFormalParameter.
+          handleRecoverableError(messageFieldInitializerOutsideConstructor,
+              param.thisKeyword, param.thisKeyword);
         }
-      } else if (context == IdentifierContext.classDeclaration) {
-        className = identifier.name;
-      }
-      push(identifier);
+      });
     }
   }
 
-  void endSend(Token beginToken, Token endToken) {
-    debugEvent("Send");
-    MethodInvocation arguments = pop();
-    TypeArgumentList typeArguments = pop();
-    if (arguments != null) {
-      doInvocation(endToken, typeArguments, arguments);
+  @override
+  void debugEvent(String name) {
+    // printEvent('AstBuilder: $name');
+  }
+
+  void doDotExpression(Token dot) {
+    var identifierOrInvoke = pop() as Expression;
+    var receiver = pop() as Expression?;
+    if (identifierOrInvoke is SimpleIdentifier) {
+      if (receiver is SimpleIdentifier && identical('.', dot.stringValue)) {
+        push(ast.prefixedIdentifier(receiver, dot, identifierOrInvoke));
+      } else {
+        push(ast.propertyAccess(receiver, dot, identifierOrInvoke));
+      }
+    } else if (identifierOrInvoke is MethodInvocationImpl) {
+      assert(identifierOrInvoke.target == null);
+      identifierOrInvoke
+        ..target = receiver
+        ..operator = dot;
+      push(identifierOrInvoke);
     } else {
-      doPropertyGet(endToken);
+      // This same error is reported in BodyBuilder.doDotOrCascadeExpression
+      Token token = identifierOrInvoke.beginToken;
+      // TODO(danrubel): Consider specializing the error message based
+      // upon the type of expression. e.g. "x.this" -> templateThisAsIdentifier
+      handleRecoverableError(
+          templateExpectedIdentifier.withArguments(token), token, token);
+      SimpleIdentifier identifier =
+          ast.simpleIdentifier(token, isDeclaration: false);
+      push(ast.propertyAccess(receiver, dot, identifier));
     }
   }
 
   void doInvocation(
-      Token token, TypeArgumentList typeArguments, MethodInvocation arguments) {
-    Expression receiver = pop();
-    if (receiver is SimpleIdentifier) {
+      TypeArgumentList? typeArguments, MethodInvocationImpl arguments) {
+    var receiver = pop() as Expression;
+    if (receiver is SimpleIdentifierImpl) {
       arguments.methodName = receiver;
       if (typeArguments != null) {
         arguments.typeArguments = typeArguments;
@@ -257,553 +625,837 @@ class AstBuilder extends ScopeListener {
     }
   }
 
-  void doPropertyGet(Token token) {}
+  void doPropertyGet() {}
 
-  void endExpressionStatement(Token token) {
-    debugEvent("ExpressionStatement");
-    push(ast.expressionStatement(pop(), toAnalyzerToken(token)));
+  @override
+  void endArguments(int count, Token leftParenthesis, Token rightParenthesis) {
+    assert(optional('(', leftParenthesis));
+    assert(optional(')', rightParenthesis));
+    debugEvent("Arguments");
+
+    var expressions = popTypedList2<Expression>(count);
+    ArgumentList arguments =
+        ast.argumentList(leftParenthesis, expressions, rightParenthesis);
+
+    if (!enableNamedArgumentsAnywhere) {
+      bool hasSeenNamedArgument = false;
+      for (Expression expression in expressions) {
+        if (expression is NamedExpression) {
+          hasSeenNamedArgument = true;
+        } else if (hasSeenNamedArgument) {
+          // Positional argument after named argument.
+          handleRecoverableError(messagePositionalAfterNamedArgument,
+              expression.beginToken, expression.endToken);
+        }
+      }
+    }
+
+    push(ast.methodInvocation(
+        null, null, _tmpSimpleIdentifier(), null, arguments));
   }
 
   @override
-  void handleEmptyFunctionBody(Token semicolon) {
-    debugEvent("EmptyFunctionBody");
-    // TODO(scheglov) Change the parser to not produce these modifiers.
-    pop(); // star
-    pop(); // async
-    push(ast.emptyFunctionBody(toAnalyzerToken(semicolon)));
+  void endAsOperatorType(Token asOperator) {
+    debugEvent("AsOperatorType");
   }
 
   @override
-  void handleEmptyStatement(Token token) {
-    debugEvent("EmptyStatement");
-    push(ast.emptyStatement(toAnalyzerToken(token)));
+  void endAssert(Token assertKeyword, Assert kind, Token leftParenthesis,
+      Token? comma, Token semicolon) {
+    assert(optional('assert', assertKeyword));
+    assert(optional('(', leftParenthesis));
+    assert(optionalOrNull(',', comma));
+    assert(kind != Assert.Statement || optionalOrNull(';', semicolon));
+    debugEvent("Assert");
+
+    var message = popIfNotNull(comma) as Expression?;
+    var condition = pop() as Expression;
+    switch (kind) {
+      case Assert.Expression:
+        // The parser has already reported an error indicating that assert
+        // cannot be used in an expression. Insert a placeholder.
+        List<Expression> arguments = <Expression>[condition];
+        if (message != null) {
+          arguments.add(message);
+        }
+        push(ast.functionExpressionInvocation(
+            ast.simpleIdentifier(assertKeyword),
+            null,
+            ast.argumentList(
+                leftParenthesis, arguments, leftParenthesis.endGroup!)));
+        break;
+      case Assert.Initializer:
+        push(ast.assertInitializer(assertKeyword, leftParenthesis, condition,
+            comma, message, leftParenthesis.endGroup!));
+        break;
+      case Assert.Statement:
+        push(ast.assertStatement(assertKeyword, leftParenthesis, condition,
+            comma, message, leftParenthesis.endGroup!, semicolon));
+        break;
+    }
   }
 
-  void endBlockFunctionBody(int count, Token beginToken, Token endToken) {
+  @override
+  void endAwaitExpression(Token awaitKeyword, Token endToken) {
+    assert(optional('await', awaitKeyword));
+    debugEvent("AwaitExpression");
+
+    var expression = pop() as Expression;
+    push(ast.awaitExpression(awaitKeyword, expression));
+  }
+
+  @override
+  void endBinaryExpression(Token operatorToken) {
+    assert(operatorToken.isOperator ||
+        optional('.', operatorToken) ||
+        optional('?.', operatorToken) ||
+        optional('..', operatorToken) ||
+        optional('?..', operatorToken) ||
+        optional('===', operatorToken) ||
+        optional('!==', operatorToken));
+    debugEvent("BinaryExpression");
+
+    if (identical(".", operatorToken.stringValue) ||
+        identical("?.", operatorToken.stringValue) ||
+        identical("..", operatorToken.stringValue) ||
+        identical("?..", operatorToken.stringValue)) {
+      doDotExpression(operatorToken);
+    } else {
+      var right = pop() as Expression;
+      var left = pop() as Expression;
+      reportErrorIfSuper(right);
+      push(ast.binaryExpression(left, operatorToken, right));
+      if (!enableTripleShift && operatorToken.type == TokenType.GT_GT_GT) {
+        var feature = ExperimentalFeatures.triple_shift;
+        handleRecoverableError(
+          templateExperimentNotEnabled.withArguments(
+            feature.enableString,
+            _versionAsString(ExperimentStatus.currentVersion),
+          ),
+          operatorToken,
+          operatorToken,
+        );
+      }
+    }
+  }
+
+  @override
+  void endBlock(
+      int count, Token leftBracket, Token rightBracket, BlockKind blockKind) {
+    assert(optional('{', leftBracket));
+    assert(optional('}', rightBracket));
+    debugEvent("Block");
+
+    var statements = popTypedList2<Statement>(count);
+    push(ast.block(leftBracket, statements, rightBracket));
+  }
+
+  @override
+  void endBlockFunctionBody(int count, Token leftBracket, Token rightBracket) {
+    assert(optional('{', leftBracket));
+    assert(optional('}', rightBracket));
     debugEvent("BlockFunctionBody");
-    List statements = popList(count);
-    if (beginToken != null) {
-      exitLocalScope();
-    }
-    Block block = ast.block(
-        toAnalyzerToken(beginToken), statements, toAnalyzerToken(endToken));
-    analyzer.Token star = pop();
-    analyzer.Token asyncKeyword = pop();
-    push(ast.blockFunctionBody(asyncKeyword, star, block));
-  }
 
-  void finishFunction(formals, asyncModifier, FunctionBody body) {
-    debugEvent("finishFunction");
-    Statement bodyStatement;
-    if (body is EmptyFunctionBody) {
-      bodyStatement = ast.emptyStatement(body.semicolon);
-    } else if (body is ExpressionFunctionBody) {
-      bodyStatement = ast.returnStatement(null, body.expression, null);
+    var statements = popTypedList2<Statement>(count);
+    Block block = ast.block(leftBracket, statements, rightBracket);
+    var star = pop() as Token?;
+    var asyncKeyword = pop() as Token?;
+    if (parseFunctionBodies) {
+      push(ast.blockFunctionBody(asyncKeyword, star, block));
     } else {
-      bodyStatement = (body as BlockFunctionBody).block;
-    }
-    var kernel = toKernel(bodyStatement, elementStore, library.library, scope);
-    if (member is ProcedureBuilder) {
-      ProcedureBuilder builder = member;
-      builder.body = kernel;
-    } else {
-      internalError("Internal error: expected procedure, but got: $member");
+      // TODO(danrubel): Skip the block rather than parsing it.
+      push(ast.emptyFunctionBody(
+          SyntheticToken(TokenType.SEMICOLON, leftBracket.charOffset)));
     }
   }
 
-  void beginCascade(Token token) {
-    debugEvent("beginCascade");
-    Expression expression = pop();
-    push(token);
-    if (expression is CascadeExpression) {
-      push(expression);
-    } else {
-      push(ast.cascadeExpression(expression, <Expression>[]));
-    }
-    push(NullValue.CascadeReceiver);
-  }
-
+  @override
   void endCascade() {
     debugEvent("Cascade");
-    Expression expression = pop();
-    CascadeExpression receiver = pop();
+
+    var expression = pop() as Expression;
+    var receiver = pop() as CascadeExpression;
     pop(); // Token.
     receiver.cascadeSections.add(expression);
     push(receiver);
   }
 
-  void handleOperator(Token token) {
-    debugEvent("Operator");
-    push(toAnalyzerToken(token));
-  }
+  @override
+  void endClassConstructor(Token? getOrSet, Token beginToken, Token beginParam,
+      Token? beginInitializers, Token endToken) {
+    assert(getOrSet == null ||
+        optional('get', getOrSet) ||
+        optional('set', getOrSet));
+    debugEvent("ClassConstructor");
 
-  void handleSymbolVoid(Token token) {
-    debugEvent("SymbolVoid");
-    push(toAnalyzerToken(token));
-  }
+    var bodyObject = pop();
+    var initializers = (pop() as List<ConstructorInitializer>?) ?? const [];
+    var separator = pop() as Token?;
+    var parameters = pop() as FormalParameterList;
+    var typeParameters = pop() as TypeParameterList?;
+    var name = pop();
+    pop(); // return type
+    var modifiers = pop() as _Modifiers?;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, beginToken);
 
-  void handleBinaryExpression(Token token) {
-    debugEvent("BinaryExpression");
-    if (identical(".", token.stringValue) ||
-        identical("?.", token.stringValue) ||
-        identical("..", token.stringValue)) {
-      doDotExpression(token);
+    ConstructorName? redirectedConstructor;
+    FunctionBody body;
+    if (bodyObject is FunctionBody) {
+      body = bodyObject;
+    } else if (bodyObject is _RedirectingFactoryBody) {
+      separator = bodyObject.equalToken;
+      redirectedConstructor = bodyObject.constructorName;
+      body = ast.emptyFunctionBody(endToken);
     } else {
-      Expression right = pop();
-      Expression left = pop();
-      push(ast.binaryExpression(left, toAnalyzerToken(token), right));
+      internalProblem(
+          templateInternalProblemUnhandled.withArguments(
+              "${bodyObject.runtimeType}", "bodyObject"),
+          beginToken.charOffset,
+          uri);
     }
-  }
 
-  void doDotExpression(Token token) {
-    Expression identifierOrInvoke = pop();
-    Expression receiver = pop();
-    if (identifierOrInvoke is SimpleIdentifier) {
-      if (receiver is SimpleIdentifier && identical('.', token.stringValue)) {
-        push(ast.prefixedIdentifier(
-            receiver, toAnalyzerToken(token), identifierOrInvoke));
-      } else {
-        push(ast.propertyAccess(
-            receiver, toAnalyzerToken(token), identifierOrInvoke));
-      }
-    } else if (identifierOrInvoke is MethodInvocation) {
-      assert(identifierOrInvoke.target == null);
-      identifierOrInvoke
-        ..target = receiver
-        ..operator = toAnalyzerToken(token);
-      push(identifierOrInvoke);
+    SimpleIdentifier prefixOrName;
+    Token? period;
+    SimpleIdentifier? nameOrNull;
+    if (name is SimpleIdentifier) {
+      prefixOrName = name;
+    } else if (name is PrefixedIdentifier) {
+      prefixOrName = name.prefix;
+      period = name.period;
+      nameOrNull = name.identifier;
+    } else if (name is _OperatorName) {
+      prefixOrName = name.name;
     } else {
-      internalError(
-          "Unhandled property access: ${identifierOrInvoke.runtimeType}");
-    }
-  }
-
-  void handleLiteralInt(Token token) {
-    debugEvent("LiteralInt");
-    push(ast.integerLiteral(toAnalyzerToken(token), int.parse(token.lexeme)));
-  }
-
-  void handleExpressionFunctionBody(Token arrowToken, Token endToken) {
-    debugEvent("ExpressionFunctionBody");
-    Expression expression = pop();
-    analyzer.Token star = pop();
-    analyzer.Token asyncKeyword = pop();
-    assert(star == null);
-    push(ast.expressionFunctionBody(asyncKeyword, toAnalyzerToken(arrowToken),
-        expression, toAnalyzerToken(endToken)));
-  }
-
-  void endReturnStatement(
-      bool hasExpression, Token beginToken, Token endToken) {
-    debugEvent("ReturnStatement");
-    Expression expression = hasExpression ? pop() : null;
-    push(ast.returnStatement(
-        toAnalyzerToken(beginToken), expression, toAnalyzerToken(endToken)));
-  }
-
-  void endIfStatement(Token ifToken, Token elseToken) {
-    Statement elsePart = popIfNotNull(elseToken);
-    Statement thenPart = pop();
-    Expression condition = pop();
-    BeginGroupToken leftParenthesis = ifToken.next;
-    push(ast.ifStatement(
-        toAnalyzerToken(ifToken),
-        toAnalyzerToken(ifToken.next),
-        condition,
-        toAnalyzerToken(leftParenthesis.endGroup),
-        thenPart,
-        toAnalyzerToken(elseToken),
-        elsePart));
-  }
-
-  void prepareInitializers() {
-    debugEvent("prepareInitializers");
-  }
-
-  void handleNoInitializers() {
-    debugEvent("NoInitializers");
-    push(NullValue.ConstructorInitializerSeparator);
-    push(NullValue.ConstructorInitializers);
-  }
-
-  void endInitializers(int count, Token beginToken, Token endToken) {
-    debugEvent("Initializers");
-    List<Object> initializerObjects = popList(count) ?? const [];
-
-    push(beginToken);
-
-    var initializers = <ConstructorInitializer>[];
-    for (Object initializerObject in initializerObjects) {
-      if (initializerObject is FunctionExpressionInvocation) {
-        Expression function = initializerObject.function;
-        if (function is SuperExpression) {
-          initializers.add(ast.superConstructorInvocation(function.superKeyword,
-              null, null, initializerObject.argumentList));
-        } else {
-          initializers.add(ast.redirectingConstructorInvocation(
-              (function as ThisExpression).thisKeyword,
-              null,
-              null,
-              initializerObject.argumentList));
-        }
-      } else if (initializerObject is MethodInvocation) {
-        Expression target = initializerObject.target;
-        if (target is SuperExpression) {
-          initializers.add(ast.superConstructorInvocation(
-              target.superKeyword,
-              initializerObject.operator,
-              initializerObject.methodName,
-              initializerObject.argumentList));
-        } else {
-          initializers.add(ast.redirectingConstructorInvocation(
-              (target as ThisExpression).thisKeyword,
-              initializerObject.operator,
-              initializerObject.methodName,
-              initializerObject.argumentList));
-        }
-      } else if (initializerObject is AssignmentExpression) {
-        analyzer.Token thisKeyword;
-        analyzer.Token period;
-        SimpleIdentifier fieldName;
-        Expression left = initializerObject.leftHandSide;
-        if (left is PropertyAccess) {
-          var thisExpression = left.target as ThisExpression;
-          thisKeyword = thisExpression.thisKeyword;
-          period = left.operator;
-          fieldName = left.propertyName;
-        } else {
-          fieldName = left as SimpleIdentifier;
-        }
-        initializers.add(ast.constructorFieldInitializer(
-            thisKeyword,
-            period,
-            fieldName,
-            initializerObject.operator,
-            initializerObject.rightHandSide));
-      }
+      throw UnimplementedError(
+          'name is an instance of ${name.runtimeType} in endClassConstructor');
     }
 
-    push(initializers);
-  }
-
-  void endVariableInitializer(Token assignmentOperator) {
-    debugEvent("VariableInitializer");
-    assert(assignmentOperator.stringValue == "=");
-    Expression initializer = pop();
-    Identifier identifier = pop();
-    // TODO(ahe): Don't push initializers, instead install them.
-    push(ast.variableDeclaration(
-        identifier, toAnalyzerToken(assignmentOperator), initializer));
+    if (typeParameters != null) {
+      // Outline builder also reports this error message.
+      handleRecoverableError(messageConstructorWithTypeParameters,
+          typeParameters.beginToken, typeParameters.endToken);
+    }
+    if (modifiers?.constKeyword != null &&
+        (body.length > 1 || body.beginToken.lexeme != ';')) {
+      // This error is also reported in BodyBuilder.finishFunction
+      Token bodyToken = body.beginToken;
+      // Token bodyToken = body.beginToken ?? modifiers.constKeyword;
+      handleRecoverableError(
+          messageConstConstructorWithBody, bodyToken, bodyToken);
+    }
+    ConstructorDeclaration constructor = ast.constructorDeclaration(
+        comment,
+        metadata,
+        modifiers?.externalKeyword,
+        modifiers?.finalConstOrVarKeyword,
+        null,
+        // TODO(paulberry): factoryKeyword
+        ast.simpleIdentifier(prefixOrName.token),
+        period,
+        nameOrNull,
+        parameters,
+        separator,
+        initializers,
+        redirectedConstructor,
+        body);
+    currentDeclarationMembers.add(constructor);
+    if (mixinDeclaration != null) {
+      // TODO (danrubel): Report an error if this is a mixin declaration.
+    }
   }
 
   @override
-  void endWhileStatement(Token whileKeyword, Token endToken) {
-    debugEvent("WhileStatement");
-    Statement body = pop();
-    ParenthesizedExpression condition = pop();
-    exitContinueTarget();
-    exitBreakTarget();
-    push(ast.whileStatement(
-        toAnalyzerToken(whileKeyword),
+  void endClassDeclaration(Token beginToken, Token endToken) {
+    debugEvent("ClassDeclaration");
+    classDeclaration = null;
+  }
+
+  @override
+  void endClassFactoryMethod(
+      Token beginToken, Token factoryKeyword, Token endToken) {
+    assert(optional('factory', factoryKeyword));
+    assert(optional(';', endToken) || optional('}', endToken));
+    debugEvent("ClassFactoryMethod");
+
+    FunctionBody body;
+    Token? separator;
+    ConstructorName? redirectedConstructor;
+    var bodyObject = pop();
+    if (bodyObject is FunctionBody) {
+      body = bodyObject;
+    } else if (bodyObject is _RedirectingFactoryBody) {
+      separator = bodyObject.equalToken;
+      redirectedConstructor = bodyObject.constructorName;
+      body = ast.emptyFunctionBody(endToken);
+    } else {
+      internalProblem(
+          templateInternalProblemUnhandled.withArguments(
+              "${bodyObject.runtimeType}", "bodyObject"),
+          beginToken.charOffset,
+          uri);
+    }
+
+    var parameters = pop() as FormalParameterList;
+    var typeParameters = pop() as TypeParameterList?;
+    var constructorName = pop() as Identifier;
+    var modifiers = pop() as _Modifiers?;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, beginToken);
+
+    if (typeParameters != null) {
+      // TODO(danrubel): Update OutlineBuilder to report this error message.
+      handleRecoverableError(messageConstructorWithTypeParameters,
+          typeParameters.beginToken, typeParameters.endToken);
+    }
+
+    // Decompose the preliminary ConstructorName into the type name and
+    // the actual constructor name.
+    SimpleIdentifier returnType;
+    Token? period;
+    SimpleIdentifier? name;
+    Identifier typeName = constructorName;
+    if (typeName is SimpleIdentifier) {
+      returnType = typeName;
+    } else if (typeName is PrefixedIdentifier) {
+      returnType = typeName.prefix;
+      period = typeName.period;
+      name =
+          ast.simpleIdentifier(typeName.identifier.token, isDeclaration: true);
+    } else {
+      throw UnimplementedError();
+    }
+
+    currentDeclarationMembers.add(ast.constructorDeclaration(
+        comment,
+        metadata,
+        modifiers?.externalKeyword,
+        modifiers?.finalConstOrVarKeyword,
+        factoryKeyword,
+        ast.simpleIdentifier(returnType.token),
+        period,
+        name,
+        parameters,
+        separator,
+        null,
+        redirectedConstructor,
+        body));
+  }
+
+  @override
+  void endClassFields(
+      Token? abstractToken,
+      Token? externalToken,
+      Token? staticToken,
+      Token? covariantToken,
+      Token? lateToken,
+      Token? varFinalOrConst,
+      int count,
+      Token beginToken,
+      Token semicolon) {
+    assert(optional(';', semicolon));
+    debugEvent("Fields");
+
+    if (abstractToken != null) {
+      if (!enableNonNullable) {
+        handleRecoverableError(
+            messageAbstractClassMember, abstractToken, abstractToken);
+      } else {
+        if (staticToken != null) {
+          handleRecoverableError(
+              messageAbstractStaticField, abstractToken, abstractToken);
+        }
+        if (lateToken != null) {
+          handleRecoverableError(
+              messageAbstractLateField, abstractToken, abstractToken);
+        }
+      }
+    }
+    if (externalToken != null) {
+      if (!enableNonNullable) {
+        handleRecoverableError(
+            messageExternalField, externalToken, externalToken);
+      } else if (lateToken != null) {
+        handleRecoverableError(
+            messageExternalLateField, externalToken, externalToken);
+      }
+    }
+
+    var variables = popTypedList2<VariableDeclaration>(count);
+    var type = pop() as TypeAnnotation?;
+    var variableList = ast.variableDeclarationList2(
+      lateKeyword: lateToken,
+      keyword: varFinalOrConst,
+      type: type,
+      variables: variables,
+    );
+    var covariantKeyword = covariantToken;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, beginToken);
+    currentDeclarationMembers.add(ast.fieldDeclaration2(
+        comment: comment,
+        metadata: metadata,
+        abstractKeyword: abstractToken,
+        covariantKeyword: covariantKeyword,
+        externalKeyword: externalToken,
+        staticKeyword: staticToken,
+        fieldList: variableList,
+        semicolon: semicolon));
+  }
+
+  @override
+  void endClassMethod(Token? getOrSet, Token beginToken, Token beginParam,
+      Token? beginInitializers, Token endToken) {
+    assert(getOrSet == null ||
+        optional('get', getOrSet) ||
+        optional('set', getOrSet));
+    debugEvent("ClassMethod");
+
+    var bodyObject = pop();
+    pop(); // initializers
+    pop(); // separator
+    var parameters = pop() as FormalParameterList?;
+    var typeParameters = pop() as TypeParameterList?;
+    var name = pop();
+    var returnType = pop() as TypeAnnotation?;
+    var modifiers = pop() as _Modifiers?;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, beginToken);
+
+    assert(parameters != null || optional('get', getOrSet!));
+
+    FunctionBody body;
+    if (bodyObject is FunctionBody) {
+      body = bodyObject;
+    } else if (bodyObject is _RedirectingFactoryBody) {
+      body = ast.emptyFunctionBody(endToken);
+    } else {
+      internalProblem(
+          templateInternalProblemUnhandled.withArguments(
+              "${bodyObject.runtimeType}", "bodyObject"),
+          beginToken.charOffset,
+          uri);
+    }
+
+    Token? operatorKeyword;
+    SimpleIdentifier nameId;
+    if (name is SimpleIdentifier) {
+      nameId = name;
+    } else if (name is _OperatorName) {
+      operatorKeyword = name.operatorKeyword;
+      nameId = name.name;
+      if (typeParameters != null) {
+        handleRecoverableError(messageOperatorWithTypeParameters,
+            typeParameters.beginToken, typeParameters.endToken);
+      }
+    } else {
+      throw UnimplementedError(
+          'name is an instance of ${name.runtimeType} in endClassMethod');
+    }
+
+    checkFieldFormalParameters(parameters);
+    currentDeclarationMembers.add(ast.methodDeclaration(
+        comment,
+        metadata,
+        modifiers?.externalKeyword,
+        modifiers?.abstractKeyword ?? modifiers?.staticKeyword,
+        returnType,
+        getOrSet,
+        operatorKeyword,
+        nameId,
+        typeParameters,
+        parameters,
+        body));
+  }
+
+  @override
+  void endClassOrMixinOrExtensionBody(DeclarationKind kind, int memberCount,
+      Token leftBracket, Token rightBracket) {
+    // TODO(danrubel): consider renaming endClassOrMixinBody
+    // to endClassOrMixinOrExtensionBody
+    assert(optional('{', leftBracket));
+    assert(optional('}', rightBracket));
+    debugEvent("ClassOrMixinBody");
+
+    if (classDeclaration != null) {
+      classDeclaration!
+        ..leftBracket = leftBracket
+        ..rightBracket = rightBracket;
+    } else if (mixinDeclaration != null) {
+      mixinDeclaration!
+        ..leftBracket = leftBracket
+        ..rightBracket = rightBracket;
+    } else {
+      extensionDeclaration!
+        ..leftBracket = leftBracket
+        ..rightBracket = rightBracket;
+    }
+  }
+
+  @override
+  void endCombinators(int count) {
+    debugEvent("Combinators");
+    push(popTypedList<Combinator>(count) ?? NullValue.Combinators);
+  }
+
+  @override
+  void endCompilationUnit(int count, Token endToken) {
+    debugEvent("CompilationUnit");
+
+    var beginToken = pop() as Token;
+    checkEmpty(endToken.charOffset);
+
+    CompilationUnitImpl unit = ast.compilationUnit(
+        beginToken: beginToken,
+        scriptTag: scriptTag,
+        directives: directives,
+        declarations: declarations,
+        endToken: endToken,
+        featureSet: _featureSet);
+    push(unit);
+  }
+
+  @override
+  void endConditionalExpression(Token question, Token colon) {
+    assert(optional('?', question));
+    assert(optional(':', colon));
+    debugEvent("ConditionalExpression");
+
+    var elseExpression = pop() as Expression;
+    var thenExpression = pop() as Expression;
+    var condition = pop() as Expression;
+    reportErrorIfSuper(elseExpression);
+    reportErrorIfSuper(thenExpression);
+    push(ast.conditionalExpression(
+        condition, question, thenExpression, colon, elseExpression));
+  }
+
+  @override
+  void endConditionalUri(Token ifKeyword, Token leftParen, Token? equalSign) {
+    assert(optional('if', ifKeyword));
+    assert(optionalOrNull('(', leftParen));
+    assert(optionalOrNull('==', equalSign));
+    debugEvent("ConditionalUri");
+
+    var libraryUri = pop() as StringLiteral;
+    var value = popIfNotNull(equalSign) as StringLiteral?;
+    if (value is StringInterpolation) {
+      for (var child in value.childEntities) {
+        if (child is InterpolationExpression) {
+          // This error is reported in OutlineBuilder.endLiteralString
+          handleRecoverableError(
+              messageInterpolationInUri, child.beginToken, child.endToken);
+          break;
+        }
+      }
+    }
+    var name = pop() as DottedName;
+    push(ast.configuration(ifKeyword, leftParen, name, equalSign, value,
+        leftParen.endGroup!, libraryUri));
+  }
+
+  @override
+  void endConditionalUris(int count) {
+    debugEvent("ConditionalUris");
+
+    push(popTypedList<Configuration>(count) ?? NullValue.ConditionalUris);
+  }
+
+  @override
+  void endConstExpression(Token constKeyword) {
+    assert(optional('const', constKeyword));
+    debugEvent("ConstExpression");
+
+    _handleInstanceCreation(constKeyword);
+  }
+
+  @override
+  void endConstLiteral(Token token) {
+    debugEvent("endConstLiteral");
+  }
+
+  @override
+  void endConstructorReference(Token start, Token? periodBeforeName,
+      Token endToken, ConstructorReferenceContext constructorReferenceContext) {
+    assert(optionalOrNull('.', periodBeforeName));
+    debugEvent("ConstructorReference");
+
+    var constructorName = pop() as SimpleIdentifier?;
+    var typeArguments = pop() as TypeArgumentList?;
+    var typeNameIdentifier = pop() as Identifier;
+    push(
+      ast.constructorName(
+        ast.namedType(
+          name: typeNameIdentifier,
+          typeArguments: typeArguments,
+        ),
+        periodBeforeName,
+        constructorName,
+      ),
+    );
+  }
+
+  @override
+  void endDoWhileStatement(
+      Token doKeyword, Token whileKeyword, Token semicolon) {
+    assert(optional('do', doKeyword));
+    assert(optional('while', whileKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("DoWhileStatement");
+
+    var condition = pop() as ParenthesizedExpression;
+    var body = pop() as Statement;
+    push(ast.doStatement(
+        doKeyword,
+        body,
+        whileKeyword,
         condition.leftParenthesis,
         condition.expression,
         condition.rightParenthesis,
+        semicolon));
+  }
+
+  @override
+  void endDoWhileStatementBody(Token token) {
+    debugEvent("endDoWhileStatementBody");
+  }
+
+  @override
+  void endElseStatement(Token token) {
+    debugEvent("endElseStatement");
+  }
+
+  @override
+  void endEnum(Token enumKeyword, Token leftBrace, int memberCount) {
+    assert(optional('enum', enumKeyword));
+    assert(optional('{', leftBrace));
+    debugEvent("Enum");
+  }
+
+  @override
+  void endEnumConstructor(Token? getOrSet, Token beginToken, Token beginParam,
+      Token? beginInitializers, Token endToken) {
+    debugEvent("endEnumConstructor");
+    endClassConstructor(
+        getOrSet, beginToken, beginParam, beginInitializers, endToken);
+  }
+
+  @override
+  void endExport(Token exportKeyword, Token semicolon) {
+    assert(optional('export', exportKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("Export");
+
+    var combinators = pop() as List<Combinator>?;
+    var configurations = pop() as List<Configuration>?;
+    var uri = pop() as StringLiteral;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, exportKeyword);
+    directives.add(ast.exportDirective(comment, metadata, exportKeyword, uri,
+        configurations, combinators, semicolon));
+  }
+
+  @override
+  void endExtensionConstructor(Token? getOrSet, Token beginToken,
+      Token beginParam, Token? beginInitializers, Token endToken) {
+    debugEvent("ExtensionConstructor");
+    // TODO(danrubel) Decide how to handle constructor declarations within
+    // extensions. They are invalid and the parser has already reported an
+    // error at this point. In the future, we should include them in order
+    // to get navigation, search, etc.
+    pop(); // body
+    pop(); // initializers
+    pop(); // separator
+    pop(); // parameters
+    pop(); // typeParameters
+    pop(); // name
+    pop(); // returnType
+    pop(); // modifiers
+    pop(); // metadata
+  }
+
+  @override
+  void endExtensionDeclaration(Token extensionKeyword, Token? typeKeyword,
+      Token onKeyword, Token? showKeyword, Token? hideKeyword, Token token) {
+    if (typeKeyword != null && !enableExtensionTypes) {
+      var feature = ExperimentalFeatures.extension_types;
+      handleRecoverableError(
+          templateExperimentNotEnabled.withArguments(
+            feature.enableString,
+            _versionAsString(ExperimentStatus.currentVersion),
+          ),
+          typeKeyword,
+          typeKeyword);
+    }
+
+    if ((showKeyword != null || hideKeyword != null) && !enableExtensionTypes) {
+      var feature = ExperimentalFeatures.extension_types;
+      handleRecoverableError(
+          templateExperimentNotEnabled.withArguments(
+            feature.enableString,
+            _versionAsString(ExperimentStatus.currentVersion),
+          ),
+          (showKeyword ?? hideKeyword)!,
+          (showKeyword ?? hideKeyword)!);
+    }
+
+    ShowClause? showClause = pop(NullValue.ShowClause) as ShowClause?;
+    HideClause? hideClause = pop(NullValue.HideClause) as HideClause?;
+
+    var type = pop() as TypeAnnotation;
+
+    extensionDeclaration!
+      ..extendedType = type
+      ..onKeyword = onKeyword
+      ..typeKeyword = typeKeyword
+      ..showClause = showClause
+      ..hideClause = hideClause;
+    extensionDeclaration = null;
+  }
+
+  @override
+  void endExtensionFactoryMethod(
+      Token beginToken, Token factoryKeyword, Token endToken) {
+    assert(optional('factory', factoryKeyword));
+    assert(optional(';', endToken) || optional('}', endToken));
+    debugEvent("ExtensionFactoryMethod");
+
+    var bodyObject = pop();
+    var parameters = pop() as FormalParameterList;
+    var typeParameters = pop() as TypeParameterList?;
+    var constructorName = pop();
+    var modifiers = pop() as _Modifiers?;
+    var metadata = pop() as List<Annotation>?;
+
+    FunctionBody body;
+    if (bodyObject is FunctionBody) {
+      body = bodyObject;
+    } else if (bodyObject is _RedirectingFactoryBody) {
+      body = ast.emptyFunctionBody(endToken);
+    } else {
+      // Unhandled situation which should never happen.
+      // Since this event handler is just a recovery attempt,
+      // don't bother adding this declaration to the AST.
+      return;
+    }
+    var comment = _findComment(metadata, beginToken);
+
+    // Constructor declarations within extensions are invalid and the parser
+    // has already reported an error at this point, but we include them in as
+    // a method declaration in order to get navigation, search, etc.
+
+    SimpleIdentifier methodName;
+    if (constructorName is SimpleIdentifier) {
+      methodName = constructorName;
+    } else if (constructorName is PrefixedIdentifier) {
+      methodName = constructorName.identifier;
+    } else {
+      // Unsure what the method name should be in this situation.
+      // Since this event handler is just a recovery attempt,
+      // don't bother adding this declaration to the AST.
+      return;
+    }
+    currentDeclarationMembers.add(ast.methodDeclaration(
+        comment,
+        metadata,
+        modifiers?.externalKeyword,
+        modifiers?.abstractKeyword ?? modifiers?.staticKeyword,
+        null, // returnType
+        null, // getOrSet
+        null, // operatorKeyword
+        methodName,
+        typeParameters,
+        parameters,
         body));
   }
 
   @override
-  void endYieldStatement(Token yieldToken, Token starToken, Token endToken) {
-    debugEvent("YieldStatement");
-    assert(endToken.lexeme == ';');
-    Expression expression = pop();
-    push(ast.yieldStatement(toAnalyzerToken(yieldToken),
-        toAnalyzerToken(starToken), expression, toAnalyzerToken(endToken)));
+  void endExtensionFields(
+      Token? abstractToken,
+      Token? externalToken,
+      Token? staticToken,
+      Token? covariantToken,
+      Token? lateToken,
+      Token? varFinalOrConst,
+      int count,
+      Token beginToken,
+      Token endToken) {
+    if (staticToken == null) {
+      // TODO(danrubel) Decide how to handle instance field declarations
+      // within extensions. They are invalid and the parser has already reported
+      // an error at this point, but we include them in order to get navigation,
+      // search, etc.
+    }
+    endClassFields(abstractToken, externalToken, staticToken, covariantToken,
+        lateToken, varFinalOrConst, count, beginToken, endToken);
   }
 
   @override
-  void handleNoVariableInitializer(Token token) {
-    debugEvent("NoVariableInitializer");
+  void endExtensionMethod(Token? getOrSet, Token beginToken, Token beginParam,
+      Token? beginInitializers, Token endToken) {
+    debugEvent("ExtensionMethod");
+    endClassMethod(
+        getOrSet, beginToken, beginParam, beginInitializers, endToken);
   }
 
-  void endInitializedIdentifier(Token nameToken) {
-    debugEvent("InitializedIdentifier");
-    AstNode node = pop();
-    VariableDeclaration variable;
-    // TODO(paulberry): This seems kludgy.  It would be preferable if we
-    // could respond to a "handleNoVariableInitializer" event by converting a
-    // SimpleIdentifier into a VariableDeclaration, and then when this code was
-    // reached, node would always be a VariableDeclaration.
-    if (node is VariableDeclaration) {
-      variable = node;
-    } else if (node is SimpleIdentifier) {
-      variable = ast.variableDeclaration(node, null, null);
-    } else {
-      internalError("unhandled identifier: ${node.runtimeType}");
-    }
-    push(variable);
-    scope[variable.name.name] = variable.name.staticElement =
-        new AnalyzerLocalVariableElemment(variable);
+  @override
+  void endFieldInitializer(Token assignment, Token token) {
+    assert(optional('=', assignment));
+    debugEvent("FieldInitializer");
+
+    var initializer = pop() as Expression;
+    var name = pop() as SimpleIdentifier;
+    push(_makeVariableDeclaration(name, assignment, initializer));
   }
 
-  void endVariablesDeclaration(int count, Token endToken) {
-    debugEvent("VariablesDeclaration");
-    List<VariableDeclaration> variables = popList(count);
-    TypeAnnotation type = pop();
-    _Modifiers modifiers = pop();
-    Token keyword = modifiers?.finalConstOrVarKeyword;
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.variableDeclarationStatement(
-        ast.variableDeclarationList(
-            comment, metadata, toAnalyzerToken(keyword), type, variables),
-        toAnalyzerToken(endToken)));
+  @override
+  void endForControlFlow(Token token) {
+    debugEvent("endForControlFlow");
+    var entry = pop() as Object;
+    var forLoopParts = pop() as ForParts;
+    var leftParen = pop() as Token;
+    var forToken = pop() as Token;
+
+    pushForControlFlowInfo(null, forToken, leftParen, forLoopParts, entry);
   }
 
-  void handleAssignmentExpression(Token token) {
-    debugEvent("AssignmentExpression");
-    Expression rhs = pop();
-    Expression lhs = pop();
-    push(ast.assignmentExpression(lhs, toAnalyzerToken(token), rhs));
-  }
+  @override
+  void endForIn(Token endToken) {
+    debugEvent("ForInExpression");
 
-  void endBlock(int count, Token beginToken, Token endToken) {
-    debugEvent("Block");
-    List<Statement> statements = popList(count) ?? <Statement>[];
-    exitLocalScope();
-    push(ast.block(
-        toAnalyzerToken(beginToken), statements, toAnalyzerToken(endToken)));
-  }
-
-  void endForStatement(Token forKeyword, Token leftSeparator,
-      int updateExpressionCount, Token endToken) {
-    debugEvent("ForStatement");
-    Statement body = pop();
-    List<Expression> updates = popList(updateExpressionCount);
-    Statement conditionStatement = pop();
-    Object initializerPart = pop();
-    exitLocalScope();
-    exitContinueTarget();
-    exitBreakTarget();
-    BeginGroupToken leftParenthesis = forKeyword.next;
-
-    VariableDeclarationList variableList;
-    Expression initializer;
-    if (initializerPart is VariableDeclarationStatement) {
-      variableList = initializerPart.variables;
-    } else {
-      initializer = initializerPart as Expression;
-    }
-
-    Expression condition;
-    analyzer.Token rightSeparator;
-    if (conditionStatement is ExpressionStatement) {
-      condition = conditionStatement.expression;
-      rightSeparator = conditionStatement.semicolon;
-    } else {
-      rightSeparator = (conditionStatement as EmptyStatement).semicolon;
-    }
+    var body = pop() as Statement;
+    var forLoopParts = pop() as ForEachParts;
+    var leftParenthesis = pop() as Token;
+    var forToken = pop() as Token;
+    var awaitToken = pop(NullValue.AwaitToken) as Token?;
 
     push(ast.forStatement(
-        toAnalyzerToken(forKeyword),
-        toAnalyzerToken(leftParenthesis),
-        variableList,
-        initializer,
-        toAnalyzerToken(leftSeparator),
-        condition,
-        rightSeparator,
-        updates,
-        toAnalyzerToken(leftParenthesis.endGroup),
-        body));
-  }
-
-  void handleLiteralList(
-      int count, Token beginToken, Token constKeyword, Token endToken) {
-    debugEvent("LiteralList");
-    List<Expression> expressions = popList(count);
-    TypeArgumentList typeArguments = pop();
-    push(ast.listLiteral(toAnalyzerToken(constKeyword), typeArguments,
-        toAnalyzerToken(beginToken), expressions, toAnalyzerToken(endToken)));
-  }
-
-  void handleAsyncModifier(Token asyncToken, Token starToken) {
-    debugEvent("AsyncModifier");
-    push(toAnalyzerToken(asyncToken) ?? NullValue.FunctionBodyAsyncToken);
-    push(toAnalyzerToken(starToken) ?? NullValue.FunctionBodyStarToken);
-  }
-
-  void endAwaitExpression(Token beginToken, Token endToken) {
-    debugEvent("AwaitExpression");
-    push(ast.awaitExpression(toAnalyzerToken(beginToken), pop()));
-  }
-
-  void handleLiteralBool(Token token) {
-    debugEvent("LiteralBool");
-    bool value = identical(token.stringValue, "true");
-    assert(value || identical(token.stringValue, "false"));
-    push(ast.booleanLiteral(toAnalyzerToken(token), value));
-  }
-
-  void handleLiteralDouble(Token token) {
-    debugEvent("LiteralDouble");
-    push(ast.doubleLiteral(toAnalyzerToken(token), double.parse(token.lexeme)));
-  }
-
-  void handleLiteralNull(Token token) {
-    debugEvent("LiteralNull");
-    push(ast.nullLiteral(toAnalyzerToken(token)));
-  }
-
-  void handleLiteralMap(
-      int count, Token beginToken, Token constKeyword, Token endToken) {
-    debugEvent("LiteralMap");
-    List<MapLiteralEntry> entries = popList(count) ?? <MapLiteralEntry>[];
-    TypeArgumentList typeArguments = pop();
-    push(ast.mapLiteral(toAnalyzerToken(constKeyword), typeArguments,
-        toAnalyzerToken(beginToken), entries, toAnalyzerToken(endToken)));
-  }
-
-  void endLiteralMapEntry(Token colon, Token endToken) {
-    debugEvent("LiteralMapEntry");
-    Expression value = pop();
-    Expression key = pop();
-    push(ast.mapLiteralEntry(key, toAnalyzerToken(colon), value));
-  }
-
-  void endLiteralSymbol(Token hashToken, int tokenCount) {
-    debugEvent("LiteralSymbol");
-    List<analyzer.Token> components = popList(tokenCount);
-    push(ast.symbolLiteral(toAnalyzerToken(hashToken), components));
+      awaitKeyword: awaitToken,
+      forKeyword: forToken,
+      leftParenthesis: leftParenthesis,
+      forLoopParts: forLoopParts,
+      rightParenthesis: leftParenthesis.endGroup!,
+      body: body,
+    ));
   }
 
   @override
-  void handleSuperExpression(Token token, IdentifierContext context) {
-    debugEvent("SuperExpression");
-    push(ast.superExpression(toAnalyzerToken(token)));
+  void endForInBody(Token token) {
+    debugEvent("endForInBody");
   }
 
   @override
-  void handleThisExpression(Token token, IdentifierContext context) {
-    debugEvent("ThisExpression");
-    push(ast.thisExpression(toAnalyzerToken(token)));
-  }
+  void endForInControlFlow(Token token) {
+    debugEvent("endForInControlFlow");
 
-  void handleType(Token beginToken, Token endToken) {
-    debugEvent("Type");
-    TypeArgumentList arguments = pop();
-    Identifier name = pop();
-    // TODO(paulberry,ahe): what if the type doesn't resolve to a class
-    // element?  Try to share code with BodyBuilder.builderToFirstExpression.
-    KernelClassElement cls = name.staticElement;
-    push(ast.typeName(name, arguments)..type = cls?.rawType);
-  }
+    var entry = pop() as Object;
+    var forLoopParts = pop() as ForEachParts;
+    var leftParenthesis = pop() as Token;
+    var forToken = pop() as Token;
+    var awaitToken = pop(NullValue.AwaitToken) as Token?;
 
-  @override
-  void handleAssertStatement(Token assertKeyword, Token leftParenthesis,
-      Token comma, Token rightParenthesis, Token semicolon) {
-    debugEvent("AssertStatement");
-    Expression message = popIfNotNull(comma);
-    Expression condition = pop();
-    push(ast.assertStatement(
-        toAnalyzerToken(assertKeyword),
-        toAnalyzerToken(leftParenthesis),
-        condition,
-        toAnalyzerToken(comma),
-        message,
-        toAnalyzerToken(rightParenthesis),
-        toAnalyzerToken(semicolon)));
-  }
-
-  void handleAsOperator(Token operator, Token endToken) {
-    debugEvent("AsOperator");
-    TypeAnnotation type = pop();
-    Expression expression = pop();
-    push(ast.asExpression(expression, toAnalyzerToken(operator), type));
-  }
-
-  @override
-  void handleBreakStatement(
-      bool hasTarget, Token breakKeyword, Token semicolon) {
-    debugEvent("BreakStatement");
-    SimpleIdentifier label = hasTarget ? pop() : null;
-    push(ast.breakStatement(
-        toAnalyzerToken(breakKeyword), label, toAnalyzerToken(semicolon)));
-  }
-
-  @override
-  void handleContinueStatement(
-      bool hasTarget, Token continueKeyword, Token semicolon) {
-    debugEvent("ContinueStatement");
-    SimpleIdentifier label = hasTarget ? pop() : null;
-    push(ast.continueStatement(
-        toAnalyzerToken(continueKeyword), label, toAnalyzerToken(semicolon)));
-  }
-
-  void handleIsOperator(Token operator, Token not, Token endToken) {
-    debugEvent("IsOperator");
-    TypeAnnotation type = pop();
-    Expression expression = pop();
-    push(ast.isExpression(
-        expression, toAnalyzerToken(operator), toAnalyzerToken(not), type));
-  }
-
-  void handleConditionalExpression(Token question, Token colon) {
-    debugEvent("ConditionalExpression");
-    Expression elseExpression = pop();
-    Expression thenExpression = pop();
-    Expression condition = pop();
-    push(ast.conditionalExpression(condition, toAnalyzerToken(question),
-        thenExpression, toAnalyzerToken(colon), elseExpression));
-  }
-
-  @override
-  void endRedirectingFactoryBody(Token equalToken, Token endToken) {
-    debugEvent("RedirectingFactoryBody");
-    ConstructorName constructorName = pop();
-    Token starToken = pop();
-    Token asyncToken = pop();
-    push(new _RedirectingFactoryBody(
-        asyncToken, starToken, equalToken, constructorName));
-  }
-
-  @override
-  void endRethrowStatement(Token rethrowToken, Token endToken) {
-    debugEvent("RethrowStatement");
-    RethrowExpression expression =
-        ast.rethrowExpression(toAnalyzerToken(rethrowToken));
-    // TODO(scheglov) According to the specification, 'rethrow' is a statement.
-    push(ast.expressionStatement(expression, toAnalyzerToken(endToken)));
-  }
-
-  void endThrowExpression(Token throwToken, Token endToken) {
-    debugEvent("ThrowExpression");
-    push(ast.throwExpression(toAnalyzerToken(throwToken), pop()));
-  }
-
-  @override
-  void endOptionalFormalParameters(
-      int count, Token beginToken, Token endToken) {
-    debugEvent("OptionalFormalParameters");
-    push(new _OptionalFormalParameters(popList(count), beginToken, endToken));
-  }
-
-  void handleValuedFormalParameter(Token equals, Token token) {
-    debugEvent("ValuedFormalParameter");
-    Expression value = pop();
-    push(new _ParameterDefaultValue(equals, value));
-  }
-
-  void handleFunctionType(Token functionToken, Token semicolon) {
-    debugEvent("FunctionType");
-    FormalParameterList parameters = pop();
-    TypeParameterList typeParameters = pop();
-    TypeAnnotation returnType = pop();
-    push(ast.genericFunctionType(returnType, toAnalyzerToken(functionToken),
-        typeParameters, parameters));
-  }
-
-  void handleFormalParameterWithoutValue(Token token) {
-    debugEvent("FormalParameterWithoutValue");
-    push(NullValue.ParameterDefaultValue);
+    pushForControlFlowInfo(
+        awaitToken, forToken, leftParenthesis, forLoopParts, entry);
   }
 
   @override
@@ -812,156 +1464,176 @@ class AstBuilder extends ScopeListener {
   }
 
   @override
-  void endForIn(Token awaitToken, Token forToken, Token leftParenthesis,
-      Token inKeyword, Token rightParenthesis, Token endToken) {
-    debugEvent("ForInExpression");
-    Statement body = pop();
-    Expression iterator = pop();
-    Object variableOrDeclaration = pop();
-    exitLocalScope();
-    exitContinueTarget();
-    exitBreakTarget();
-    if (variableOrDeclaration is SimpleIdentifier) {
-      push(ast.forEachStatementWithReference(
-          toAnalyzerToken(awaitToken),
-          toAnalyzerToken(forToken),
-          toAnalyzerToken(leftParenthesis),
-          variableOrDeclaration,
-          toAnalyzerToken(inKeyword),
-          iterator,
-          toAnalyzerToken(rightParenthesis),
-          body));
-    } else {
-      var statement = variableOrDeclaration as VariableDeclarationStatement;
-      VariableDeclarationList variableList = statement.variables;
-      push(ast.forEachStatementWithDeclaration(
-          toAnalyzerToken(awaitToken),
-          toAnalyzerToken(forToken),
-          toAnalyzerToken(leftParenthesis),
-          ast.declaredIdentifier(
-              variableList.documentationComment,
-              variableList.metadata,
-              variableList.keyword,
-              variableList.type,
-              variableList.variables.single.name),
-          toAnalyzerToken(inKeyword),
-          iterator,
-          toAnalyzerToken(rightParenthesis),
-          body));
-    }
-  }
-
-  void endFormalParameter(Token thisKeyword, Token nameToken,
-      FormalParameterType kind, MemberKind memberKind) {
+  void endFormalParameter(
+      Token? thisKeyword,
+      Token? superKeyword,
+      Token? periodAfterThisOrSuper,
+      Token nameToken,
+      Token? initializerStart,
+      Token? initializerEnd,
+      FormalParameterKind kind,
+      MemberKind memberKind) {
+    assert(optionalOrNull('this', thisKeyword));
+    assert(optionalOrNull('super', superKeyword));
+    assert(thisKeyword == null && superKeyword == null
+        ? periodAfterThisOrSuper == null
+        : optional('.', periodAfterThisOrSuper!));
     debugEvent("FormalParameter");
-    _ParameterDefaultValue defaultValue = pop();
 
-    AstNode nameOrFunctionTypedParameter = pop();
+    if (superKeyword != null && !enableSuperParameters) {
+      var feature = ExperimentalFeatures.super_parameters;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(ExperimentStatus.currentVersion),
+        ),
+        superKeyword,
+        superKeyword,
+      );
+    }
 
-    FormalParameter node;
-    SimpleIdentifier name;
-    if (nameOrFunctionTypedParameter is FormalParameter) {
-      node = nameOrFunctionTypedParameter;
-      name = nameOrFunctionTypedParameter.identifier;
-    } else {
-      name = nameOrFunctionTypedParameter;
-      TypeAnnotation type = pop();
-      _Modifiers modifiers = pop();
-      Token keyword = modifiers?.finalConstOrVarKeyword;
-      Token covariantKeyword = modifiers?.covariantKeyword;
-      pop(); // TODO(paulberry): Metadata.
-      Comment comment = pop();
-      if (thisKeyword == null) {
-        node = ast.simpleFormalParameter2(
+    var defaultValue = pop() as _ParameterDefaultValue?;
+    var name = pop() as SimpleIdentifier?;
+    var typeOrFunctionTypedParameter = pop() as AstNode?;
+    var modifiers = pop() as _Modifiers?;
+    var keyword = modifiers?.finalConstOrVarKeyword;
+    var covariantKeyword = modifiers?.covariantKeyword;
+    var requiredKeyword = modifiers?.requiredToken;
+    if (!enableNonNullable) {
+      reportNonNullableModifierError(requiredKeyword);
+    }
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata,
+        thisKeyword ?? typeOrFunctionTypedParameter?.beginToken ?? nameToken);
+
+    NormalFormalParameter node;
+    if (typeOrFunctionTypedParameter is FunctionTypedFormalParameter) {
+      // This is a temporary AST node that was constructed in
+      // [endFunctionTypedFormalParameter]. We now deconstruct it and create
+      // the final AST node.
+      if (superKeyword != null) {
+        assert(thisKeyword == null,
+            "Can't have both 'this' and 'super' in a parameter.");
+        node = ast.superFormalParameter(
+            identifier: name!,
             comment: comment,
-            covariantKeyword: toAnalyzerToken(covariantKeyword),
-            keyword: toAnalyzerToken(keyword),
-            type: type,
-            identifier: name);
+            metadata: metadata,
+            covariantKeyword: covariantKeyword,
+            requiredKeyword: requiredKeyword,
+            type: typeOrFunctionTypedParameter.returnType,
+            superKeyword: superKeyword,
+            period: periodAfterThisOrSuper!,
+            typeParameters: typeOrFunctionTypedParameter.typeParameters,
+            parameters: typeOrFunctionTypedParameter.parameters,
+            question: typeOrFunctionTypedParameter.question);
+      } else if (thisKeyword != null) {
+        assert(superKeyword == null,
+            "Can't have both 'this' and 'super' in a parameter.");
+        node = ast.fieldFormalParameter2(
+            identifier: name!,
+            comment: comment,
+            metadata: metadata,
+            covariantKeyword: covariantKeyword,
+            requiredKeyword: requiredKeyword,
+            type: typeOrFunctionTypedParameter.returnType,
+            thisKeyword: thisKeyword,
+            period: periodAfterThisOrSuper!,
+            typeParameters: typeOrFunctionTypedParameter.typeParameters,
+            parameters: typeOrFunctionTypedParameter.parameters,
+            question: typeOrFunctionTypedParameter.question);
       } else {
-        // TODO(scheglov): Ideally the period token should be passed in.
-        Token period = identical('.', thisKeyword.next?.stringValue)
-            ? thisKeyword.next
-            : null;
+        node = ast.functionTypedFormalParameter2(
+            identifier: name!,
+            comment: comment,
+            metadata: metadata,
+            covariantKeyword: covariantKeyword,
+            requiredKeyword: requiredKeyword,
+            returnType: typeOrFunctionTypedParameter.returnType,
+            typeParameters: typeOrFunctionTypedParameter.typeParameters,
+            parameters: typeOrFunctionTypedParameter.parameters,
+            question: typeOrFunctionTypedParameter.question);
+      }
+    } else {
+      var type = typeOrFunctionTypedParameter as TypeAnnotation?;
+      if (superKeyword != null) {
+        assert(thisKeyword == null,
+            "Can't have both 'this' and 'super' in a parameter.");
+        if (keyword is KeywordToken && keyword.keyword == Keyword.VAR) {
+          handleRecoverableError(
+            templateExtraneousModifier.withArguments(keyword),
+            keyword,
+            keyword,
+          );
+        }
+        node = ast.superFormalParameter(
+            comment: comment,
+            metadata: metadata,
+            covariantKeyword: covariantKeyword,
+            requiredKeyword: requiredKeyword,
+            keyword: keyword,
+            type: type,
+            superKeyword: superKeyword,
+            period: periodAfterThisOrSuper!,
+            identifier: name!);
+      } else if (thisKeyword != null) {
+        assert(superKeyword == null,
+            "Can't have both 'this' and 'super' in a parameter.");
         node = ast.fieldFormalParameter2(
             comment: comment,
-            covariantKeyword: toAnalyzerToken(covariantKeyword),
-            keyword: toAnalyzerToken(keyword),
+            metadata: metadata,
+            covariantKeyword: covariantKeyword,
+            requiredKeyword: requiredKeyword,
+            keyword: keyword,
             type: type,
-            thisKeyword: toAnalyzerToken(thisKeyword),
-            period: toAnalyzerToken(period),
+            thisKeyword: thisKeyword,
+            period: thisKeyword.next!,
+            identifier: name!);
+      } else {
+        node = ast.simpleFormalParameter2(
+            comment: comment,
+            metadata: metadata,
+            covariantKeyword: covariantKeyword,
+            requiredKeyword: requiredKeyword,
+            keyword: keyword,
+            type: type,
             identifier: name);
       }
     }
 
-    ParameterKind analyzerKind = _toAnalyzerParameterKind(kind);
+    ParameterKind analyzerKind =
+        _toAnalyzerParameterKind(kind, requiredKeyword);
+    FormalParameter parameter = node;
     if (analyzerKind != ParameterKind.REQUIRED) {
-      node = ast.defaultFormalParameter(node, analyzerKind,
-          toAnalyzerToken(defaultValue?.separator), defaultValue?.value);
+      parameter = ast.defaultFormalParameter(
+          node, analyzerKind, defaultValue?.separator, defaultValue?.value);
+    } else if (defaultValue != null) {
+      // An error is reported if a required parameter has a default value.
+      // Record it as named parameter for recovery.
+      parameter = ast.defaultFormalParameter(node, ParameterKind.NAMED,
+          defaultValue.separator, defaultValue.value);
     }
-
-    if (name != null) {
-      scope[name.name] =
-          name.staticElement = new AnalyzerParameterElement(node);
-    }
-    push(node);
+    push(parameter);
   }
 
   @override
-  void endFunctionTypedFormalParameter(
-      Token thisKeyword, FormalParameterType kind) {
-    debugEvent("FunctionTypedFormalParameter");
-
-    FormalParameterList formalParameters = pop();
-    TypeParameterList typeParameters = pop();
-    SimpleIdentifier name = pop();
-    TypeAnnotation returnType = pop();
-
-    _Modifiers modifiers = pop();
-    Token covariantKeyword = modifiers?.covariantKeyword;
-
-    pop(); // TODO(paulberry): Metadata.
-    Comment comment = pop();
-
-    FormalParameter node;
-    if (thisKeyword == null) {
-      node = ast.functionTypedFormalParameter2(
-          comment: comment,
-          covariantKeyword: toAnalyzerToken(covariantKeyword),
-          returnType: returnType,
-          identifier: name,
-          typeParameters: typeParameters,
-          parameters: formalParameters);
-    } else {
-      // TODO(scheglov): Ideally the period token should be passed in.
-      Token period = identical('.', thisKeyword?.next?.stringValue)
-          ? thisKeyword.next
-          : null;
-      node = ast.fieldFormalParameter2(
-          comment: comment,
-          covariantKeyword: toAnalyzerToken(covariantKeyword),
-          type: returnType,
-          thisKeyword: toAnalyzerToken(thisKeyword),
-          period: toAnalyzerToken(period),
-          identifier: name,
-          typeParameters: typeParameters,
-          parameters: formalParameters);
-    }
-
-    scope[name.name] = name.staticElement = new AnalyzerParameterElement(node);
-    push(node);
+  void endFormalParameterDefaultValueExpression() {
+    debugEvent("FormalParameterDefaultValueExpression");
   }
 
+  @override
   void endFormalParameters(
-      int count, Token beginToken, Token endToken, MemberKind kind) {
+      int count, Token leftParen, Token rightParen, MemberKind kind) {
+    assert(optional('(', leftParen));
+    assert(optional(')', rightParen));
     debugEvent("FormalParameters");
-    List rawParameters = popList(count) ?? const <Object>[];
+
+    var rawParameters = popTypedList(count) ?? const <Object>[];
     List<FormalParameter> parameters = <FormalParameter>[];
-    Token leftDelimiter;
-    Token rightDelimiter;
+    Token? leftDelimiter;
+    Token? rightDelimiter;
     for (Object raw in rawParameters) {
       if (raw is _OptionalFormalParameters) {
-        parameters.addAll(raw.parameters);
+        parameters.addAll(raw.parameters ?? const <FormalParameter>[]);
         leftDelimiter = raw.leftDelimiter;
         rightDelimiter = raw.rightDelimiter;
       } else {
@@ -969,62 +1641,661 @@ class AstBuilder extends ScopeListener {
       }
     }
     push(ast.formalParameterList(
-        toAnalyzerToken(beginToken),
-        parameters,
-        toAnalyzerToken(leftDelimiter),
-        toAnalyzerToken(rightDelimiter),
-        toAnalyzerToken(endToken)));
+        leftParen, parameters, leftDelimiter, rightDelimiter, rightParen));
+  }
+
+  @override
+  void endForStatement(Token endToken) {
+    debugEvent("ForStatement");
+    var body = pop() as Statement;
+    var forLoopParts = pop() as ForParts;
+    var leftParen = pop() as Token;
+    var forToken = pop() as Token;
+
+    push(ast.forStatement(
+      forKeyword: forToken,
+      leftParenthesis: leftParen,
+      forLoopParts: forLoopParts,
+      rightParenthesis: leftParen.endGroup!,
+      body: body,
+    ));
+  }
+
+  @override
+  void endForStatementBody(Token token) {
+    debugEvent("endForStatementBody");
+  }
+
+  @override
+  void endFunctionExpression(Token beginToken, Token token) {
+    // TODO(paulberry): set up scopes properly to resolve parameters and type
+    // variables.  Note that this is tricky due to the handling of initializers
+    // in constructors, so the logic should be shared with BodyBuilder as much
+    // as possible.
+    debugEvent("FunctionExpression");
+
+    var body = pop() as FunctionBody;
+    var parameters = pop() as FormalParameterList?;
+    var typeParameters = pop() as TypeParameterList?;
+    push(ast.functionExpression(typeParameters, parameters, body));
+  }
+
+  @override
+  void endFunctionName(Token beginToken, Token token) {
+    debugEvent("FunctionName");
+  }
+
+  @override
+  void endFunctionType(Token functionToken, Token? questionMark) {
+    assert(optional('Function', functionToken));
+    debugEvent("FunctionType");
+    if (!enableNonNullable) {
+      reportErrorIfNullableType(questionMark);
+    }
+
+    var parameters = pop() as FormalParameterList;
+    var returnType = pop() as TypeAnnotation?;
+    var typeParameters = pop() as TypeParameterList?;
+    push(ast.genericFunctionType(
+        returnType, functionToken, typeParameters, parameters,
+        question: questionMark));
+  }
+
+  @override
+  void endFunctionTypedFormalParameter(Token nameToken, Token? question) {
+    debugEvent("FunctionTypedFormalParameter");
+    if (!enableNonNullable) {
+      reportErrorIfNullableType(question);
+    }
+
+    var formalParameters = pop() as FormalParameterList;
+    var returnType = pop() as TypeAnnotation?;
+    var typeParameters = pop() as TypeParameterList?;
+
+    // Create a temporary formal parameter that will be dissected later in
+    // [endFormalParameter].
+    push(ast.functionTypedFormalParameter2(
+        identifier: ast.simpleIdentifier(
+          StringToken(TokenType.IDENTIFIER, '', 0),
+        ),
+        returnType: returnType,
+        typeParameters: typeParameters,
+        parameters: formalParameters,
+        question: question));
+  }
+
+  @override
+  void endHide(Token hideKeyword) {
+    assert(optional('hide', hideKeyword));
+    debugEvent("Hide");
+
+    var hiddenNames = pop() as List<SimpleIdentifier>;
+    push(ast.hideCombinator(hideKeyword, hiddenNames));
+  }
+
+  @override
+  void endIfControlFlow(Token token) {
+    var thenElement = pop() as CollectionElement;
+    var condition = pop() as ParenthesizedExpression;
+    var ifToken = pop() as Token;
+    pushIfControlFlowInfo(ifToken, condition, thenElement, null, null);
+  }
+
+  @override
+  void endIfElseControlFlow(Token token) {
+    var elseElement = pop() as CollectionElement;
+    var elseToken = pop() as Token;
+    var thenElement = pop() as CollectionElement;
+    var condition = pop() as ParenthesizedExpression;
+    var ifToken = pop() as Token;
+    pushIfControlFlowInfo(
+        ifToken, condition, thenElement, elseToken, elseElement);
+  }
+
+  @override
+  void endIfStatement(Token ifToken, Token? elseToken) {
+    assert(optional('if', ifToken));
+    assert(optionalOrNull('else', elseToken));
+
+    var elsePart = popIfNotNull(elseToken) as Statement?;
+    var thenPart = pop() as Statement;
+    var condition = pop() as ParenthesizedExpression;
+    push(ast.ifStatement(
+        ifToken,
+        condition.leftParenthesis,
+        condition.expression,
+        condition.rightParenthesis,
+        thenPart,
+        elseToken,
+        elsePart));
+  }
+
+  @override
+  void endImplicitCreationExpression(Token token, Token openAngleBracket) {
+    debugEvent("ImplicitCreationExpression");
+
+    _handleInstanceCreation(null);
+  }
+
+  @override
+  void endImport(Token importKeyword, Token? semicolon) {
+    assert(optional('import', importKeyword));
+    assert(optionalOrNull(';', semicolon));
+    debugEvent("Import");
+
+    var combinators = pop() as List<Combinator>?;
+    var deferredKeyword = pop(NullValue.Deferred) as Token?;
+    var asKeyword = pop(NullValue.As) as Token?;
+    var prefix = pop(NullValue.Prefix) as SimpleIdentifier?;
+    var configurations = pop() as List<Configuration>?;
+    var uri = pop() as StringLiteral;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, importKeyword);
+
+    directives.add(ast.importDirective(
+        comment,
+        metadata,
+        importKeyword,
+        uri,
+        configurations,
+        deferredKeyword,
+        asKeyword,
+        prefix,
+        combinators,
+        semicolon ?? Tokens.semicolon()));
+  }
+
+  @override
+  void endInitializedIdentifier(Token nameToken) {
+    debugEvent("InitializedIdentifier");
+
+    var node = pop() as AstNode?;
+    VariableDeclaration variable;
+    // TODO(paulberry): This seems kludgy.  It would be preferable if we
+    // could respond to a "handleNoVariableInitializer" event by converting a
+    // SimpleIdentifier into a VariableDeclaration, and then when this code was
+    // reached, node would always be a VariableDeclaration.
+    if (node is VariableDeclaration) {
+      variable = node;
+    } else if (node is SimpleIdentifier) {
+      variable = _makeVariableDeclaration(node, null, null);
+    } else {
+      internalProblem(
+          templateInternalProblemUnhandled.withArguments(
+              "${node.runtimeType}", "identifier"),
+          nameToken.charOffset,
+          uri);
+    }
+    push(variable);
+  }
+
+  @override
+  void endInitializers(int count, Token colon, Token endToken) {
+    assert(optional(':', colon));
+    debugEvent("Initializers");
+
+    var initializerObjects = popTypedList(count) ?? const [];
+    if (!isFullAst) return;
+
+    push(colon);
+
+    var initializers = <ConstructorInitializer>[];
+    for (Object initializerObject in initializerObjects) {
+      var initializer = buildInitializer(initializerObject);
+      if (initializer != null) {
+        initializers.add(initializer);
+      } else {
+        handleRecoverableError(
+            messageInvalidInitializer,
+            initializerObject is AstNode ? initializerObject.beginToken : colon,
+            initializerObject is AstNode ? initializerObject.endToken : colon);
+      }
+    }
+
+    push(initializers);
+  }
+
+  @override
+  void endInvalidAwaitExpression(
+      Token awaitKeyword, Token endToken, MessageCode errorCode) {
+    debugEvent("InvalidAwaitExpression");
+    endAwaitExpression(awaitKeyword, endToken);
+  }
+
+  @override
+  void endInvalidYieldStatement(Token yieldKeyword, Token? starToken,
+      Token endToken, MessageCode errorCode) {
+    debugEvent("InvalidYieldStatement");
+    endYieldStatement(yieldKeyword, starToken, endToken);
+  }
+
+  @override
+  void endIsOperatorType(Token asOperator) {
+    debugEvent("IsOperatorType");
+  }
+
+  @override
+  void endLabeledStatement(int labelCount) {
+    debugEvent("LabeledStatement");
+
+    var statement = pop() as Statement;
+    var labels = popTypedList2<Label>(labelCount);
+    push(ast.labeledStatement(labels, statement));
+  }
+
+  @override
+  void endLibraryName(Token libraryKeyword, Token semicolon) {
+    assert(optional('library', libraryKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("LibraryName");
+
+    var libraryName = pop() as List<SimpleIdentifier>;
+    var name = ast.libraryIdentifier(libraryName);
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, libraryKeyword);
+    directives.add(ast.libraryDirective(
+        comment, metadata, libraryKeyword, name, semicolon));
+  }
+
+  @override
+  void endLiteralString(int interpolationCount, Token endToken) {
+    debugEvent("endLiteralString");
+
+    if (interpolationCount == 0) {
+      var token = pop() as Token;
+      String value = unescapeString(token.lexeme, token, this);
+      push(ast.simpleStringLiteral(token, value));
+    } else {
+      var parts = popTypedList(1 + interpolationCount * 2)!;
+      var first = parts.first as Token;
+      var last = parts.last as Token;
+      Quote quote = analyzeQuote(first.lexeme);
+      List<InterpolationElement> elements = <InterpolationElement>[];
+      elements.add(ast.interpolationString(
+          first, unescapeFirstStringPart(first.lexeme, quote, first, this)));
+      for (int i = 1; i < parts.length - 1; i++) {
+        var part = parts[i];
+        if (part is Token) {
+          elements.add(ast.interpolationString(
+              part, unescape(part.lexeme, quote, part, this)));
+        } else if (part is InterpolationExpression) {
+          elements.add(part);
+        } else {
+          internalProblem(
+              templateInternalProblemUnhandled.withArguments(
+                  "${part.runtimeType}", "string interpolation"),
+              first.charOffset,
+              uri);
+        }
+      }
+      elements.add(ast.interpolationString(
+          last,
+          unescapeLastStringPart(
+              last.lexeme, quote, last, last.isSynthetic, this)));
+      push(ast.stringInterpolation(elements));
+    }
+  }
+
+  @override
+  void endLiteralSymbol(Token hashToken, int tokenCount) {
+    assert(optional('#', hashToken));
+    debugEvent("LiteralSymbol");
+
+    var components = popTypedList2<Token>(tokenCount);
+    push(ast.symbolLiteral(hashToken, components));
+  }
+
+  @override
+  void endLocalFunctionDeclaration(Token token) {
+    debugEvent("LocalFunctionDeclaration");
+    var body = pop() as FunctionBody;
+    if (isFullAst) {
+      pop(); // constructor initializers
+      pop(); // separator before constructor initializers
+    }
+    var parameters = pop() as FormalParameterList;
+    checkFieldFormalParameters(parameters);
+    var name = pop() as SimpleIdentifier;
+    var returnType = pop() as TypeAnnotation?;
+    var typeParameters = pop() as TypeParameterList?;
+    var metadata = pop(NullValue.Metadata) as List<Annotation>?;
+    FunctionExpression functionExpression =
+        ast.functionExpression(typeParameters, parameters, body);
+    var functionDeclaration = ast.functionDeclaration(
+        null, metadata, null, returnType, null, name, functionExpression);
+    push(ast.functionDeclarationStatement(functionDeclaration));
+  }
+
+  @override
+  void endMember() {
+    debugEvent("Member");
+  }
+
+  @override
+  void endMetadata(Token atSign, Token? periodBeforeName, Token endToken) {
+    assert(optional('@', atSign));
+    assert(optionalOrNull('.', periodBeforeName));
+    debugEvent("Metadata");
+
+    var invocation = pop() as MethodInvocation?;
+    var constructorName =
+        periodBeforeName != null ? pop() as SimpleIdentifier : null;
+    var typeArguments = pop() as TypeArgumentList?;
+    if (typeArguments != null &&
+        !_featureSet.isEnabled(Feature.generic_metadata)) {
+      var feature = Feature.generic_metadata;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(feature.releaseVersion!),
+        ),
+        typeArguments.beginToken,
+        typeArguments.beginToken,
+      );
+    }
+    var name = pop() as Identifier;
+    push(ast.annotation(
+        atSign: atSign,
+        name: name,
+        typeArguments: typeArguments,
+        period: periodBeforeName,
+        constructorName: constructorName,
+        arguments: invocation?.argumentList));
+  }
+
+  @override
+  void endMetadataStar(int count) {
+    debugEvent("MetadataStar");
+
+    push(popTypedList<Annotation>(count) ?? NullValue.Metadata);
+  }
+
+  @override
+  void endMixinConstructor(Token? getOrSet, Token beginToken, Token beginParam,
+      Token? beginInitializers, Token endToken) {
+    debugEvent("MixinConstructor");
+    // TODO(danrubel) Decide how to handle constructor declarations within
+    // mixins. They are invalid, but we include them in order to get navigation,
+    // search, etc. Currently the error is reported by multiple listeners,
+    // but should be moved into the parser.
+    endClassConstructor(
+        getOrSet, beginToken, beginParam, beginInitializers, endToken);
+  }
+
+  @override
+  void endMixinDeclaration(Token mixinKeyword, Token endToken) {
+    debugEvent("MixinDeclaration");
+    mixinDeclaration = null;
+  }
+
+  @override
+  void endMixinFactoryMethod(
+      Token beginToken, Token factoryKeyword, Token endToken) {
+    debugEvent("MixinFactoryMethod");
+    endClassFactoryMethod(beginToken, factoryKeyword, endToken);
+  }
+
+  @override
+  void endMixinFields(
+      Token? abstractToken,
+      Token? externalToken,
+      Token? staticToken,
+      Token? covariantToken,
+      Token? lateToken,
+      Token? varFinalOrConst,
+      int count,
+      Token beginToken,
+      Token endToken) {
+    endClassFields(abstractToken, externalToken, staticToken, covariantToken,
+        lateToken, varFinalOrConst, count, beginToken, endToken);
+  }
+
+  @override
+  void endMixinMethod(Token? getOrSet, Token beginToken, Token beginParam,
+      Token? beginInitializers, Token endToken) {
+    debugEvent("MixinMethod");
+    endClassMethod(
+        getOrSet, beginToken, beginParam, beginInitializers, endToken);
+  }
+
+  @override
+  void endNamedFunctionExpression(Token endToken) {
+    debugEvent("NamedFunctionExpression");
+    var body = pop() as FunctionBody;
+    if (isFullAst) {
+      pop(); // constructor initializers
+      pop(); // separator before constructor initializers
+    }
+    var parameters = pop() as FormalParameterList;
+    pop(); // name
+    pop(); // returnType
+    var typeParameters = pop() as TypeParameterList?;
+    push(ast.functionExpression(typeParameters, parameters, body));
+  }
+
+  @override
+  void endNamedMixinApplication(Token beginToken, Token classKeyword,
+      Token equalsToken, Token? implementsKeyword, Token semicolon) {
+    assert(optional('class', classKeyword));
+    assert(optionalOrNull('=', equalsToken));
+    assert(optionalOrNull('implements', implementsKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("NamedMixinApplication");
+
+    ImplementsClause? implementsClause;
+    if (implementsKeyword != null) {
+      var interfaces = pop() as List<NamedType>;
+      implementsClause = ast.implementsClause(implementsKeyword, interfaces);
+    }
+    var withClause = pop(NullValue.WithClause) as WithClause;
+    var superclass = pop() as NamedType;
+    var macroKeyword = pop(NullValue.Token) as Token?;
+    var modifiers = pop() as _Modifiers?;
+    var typeParameters = pop() as TypeParameterList?;
+    var name = pop() as SimpleIdentifier;
+    var abstractKeyword = modifiers?.abstractKeyword;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, beginToken);
+    declarations.add(ast.classTypeAlias(
+        comment,
+        metadata,
+        classKeyword,
+        name,
+        typeParameters,
+        equalsToken,
+        abstractKeyword,
+        macroKeyword,
+        superclass,
+        withClause,
+        implementsClause,
+        semicolon));
+  }
+
+  @override
+  void endNewExpression(Token newKeyword) {
+    assert(optional('new', newKeyword));
+    debugEvent("NewExpression");
+
+    _handleInstanceCreation(newKeyword);
+  }
+
+  @override
+  void endOptionalFormalParameters(
+      int count, Token leftDelimeter, Token rightDelimeter) {
+    assert((optional('[', leftDelimeter) && optional(']', rightDelimeter)) ||
+        (optional('{', leftDelimeter) && optional('}', rightDelimeter)));
+    debugEvent("OptionalFormalParameters");
+
+    push(_OptionalFormalParameters(
+        popTypedList2<FormalParameter>(count), leftDelimeter, rightDelimeter));
+  }
+
+  @override
+  void endPart(Token partKeyword, Token semicolon) {
+    assert(optional('part', partKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("Part");
+
+    var uri = pop() as StringLiteral;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, partKeyword);
+    directives
+        .add(ast.partDirective(comment, metadata, partKeyword, uri, semicolon));
+  }
+
+  @override
+  void endPartOf(
+      Token partKeyword, Token ofKeyword, Token semicolon, bool hasName) {
+    assert(optional('part', partKeyword));
+    assert(optional('of', ofKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("PartOf");
+    var libraryNameOrUri = pop();
+    LibraryIdentifier? name;
+    StringLiteral? uri;
+    if (libraryNameOrUri is StringLiteral) {
+      uri = libraryNameOrUri;
+    } else {
+      name = ast.libraryIdentifier(libraryNameOrUri as List<SimpleIdentifier>);
+    }
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, partKeyword);
+    directives.add(ast.partOfDirective(
+        comment, metadata, partKeyword, ofKeyword, uri, name, semicolon));
+  }
+
+  @override
+  void endRedirectingFactoryBody(Token equalToken, Token endToken) {
+    assert(optional('=', equalToken));
+    debugEvent("RedirectingFactoryBody");
+
+    var constructorName = pop() as ConstructorName;
+    var starToken = pop() as Token?;
+    var asyncToken = pop() as Token?;
+    push(_RedirectingFactoryBody(
+        asyncToken, starToken, equalToken, constructorName));
+  }
+
+  @override
+  void endRethrowStatement(Token rethrowToken, Token semicolon) {
+    assert(optional('rethrow', rethrowToken));
+    assert(optional(';', semicolon));
+    debugEvent("RethrowStatement");
+
+    RethrowExpression expression = ast.rethrowExpression(rethrowToken);
+    // TODO(scheglov) According to the specification, 'rethrow' is a statement.
+    push(ast.expressionStatement(expression, semicolon));
+  }
+
+  @override
+  void endReturnStatement(
+      bool hasExpression, Token returnKeyword, Token semicolon) {
+    assert(optional('return', returnKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("ReturnStatement");
+
+    var expression = hasExpression ? pop() as Expression : null;
+    push(ast.returnStatement(returnKeyword, expression, semicolon));
+  }
+
+  @override
+  void endShow(Token showKeyword) {
+    assert(optional('show', showKeyword));
+    debugEvent("Show");
+
+    var shownNames = pop() as List<SimpleIdentifier>;
+    push(ast.showCombinator(showKeyword, shownNames));
   }
 
   @override
   void endSwitchBlock(int caseCount, Token leftBracket, Token rightBracket) {
+    assert(optional('{', leftBracket));
+    assert(optional('}', rightBracket));
     debugEvent("SwitchBlock");
-    List<List<SwitchMember>> membersList = popList(caseCount);
-    exitBreakTarget();
-    exitLocalScope();
+
+    var membersList = popTypedList2<List<SwitchMember>>(caseCount);
     List<SwitchMember> members =
-        membersList?.expand((members) => members)?.toList() ?? <SwitchMember>[];
+        membersList.expand((members) => members).toList();
+
+    Set<String> labels = <String>{};
+    for (SwitchMember member in members) {
+      for (Label label in member.labels) {
+        if (!labels.add(label.label.name)) {
+          handleRecoverableError(
+              templateDuplicateLabelInSwitchStatement
+                  .withArguments(label.label.name),
+              label.beginToken,
+              label.beginToken);
+        }
+      }
+    }
+
     push(leftBracket);
     push(members);
     push(rightBracket);
   }
 
   @override
-  void handleSwitchCase(
+  void endSwitchCase(
       int labelCount,
       int expressionCount,
-      Token defaultKeyword,
+      Token? defaultKeyword,
+      Token? colonAfterDefault,
       int statementCount,
       Token firstToken,
       Token endToken) {
+    assert(optionalOrNull('default', defaultKeyword));
+    assert(defaultKeyword == null
+        ? colonAfterDefault == null
+        : optional(':', colonAfterDefault!));
     debugEvent("SwitchCase");
-    List<Statement> statements = popList(statementCount);
-    List<SwitchMember> members = popList(expressionCount) ?? [];
-    List<Label> labels = popList(labelCount);
-    if (defaultKeyword != null) {
-      members.add(ast.switchDefault(
-          <Label>[], defaultKeyword, defaultKeyword.next, <Statement>[]));
-    }
-    members.last.statements.addAll(statements);
-    members.first.labels.addAll(labels);
-    push(members);
-  }
 
-  @override
-  void handleCaseMatch(Token caseKeyword, Token colon) {
-    debugEvent("CaseMatch");
-    Expression expression = pop();
-    push(ast.switchCase(
-        <Label>[], caseKeyword, expression, colon, <Statement>[]));
+    var statements = popTypedList2<Statement>(statementCount);
+    List<SwitchMember?> members;
+
+    if (labelCount == 0 && defaultKeyword == null) {
+      // Common situation: case with no default and no labels.
+      members = popTypedList2<SwitchMember>(expressionCount);
+    } else {
+      // Labels and case statements may be intertwined
+      if (defaultKeyword != null) {
+        SwitchDefault member = ast.switchDefault(
+            <Label>[], defaultKeyword, colonAfterDefault!, <Statement>[]);
+        while (peek() is Label) {
+          member.labels.insert(0, pop() as Label);
+          --labelCount;
+        }
+        members = List<SwitchMember?>.filled(expressionCount + 1, null);
+        members[expressionCount] = member;
+      } else {
+        members = List<SwitchMember?>.filled(expressionCount, null);
+      }
+      for (int index = expressionCount - 1; index >= 0; --index) {
+        var member = pop() as SwitchMember;
+        while (peek() is Label) {
+          member.labels.insert(0, pop() as Label);
+          --labelCount;
+        }
+        members[index] = member;
+      }
+      assert(labelCount == 0);
+    }
+    var members2 = members.whereNotNull().toList();
+    if (members2.isNotEmpty) {
+      members2.last.statements.addAll(statements);
+    }
+    push(members2);
   }
 
   @override
   void endSwitchStatement(Token switchKeyword, Token endToken) {
+    assert(optional('switch', switchKeyword));
     debugEvent("SwitchStatement");
-    Token rightBracket = pop();
-    List<SwitchMember> members = pop();
-    Token leftBracket = pop();
-    ParenthesizedExpression expression = pop();
+
+    var rightBracket = pop() as Token;
+    var members = pop() as List<SwitchMember>;
+    var leftBracket = pop() as Token;
+    var expression = pop() as ParenthesizedExpression;
     push(ast.switchStatement(
         switchKeyword,
         expression.leftParenthesis,
@@ -1035,174 +2306,9 @@ class AstBuilder extends ScopeListener {
         rightBracket));
   }
 
-  void handleCatchBlock(Token onKeyword, Token catchKeyword) {
-    debugEvent("CatchBlock");
-    Block body = pop();
-    FormalParameterList catchParameterList = popIfNotNull(catchKeyword);
-    TypeAnnotation type = popIfNotNull(onKeyword);
-    SimpleIdentifier exception;
-    SimpleIdentifier stackTrace;
-    if (catchParameterList != null) {
-      List<FormalParameter> catchParameters = catchParameterList.parameters;
-      if (catchParameters.length > 0) {
-        exception = catchParameters[0].identifier;
-      }
-      if (catchParameters.length > 1) {
-        stackTrace = catchParameters[1].identifier;
-      }
-    }
-    push(ast.catchClause(
-        toAnalyzerToken(onKeyword),
-        type,
-        toAnalyzerToken(catchKeyword),
-        catchParameterList?.leftParenthesis,
-        exception,
-        null,
-        stackTrace,
-        catchParameterList?.rightParenthesis,
-        body));
-  }
-
   @override
-  void handleFinallyBlock(Token finallyKeyword) {
-    debugEvent("FinallyBlock");
-    // The finally block is popped in "endTryStatement".
-  }
-
-  void endTryStatement(int catchCount, Token tryKeyword, Token finallyKeyword) {
-    Block finallyBlock = popIfNotNull(finallyKeyword);
-    List<CatchClause> catchClauses = popList(catchCount);
-    Block body = pop();
-    push(ast.tryStatement(toAnalyzerToken(tryKeyword), body, catchClauses,
-        toAnalyzerToken(finallyKeyword), finallyBlock));
-  }
-
-  @override
-  void handleLabel(Token colon) {
-    debugEvent("Label");
-    SimpleIdentifier name = pop();
-    push(ast.label(name, colon));
-  }
-
-  void handleNoExpression(Token token) {
-    debugEvent("NoExpression");
-    push(NullValue.Expression);
-  }
-
-  void handleIndexedExpression(
-      Token openCurlyBracket, Token closeCurlyBracket) {
-    debugEvent("IndexedExpression");
-    Expression index = pop();
-    Expression target = pop();
-    if (target == null) {
-      CascadeExpression receiver = pop();
-      Token token = peek();
-      push(receiver);
-      IndexExpression expression = ast.indexExpressionForCascade(
-          toAnalyzerToken(token),
-          toAnalyzerToken(openCurlyBracket),
-          index,
-          toAnalyzerToken(closeCurlyBracket));
-      assert(expression.isCascaded);
-      push(expression);
-    } else {
-      push(ast.indexExpressionForTarget(
-          target,
-          toAnalyzerToken(openCurlyBracket),
-          index,
-          toAnalyzerToken(closeCurlyBracket)));
-    }
-  }
-
-  @override
-  void handleInvalidExpression(Token token) {
-    debugEvent("InvalidExpression");
-  }
-
-  @override
-  void handleInvalidFunctionBody(Token token) {
-    debugEvent("InvalidFunctionBody");
-  }
-
-  @override
-  Token handleUnrecoverableError(Token token, FastaMessage message) {
-    if (message.code == codeExpectedFunctionBody) {
-      if (identical('native', token.stringValue) && parser != null) {
-        Token nativeKeyword = token;
-        Token semicolon = parser.parseLiteralString(token.next);
-        token = parser.expectSemicolon(semicolon);
-        StringLiteral name = pop();
-        pop(); // star
-        pop(); // async
-        push(ast.nativeFunctionBody(
-            toAnalyzerToken(nativeKeyword), name, toAnalyzerToken(semicolon)));
-        return token;
-      }
-    } else if (message.code == codeExpectedExpression) {
-      String lexeme = token.lexeme;
-      if (identical('async', lexeme) || identical('yield', lexeme)) {
-        errorReporter?.reportErrorForOffset(
-            ParserErrorCode.ASYNC_KEYWORD_USED_AS_IDENTIFIER,
-            token.charOffset,
-            token.charCount);
-        push(ast.simpleIdentifier(toAnalyzerToken(token)));
-        return token;
-      }
-    }
-    return super.handleUnrecoverableError(token, message);
-  }
-
-  void handleUnaryPrefixExpression(Token token) {
-    debugEvent("UnaryPrefixExpression");
-    push(ast.prefixExpression(toAnalyzerToken(token), pop()));
-  }
-
-  void handleUnaryPrefixAssignmentExpression(Token token) {
-    debugEvent("UnaryPrefixAssignmentExpression");
-    push(ast.prefixExpression(toAnalyzerToken(token), pop()));
-  }
-
-  void handleUnaryPostfixAssignmentExpression(Token token) {
-    debugEvent("UnaryPostfixAssignmentExpression");
-    push(ast.postfixExpression(pop(), toAnalyzerToken(token)));
-  }
-
-  void handleModifier(Token token) {
-    debugEvent("Modifier");
-    push(token);
-  }
-
-  void handleModifiers(int count) {
-    debugEvent("Modifiers");
-    if (count == 0) {
-      push(NullValue.Modifiers);
-    } else {
-      push(new _Modifiers(popList(count)));
-    }
-  }
-
-  void endTopLevelMethod(Token beginToken, Token getOrSet, Token endToken) {
-    // TODO(paulberry): set up scopes properly to resolve parameters and type
-    // variables.
-    debugEvent("TopLevelMethod");
-    FunctionBody body = pop();
-    FormalParameterList parameters = pop();
-    TypeParameterList typeParameters = pop();
-    SimpleIdentifier name = pop();
-    analyzer.Token propertyKeyword = toAnalyzerToken(getOrSet);
-    TypeAnnotation returnType = pop();
-    _Modifiers modifiers = pop();
-    Token externalKeyword = modifiers?.externalKeyword;
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.functionDeclaration(
-        comment,
-        metadata,
-        toAnalyzerToken(externalKeyword),
-        returnType,
-        propertyKeyword,
-        name,
-        ast.functionExpression(typeParameters, parameters, body)));
+  void endThenStatement(Token token) {
+    debugEvent("endThenStatement");
   }
 
   @override
@@ -1211,285 +2317,1392 @@ class AstBuilder extends ScopeListener {
   }
 
   @override
-  void beginCompilationUnit(Token token) {
-    push(token);
-  }
+  void endTopLevelFields(
+      Token? externalToken,
+      Token? staticToken,
+      Token? covariantToken,
+      Token? lateToken,
+      Token? varFinalOrConst,
+      int count,
+      Token beginToken,
+      Token semicolon) {
+    assert(optional(';', semicolon));
+    debugEvent("TopLevelFields");
 
-  @override
-  void endCompilationUnit(int count, Token endToken) {
-    debugEvent("CompilationUnit");
-    List<Object> elements = popList(count);
-    Token beginToken = pop();
-
-    ScriptTag scriptTag = null;
-    var directives = <Directive>[];
-    var declarations = <CompilationUnitMember>[];
-    if (elements != null) {
-      for (AstNode node in elements) {
-        if (node is ScriptTag) {
-          scriptTag = node;
-        } else if (node is Directive) {
-          directives.add(node);
-        } else if (node is CompilationUnitMember) {
-          declarations.add(node);
-        } else {
-          internalError(
-              'Unrecognized compilation unit member: ${node.runtimeType}');
-        }
+    if (externalToken != null) {
+      if (!enableNonNullable) {
+        handleRecoverableError(
+            messageExternalField, externalToken, externalToken);
+      } else if (lateToken != null) {
+        handleRecoverableError(
+            messageExternalLateField, externalToken, externalToken);
       }
     }
 
-    push(ast.compilationUnit(
-        beginToken, scriptTag, directives, declarations, endToken));
+    var variables = popTypedList2<VariableDeclaration>(count);
+    var type = pop() as TypeAnnotation?;
+    var variableList = ast.variableDeclarationList2(
+      lateKeyword: lateToken,
+      keyword: varFinalOrConst,
+      type: type,
+      variables: variables,
+    );
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, beginToken);
+    declarations.add(ast.topLevelVariableDeclaration(
+        comment, metadata, variableList, semicolon,
+        externalKeyword: externalToken));
   }
 
-  void endImport(Token importKeyword, Token deferredKeyword, Token asKeyword,
-      Token semicolon) {
-    debugEvent("Import");
-    List<Combinator> combinators = pop();
-    SimpleIdentifier prefix;
-    if (asKeyword != null) prefix = pop();
-    List<Configuration> configurations = pop();
-    StringLiteral uri = pop();
-    List<Annotation> metadata = pop();
-    assert(metadata == null); // TODO(paulberry): fix.
-    Comment comment = pop();
-    push(ast.importDirective(
+  @override
+  void endTopLevelMethod(Token beginToken, Token? getOrSet, Token endToken) {
+    // TODO(paulberry): set up scopes properly to resolve parameters and type
+    // variables.
+    assert(getOrSet == null ||
+        optional('get', getOrSet) ||
+        optional('set', getOrSet));
+    debugEvent("TopLevelMethod");
+
+    var body = pop() as FunctionBody;
+    var parameters = pop() as FormalParameterList?;
+    var typeParameters = pop() as TypeParameterList?;
+    var name = pop() as SimpleIdentifier;
+    var returnType = pop() as TypeAnnotation?;
+    var modifiers = pop() as _Modifiers?;
+    var externalKeyword = modifiers?.externalKeyword;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, beginToken);
+    declarations.add(ast.functionDeclaration(
         comment,
         metadata,
-        toAnalyzerToken(importKeyword),
-        uri,
-        configurations,
-        toAnalyzerToken(deferredKeyword),
-        toAnalyzerToken(asKeyword),
-        prefix,
-        combinators,
-        toAnalyzerToken(semicolon)));
-  }
-
-  void endExport(Token exportKeyword, Token semicolon) {
-    debugEvent("Export");
-    List<Combinator> combinators = pop();
-    List<Configuration> configurations = pop();
-    StringLiteral uri = pop();
-    List<Annotation> metadata = pop();
-    assert(metadata == null);
-    Comment comment = pop();
-    push(ast.exportDirective(comment, metadata, toAnalyzerToken(exportKeyword),
-        uri, configurations, combinators, toAnalyzerToken(semicolon)));
-  }
-
-  @override
-  void endDottedName(int count, Token firstIdentifier) {
-    debugEvent("DottedName");
-    List<SimpleIdentifier> components = popList(count);
-    push(ast.dottedName(components));
-  }
-
-  @override
-  void endDoWhileStatement(
-      Token doKeyword, Token whileKeyword, Token semicolon) {
-    debugEvent("DoWhileStatement");
-    ParenthesizedExpression condition = pop();
-    Statement body = pop();
-    exitContinueTarget();
-    exitBreakTarget();
-    push(ast.doStatement(
-        toAnalyzerToken(doKeyword),
-        body,
-        toAnalyzerToken(whileKeyword),
-        condition.leftParenthesis,
-        condition.expression,
-        condition.rightParenthesis,
-        toAnalyzerToken(semicolon)));
-  }
-
-  void endConditionalUri(Token ifKeyword, Token equalitySign) {
-    debugEvent("ConditionalUri");
-    StringLiteral libraryUri = pop();
-    // TODO(paulberry,ahe): the parser should report the right paren token to
-    // the listener.
-    Token rightParen = null;
-    StringLiteral value;
-    if (equalitySign != null) {
-      value = pop();
-    }
-    DottedName name = pop();
-    // TODO(paulberry,ahe): what if there is no `(` token due to an error in the
-    // file being parsed?  It seems like we need the parser to do adequate error
-    // recovery and then report both the ifKeyword and leftParen tokens to the
-    // listener.
-    Token leftParen = ifKeyword.next;
-    push(ast.configuration(
-        toAnalyzerToken(ifKeyword),
-        toAnalyzerToken(leftParen),
+        externalKeyword,
+        returnType,
+        getOrSet,
         name,
-        toAnalyzerToken(equalitySign),
-        value,
-        toAnalyzerToken(rightParen),
-        libraryUri));
+        ast.functionExpression(typeParameters, parameters, body)));
   }
 
   @override
-  void endConditionalUris(int count) {
-    debugEvent("ConditionalUris");
-    push(popList(count) ?? NullValue.ConditionalUris);
+  void endTryStatement(
+      int catchCount, Token tryKeyword, Token? finallyKeyword) {
+    assert(optional('try', tryKeyword));
+    assert(optionalOrNull('finally', finallyKeyword));
+    debugEvent("TryStatement");
+
+    var finallyBlock = popIfNotNull(finallyKeyword) as Block?;
+    var catchClauses = popTypedList2<CatchClause>(catchCount);
+    var body = pop() as Block;
+    push(ast.tryStatement(
+        tryKeyword, body, catchClauses, finallyKeyword, finallyBlock));
   }
 
   @override
-  void endIdentifierList(int count) {
-    debugEvent("IdentifierList");
-    push(popList(count) ?? NullValue.IdentifierList);
+  void endTypeArguments(int count, Token leftBracket, Token rightBracket) {
+    assert(optional('<', leftBracket));
+    assert(optional('>', rightBracket));
+    debugEvent("TypeArguments");
+
+    var arguments = popTypedList2<TypeAnnotation>(count);
+    push(ast.typeArgumentList(leftBracket, arguments, rightBracket));
   }
 
   @override
-  void endShow(Token showKeyword) {
-    debugEvent("Show");
-    List<SimpleIdentifier> shownNames = pop();
-    push(ast.showCombinator(toAnalyzerToken(showKeyword), shownNames));
-  }
+  void endTypedef(Token typedefKeyword, Token? equals, Token semicolon) {
+    assert(optional('typedef', typedefKeyword));
+    assert(optionalOrNull('=', equals));
+    assert(optional(';', semicolon));
+    debugEvent("FunctionTypeAlias");
 
-  @override
-  void endHide(Token hideKeyword) {
-    debugEvent("Hide");
-    List<SimpleIdentifier> hiddenNames = pop();
-    push(ast.hideCombinator(toAnalyzerToken(hideKeyword), hiddenNames));
+    if (equals == null) {
+      var parameters = pop() as FormalParameterList;
+      var typeParameters = pop() as TypeParameterList?;
+      var name = pop() as SimpleIdentifier;
+      var returnType = pop() as TypeAnnotation?;
+      var metadata = pop() as List<Annotation>?;
+      var comment = _findComment(metadata, typedefKeyword);
+      declarations.add(ast.functionTypeAlias(comment, metadata, typedefKeyword,
+          returnType, name, typeParameters, parameters, semicolon));
+    } else {
+      var type = pop() as TypeAnnotation;
+      var templateParameters = pop() as TypeParameterList?;
+      var name = pop() as SimpleIdentifier;
+      var metadata = pop() as List<Annotation>?;
+      var comment = _findComment(metadata, typedefKeyword);
+      if (type is! GenericFunctionType && !enableNonFunctionTypeAliases) {
+        var feature = Feature.nonfunction_type_aliases;
+        handleRecoverableError(
+          templateExperimentNotEnabled.withArguments(
+            feature.enableString,
+            _versionAsString(ExperimentStatus.currentVersion),
+          ),
+          equals,
+          equals,
+        );
+      }
+      declarations.add(ast.genericTypeAlias(comment, metadata, typedefKeyword,
+          name, templateParameters, equals, type, semicolon));
+    }
   }
 
   @override
   void endTypeList(int count) {
     debugEvent("TypeList");
-    push(popList(count) ?? NullValue.TypeList);
+    push(popTypedList<NamedType>(count) ?? NullValue.TypeList);
   }
 
   @override
-  void endClassBody(int memberCount, Token beginToken, Token endToken) {
-    debugEvent("ClassBody");
-    push(new _ClassBody(
-        beginToken, popList(memberCount) ?? <ClassMember>[], endToken));
-  }
+  void endTypeVariable(
+      Token token, int index, Token? extendsOrSuper, Token? variance) {
+    debugEvent("TypeVariable");
+    assert(extendsOrSuper == null ||
+        optional('extends', extendsOrSuper) ||
+        optional('super', extendsOrSuper));
 
-  @override
-  void endClassDeclaration(
-      int interfacesCount,
-      Token beginToken,
-      Token classKeyword,
-      Token extendsKeyword,
-      Token implementsKeyword,
-      Token endToken) {
-    debugEvent("ClassDeclaration");
-    _ClassBody body = pop();
-    ImplementsClause implementsClause;
-    if (implementsKeyword != null) {
-      List<TypeName> interfaces = popList(interfacesCount);
-      implementsClause =
-          ast.implementsClause(toAnalyzerToken(implementsKeyword), interfaces);
+    // TODO (kallentu): Implement variance behaviour for the analyzer.
+    assert(variance == null ||
+        optional('in', variance) ||
+        optional('out', variance) ||
+        optional('inout', variance));
+    if (!enableVariance) {
+      reportVarianceModifierNotEnabled(variance);
     }
-    ExtendsClause extendsClause;
-    WithClause withClause;
-    var supertype = pop();
-    if (supertype == null) {
-      // No extends clause
-    } else if (supertype is TypeName) {
-      extendsClause =
-          ast.extendsClause(toAnalyzerToken(extendsKeyword), supertype);
-    } else if (supertype is _MixinApplication) {
-      extendsClause = ast.extendsClause(
-          toAnalyzerToken(extendsKeyword), supertype.supertype);
-      withClause = ast.withClause(
-          toAnalyzerToken(supertype.withKeyword), supertype.mixinTypes);
+
+    var bound = pop() as TypeAnnotation?;
+
+    // Peek to leave type parameters on top of stack.
+    var typeParameters = peek() as List<TypeParameter>;
+
+    // TODO (kallentu) : Clean up TypeParameterImpl casting once variance is
+    // added to the interface.
+    (typeParameters[index] as TypeParameterImpl)
+      ..extendsKeyword = extendsOrSuper
+      ..bound = bound
+      ..varianceKeyword = variance;
+  }
+
+  @override
+  void endTypeVariables(Token beginToken, Token endToken) {
+    assert(optional('<', beginToken));
+    assert(optional('>', endToken));
+    debugEvent("TypeVariables");
+
+    var typeParameters = pop() as List<TypeParameter>;
+    push(ast.typeParameterList(beginToken, typeParameters, endToken));
+  }
+
+  @override
+  void endVariableInitializer(Token assignmentOperator) {
+    assert(optionalOrNull('=', assignmentOperator));
+    debugEvent("VariableInitializer");
+
+    var initializer = pop() as Expression;
+    var identifier = pop() as SimpleIdentifier;
+    // TODO(ahe): Don't push initializers, instead install them.
+    push(_makeVariableDeclaration(identifier, assignmentOperator, initializer));
+  }
+
+  @override
+  void endVariablesDeclaration(int count, Token? semicolon) {
+    assert(optionalOrNull(';', semicolon));
+    debugEvent("VariablesDeclaration");
+
+    var variables = popTypedList2<VariableDeclaration>(count);
+    var modifiers = pop(NullValue.Modifiers) as _Modifiers?;
+    var type = pop() as TypeAnnotation?;
+    var keyword = modifiers?.finalConstOrVarKeyword;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, variables[0].beginToken);
+    // var comment = _findComment(metadata,
+    //     variables[0].beginToken ?? type?.beginToken ?? modifiers.beginToken);
+    push(ast.variableDeclarationStatement(
+        ast.variableDeclarationList2(
+          comment: comment,
+          metadata: metadata,
+          lateKeyword: modifiers?.lateToken,
+          keyword: keyword,
+          type: type,
+          variables: variables,
+        ),
+        semicolon ?? Tokens.semicolon()));
+  }
+
+  @override
+  void endWhileStatement(Token whileKeyword, Token endToken) {
+    assert(optional('while', whileKeyword));
+    debugEvent("WhileStatement");
+
+    var body = pop() as Statement;
+    var condition = pop() as ParenthesizedExpression;
+    push(ast.whileStatement(whileKeyword, condition.leftParenthesis,
+        condition.expression, condition.rightParenthesis, body));
+  }
+
+  @override
+  void endWhileStatementBody(Token token) {
+    debugEvent("endWhileStatementBody");
+  }
+
+  @override
+  void endYieldStatement(Token yieldToken, Token? starToken, Token semicolon) {
+    assert(optional('yield', yieldToken));
+    assert(optionalOrNull('*', starToken));
+    assert(optional(';', semicolon));
+    debugEvent("YieldStatement");
+
+    var expression = pop() as Expression;
+    push(ast.yieldStatement(yieldToken, starToken, expression, semicolon));
+  }
+
+  @override
+  void handleAsOperator(Token asOperator) {
+    assert(optional('as', asOperator));
+    debugEvent("AsOperator");
+
+    var type = pop() as TypeAnnotation;
+    var expression = pop() as Expression;
+    push(ast.asExpression(expression, asOperator, type));
+  }
+
+  @override
+  void handleAssignmentExpression(Token token) {
+    assert(token.type.isAssignmentOperator);
+    debugEvent("AssignmentExpression");
+
+    var rhs = pop() as Expression;
+    var lhs = pop() as Expression;
+    if (!lhs.isAssignable) {
+      // TODO(danrubel): Update the BodyBuilder to report this error.
+      handleRecoverableError(
+          messageMissingAssignableSelector, lhs.beginToken, lhs.endToken);
+    }
+    push(ast.assignmentExpression(lhs, token, rhs));
+    if (!enableTripleShift && token.type == TokenType.GT_GT_GT_EQ) {
+      var feature = ExperimentalFeatures.triple_shift;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(ExperimentStatus.currentVersion),
+        ),
+        token,
+        token,
+      );
+    }
+  }
+
+  @override
+  void handleAsyncModifier(Token? asyncToken, Token? starToken) {
+    assert(asyncToken == null ||
+        optional('async', asyncToken) ||
+        optional('sync', asyncToken));
+    assert(optionalOrNull('*', starToken));
+    debugEvent("AsyncModifier");
+
+    push(asyncToken ?? NullValue.FunctionBodyAsyncToken);
+    push(starToken ?? NullValue.FunctionBodyStarToken);
+  }
+
+  @override
+  void handleBreakStatement(
+      bool hasTarget, Token breakKeyword, Token semicolon) {
+    assert(optional('break', breakKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("BreakStatement");
+
+    var label = hasTarget ? pop() as SimpleIdentifier : null;
+    push(ast.breakStatement(breakKeyword, label, semicolon));
+  }
+
+  @override
+  void handleCaseMatch(Token caseKeyword, Token colon) {
+    assert(optional('case', caseKeyword));
+    assert(optional(':', colon));
+    debugEvent("CaseMatch");
+
+    var expression = pop() as Expression;
+    push(ast.switchCase(
+        <Label>[], caseKeyword, expression, colon, <Statement>[]));
+  }
+
+  @override
+  void handleCatchBlock(Token? onKeyword, Token? catchKeyword, Token? comma) {
+    assert(optionalOrNull('on', onKeyword));
+    assert(optionalOrNull('catch', catchKeyword));
+    assert(optionalOrNull(',', comma));
+    debugEvent("CatchBlock");
+
+    var body = pop() as Block;
+    var catchParameterList = popIfNotNull(catchKeyword) as FormalParameterList?;
+    var type = popIfNotNull(onKeyword) as TypeAnnotation?;
+    SimpleIdentifier? exception;
+    SimpleIdentifier? stackTrace;
+    if (catchParameterList != null) {
+      List<FormalParameter> catchParameters = catchParameterList.parameters;
+      if (catchParameters.isNotEmpty) {
+        exception = catchParameters[0].identifier;
+      }
+      if (catchParameters.length > 1) {
+        stackTrace = catchParameters[1].identifier;
+      }
+    }
+    push(ast.catchClause(
+        onKeyword,
+        type,
+        catchKeyword,
+        catchParameterList?.leftParenthesis,
+        exception,
+        comma,
+        stackTrace,
+        catchParameterList?.rightParenthesis,
+        body));
+  }
+
+  @override
+  void handleClassExtends(Token? extendsKeyword, int typeCount) {
+    assert(extendsKeyword == null || extendsKeyword.isKeywordOrIdentifier);
+    debugEvent("ClassExtends");
+
+    // If more extends clauses was specified (parser has already issued an
+    // error) throw them away for now and pick the first one.
+    while (typeCount > 1) {
+      pop();
+      typeCount--;
+    }
+    var supertype = pop() as NamedType?;
+    if (supertype != null) {
+      push(ast.extendsClause(extendsKeyword!, supertype));
     } else {
-      internalError('Unexpected kind of supertype ${supertype.runtimeType}');
+      push(NullValue.ExtendsClause);
     }
-    TypeParameterList typeParameters = pop();
-    SimpleIdentifier name = pop();
-    assert(className == name.name);
-    className = null;
-    _Modifiers modifiers = pop();
-    Token abstractKeyword = modifiers?.abstractKeyword;
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.classDeclaration(
-        comment,
-        metadata,
-        toAnalyzerToken(abstractKeyword),
-        toAnalyzerToken(classKeyword),
-        name,
-        typeParameters,
-        extendsClause,
-        withClause,
-        implementsClause,
-        toAnalyzerToken(body.beginToken),
-        body.members,
-        toAnalyzerToken(body.endToken)));
   }
 
   @override
-  void endMixinApplication(Token withKeyword) {
-    debugEvent("MixinApplication");
-    List<TypeName> mixinTypes = pop();
-    TypeName supertype = pop();
-    push(new _MixinApplication(supertype, withKeyword, mixinTypes));
+  void handleClassHeader(Token begin, Token classKeyword, Token? nativeToken) {
+    assert(optional('class', classKeyword));
+    assert(optionalOrNull('native', nativeToken));
+    assert(classDeclaration == null && mixinDeclaration == null);
+    debugEvent("ClassHeader");
+
+    NativeClause? nativeClause;
+    if (nativeToken != null) {
+      nativeClause = ast.nativeClause(nativeToken, nativeName);
+    }
+    var implementsClause = pop(NullValue.IdentifierList) as ImplementsClause?;
+    var withClause = pop(NullValue.WithClause) as WithClause?;
+    var extendsClause = pop(NullValue.ExtendsClause) as ExtendsClause?;
+    var macroKeyword = pop(NullValue.Token) as Token?;
+    var modifiers = pop() as _Modifiers?;
+    var typeParameters = pop() as TypeParameterList?;
+    var name = pop() as SimpleIdentifier;
+    var abstractKeyword = modifiers?.abstractKeyword;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, begin);
+    // leftBracket, members, and rightBracket
+    // are set in [endClassOrMixinBody].
+    classDeclaration = ast.classDeclaration(
+      comment,
+      metadata,
+      abstractKeyword,
+      macroKeyword,
+      classKeyword,
+      name,
+      typeParameters,
+      extendsClause,
+      withClause,
+      implementsClause,
+      Tokens.openCurlyBracket(), // leftBracket
+      <ClassMember>[],
+      Tokens.closeCurlyBracket(), // rightBracket
+    );
+
+    classDeclaration!.nativeClause = nativeClause;
+    declarations.add(classDeclaration!);
   }
 
   @override
-  void endNamedMixinApplication(Token beginToken, Token classKeyword,
-      Token equalsToken, Token implementsKeyword, Token endToken) {
-    debugEvent("NamedMixinApplication");
-    ImplementsClause implementsClause;
+  void handleClassNoWithClause() {
+    push(NullValue.WithClause);
+  }
+
+  @override
+  void handleClassWithClause(Token withKeyword) {
+    assert(optional('with', withKeyword));
+    var mixinTypes = pop() as List<NamedType>;
+    push(ast.withClause(withKeyword, mixinTypes));
+  }
+
+  @override
+  void handleCommentReference(
+    Token? newKeyword,
+    Token? firstToken,
+    Token? firstPeriod,
+    Token? secondToken,
+    Token? secondPeriod,
+    Token thirdToken,
+  ) {
+    var identifier = ast.simpleIdentifier(thirdToken);
+    if (firstToken != null) {
+      var target = ast.prefixedIdentifier(ast.simpleIdentifier(firstToken),
+          firstPeriod!, ast.simpleIdentifier(secondToken!));
+      var expression = ast.propertyAccess(target, secondPeriod!, identifier);
+      push(ast.commentReference(newKeyword, expression));
+    } else if (secondToken != null) {
+      var expression = ast.prefixedIdentifier(
+          ast.simpleIdentifier(secondToken), secondPeriod!, identifier);
+      push(ast.commentReference(newKeyword, expression));
+    } else {
+      push(ast.commentReference(newKeyword, identifier));
+    }
+  }
+
+  @override
+  void handleCommentReferenceText(String referenceSource, int referenceOffset) {
+    push(referenceSource);
+    push(referenceOffset);
+  }
+
+  @override
+  void handleConstFactory(Token constKeyword) {
+    debugEvent("ConstFactory");
+    // TODO(kallentu): Removal of const factory error for const function feature
+    handleRecoverableError(messageConstFactory, constKeyword, constKeyword);
+  }
+
+  @override
+  void handleContinueStatement(
+      bool hasTarget, Token continueKeyword, Token semicolon) {
+    assert(optional('continue', continueKeyword));
+    assert(optional(';', semicolon));
+    debugEvent("ContinueStatement");
+
+    var label = hasTarget ? pop() as SimpleIdentifier : null;
+    push(ast.continueStatement(continueKeyword, label, semicolon));
+  }
+
+  @override
+  void handleDottedName(int count, Token firstIdentifier) {
+    assert(firstIdentifier.isIdentifier);
+    debugEvent("DottedName");
+
+    var components = popTypedList2<SimpleIdentifier>(count);
+    push(ast.dottedName(components));
+  }
+
+  @override
+  void handleElseControlFlow(Token elseToken) {
+    push(elseToken);
+  }
+
+  @override
+  void handleEmptyFunctionBody(Token semicolon) {
+    assert(optional(';', semicolon));
+    debugEvent("EmptyFunctionBody");
+
+    // TODO(scheglov) Change the parser to not produce these modifiers.
+    pop(); // star
+    pop(); // async
+    push(ast.emptyFunctionBody(semicolon));
+  }
+
+  @override
+  void handleEmptyStatement(Token semicolon) {
+    assert(optional(';', semicolon));
+    debugEvent("EmptyStatement");
+
+    push(ast.emptyStatement(semicolon));
+  }
+
+  @override
+  void handleEnumElement(Token beginToken) {
+    debugEvent("EnumElement");
+    var tmpArguments = pop() as MethodInvocationImpl?;
+    var tmpConstructor = pop() as ConstructorNameImpl?;
+    var constant = pop() as EnumConstantDeclarationImpl;
+
+    if (!enableEnhancedEnums &&
+        (tmpArguments != null ||
+            tmpConstructor != null &&
+                (tmpConstructor.type2.typeArguments != null ||
+                    tmpConstructor.name != null))) {
+      Token token = tmpArguments != null
+          ? tmpArguments.argumentList.beginToken
+          : tmpConstructor!.beginToken;
+      var feature = ExperimentalFeatures.enhanced_enums;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(ExperimentStatus.currentVersion),
+        ),
+        token,
+        token,
+      );
+    }
+
+    var argumentList = tmpArguments?.argumentList;
+
+    TypeArgumentListImpl? typeArguments;
+    ConstructorSelectorImpl? constructorSelector;
+    if (tmpConstructor != null) {
+      typeArguments = tmpConstructor.type2.typeArguments;
+      var constructorNamePeriod = tmpConstructor.period;
+      var constructorNameId = tmpConstructor.name;
+      if (constructorNamePeriod != null && constructorNameId != null) {
+        constructorSelector = ConstructorSelectorImpl(
+          period: constructorNamePeriod,
+          name: constructorNameId,
+        );
+      }
+      // enum E { v<int> }
+      if (typeArguments != null && argumentList == null) {
+        errorReporter.errorReporter?.reportErrorForNode(
+          ParserErrorCode.ENUM_CONSTANT_WITH_TYPE_ARGUMENTS_WITHOUT_ARGUMENTS,
+          typeArguments,
+        );
+        argumentList = _syntheticArgumentList(typeArguments.endToken);
+      }
+      // enum E { v.^ }
+      if (constructorSelector != null) {
+        argumentList ??= _syntheticArgumentList(constructorSelector.endToken);
+      }
+    }
+
+    // Replace the constant to include arguments.
+    if (argumentList != null) {
+      constant = EnumConstantDeclarationImpl(
+        documentationComment: constant.documentationComment,
+        metadata: constant.metadata,
+        name: constant.name,
+        arguments: EnumConstantArgumentsImpl(
+          typeArguments: typeArguments,
+          constructorSelector: constructorSelector,
+          argumentList: argumentList,
+        ),
+      );
+    }
+
+    push(constant);
+  }
+
+  @override
+  void handleEnumElements(Token elementsEndToken, int elementsCount) {
+    debugEvent("EnumElements");
+
+    var constants = popTypedList2<EnumConstantDeclaration>(elementsCount);
+    enumDeclaration!.constants.addAll(constants);
+
+    if (optional(';', elementsEndToken)) {
+      enumDeclaration!.semicolon = elementsEndToken;
+    }
+
+    if (!enableEnhancedEnums && optional(';', elementsEndToken)) {
+      var feature = ExperimentalFeatures.enhanced_enums;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(ExperimentStatus.currentVersion),
+        ),
+        elementsEndToken,
+        elementsEndToken,
+      );
+    }
+  }
+
+  @override
+  void handleEnumHeader(Token enumKeyword, Token leftBrace) {
+    assert(optional('enum', enumKeyword));
+    assert(optional('{', leftBrace));
+    debugEvent("EnumHeader");
+
+    var implementsClause = pop(NullValue.IdentifierList) as ImplementsClause?;
+    var withClause = pop(NullValue.WithClause) as WithClause?;
+    var typeParameters = pop() as TypeParameterList?;
+    var name = pop() as SimpleIdentifier;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, enumKeyword);
+
+    if (!enableEnhancedEnums &&
+        (withClause != null ||
+            implementsClause != null ||
+            typeParameters != null)) {
+      var token = withClause != null
+          ? withClause.withKeyword
+          : implementsClause != null
+              ? implementsClause.implementsKeyword
+              : typeParameters!.beginToken;
+      var feature = ExperimentalFeatures.enhanced_enums;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(ExperimentStatus.currentVersion),
+        ),
+        token,
+        token,
+      );
+    }
+
+    declarations.add(
+      enumDeclaration = ast.enumDeclaration2(
+        comment: comment,
+        metadata: metadata,
+        enumKeyword: enumKeyword,
+        name: name,
+        typeParameters: typeParameters,
+        withClause: withClause,
+        implementsClause: implementsClause,
+        leftBracket: leftBrace,
+        constants: [],
+        semicolon: null,
+        members: [],
+        rightBracket: leftBrace.endGroup!,
+      ),
+    );
+  }
+
+  @override
+  void handleEnumNoWithClause() {
+    push(NullValue.WithClause);
+  }
+
+  @override
+  void handleEnumWithClause(Token withKeyword) {
+    assert(optional('with', withKeyword));
+    var mixinTypes = pop() as List<NamedType>;
+    push(ast.withClause(withKeyword, mixinTypes));
+  }
+
+  @override
+  void handleErrorToken(ErrorToken token) {
+    translateErrorToken(token, errorReporter.reportScannerError);
+  }
+
+  @override
+  void handleExpressionFunctionBody(Token arrowToken, Token? semicolon) {
+    assert(optional('=>', arrowToken) || optional('=', arrowToken));
+    assert(optionalOrNull(';', semicolon));
+    debugEvent("ExpressionFunctionBody");
+
+    var expression = pop() as Expression;
+    var star = pop() as Token?;
+    var asyncKeyword = pop() as Token?;
+    if (parseFunctionBodies) {
+      push(ast.expressionFunctionBody2(
+        keyword: asyncKeyword,
+        star: star,
+        functionDefinition: arrowToken,
+        expression: expression,
+        semicolon: semicolon,
+      ));
+    } else {
+      push(ast.emptyFunctionBody(semicolon!));
+    }
+  }
+
+  @override
+  void handleExpressionStatement(Token semicolon) {
+    assert(optional(';', semicolon));
+    debugEvent("ExpressionStatement");
+    var expression = pop() as Expression;
+    reportErrorIfSuper(expression);
+    if (expression is SimpleIdentifier &&
+        expression.token.keyword?.isBuiltInOrPseudo == false) {
+      // This error is also reported by the body builder.
+      handleRecoverableError(
+          messageExpectedStatement, expression.beginToken, expression.endToken);
+    }
+    if (expression is AssignmentExpression) {
+      if (!expression.leftHandSide.isAssignable) {
+        // This error is also reported by the body builder.
+        handleRecoverableError(
+            messageIllegalAssignmentToNonAssignable,
+            expression.leftHandSide.beginToken,
+            expression.leftHandSide.endToken);
+      }
+    }
+    push(ast.expressionStatement(expression, semicolon));
+  }
+
+  @override
+  void handleExtensionShowHide(Token? showKeyword, int showElementCount,
+      Token? hideKeyword, int hideElementCount) {
+    assert(optionalOrNull('hide', hideKeyword));
+    assert(optionalOrNull('show', showKeyword));
+    debugEvent("ExtensionShowHide");
+
+    HideClause? hideClause;
+    if (hideKeyword != null) {
+      var elements = popTypedList2<ShowHideClauseElement>(hideElementCount);
+      hideClause = ast.hideClause(hideKeyword: hideKeyword, elements: elements);
+    }
+
+    ShowClause? showClause;
+    if (showKeyword != null) {
+      var elements = popTypedList2<ShowHideClauseElement>(showElementCount);
+      showClause = ast.showClause(showKeyword: showKeyword, elements: elements);
+    }
+
+    push(hideClause ?? NullValue.HideClause);
+    push(showClause ?? NullValue.ShowClause);
+  }
+
+  @override
+  void handleFinallyBlock(Token finallyKeyword) {
+    debugEvent("FinallyBlock");
+    // The finally block is popped in "endTryStatement".
+  }
+
+  @override
+  void handleForInitializerEmptyStatement(Token token) {
+    debugEvent("ForInitializerEmptyStatement");
+    push(NullValue.Expression);
+  }
+
+  @override
+  void handleForInitializerExpressionStatement(Token token, bool forIn) {
+    debugEvent("ForInitializerExpressionStatement");
+  }
+
+  @override
+  void handleForInitializerLocalVariableDeclaration(Token token, bool forIn) {
+    debugEvent("ForInitializerLocalVariableDeclaration");
+  }
+
+  @override
+  void handleForInLoopParts(Token? awaitToken, Token forToken,
+      Token leftParenthesis, Token inKeyword) {
+    assert(optionalOrNull('await', awaitToken));
+    assert(optional('for', forToken));
+    assert(optional('(', leftParenthesis));
+    assert(optional('in', inKeyword) || optional(':', inKeyword));
+
+    var iterator = pop() as Expression;
+    var variableOrDeclaration = pop()!;
+
+    ForEachParts forLoopParts;
+    if (variableOrDeclaration is VariableDeclarationStatement) {
+      VariableDeclarationList variableList = variableOrDeclaration.variables;
+      forLoopParts = ast.forEachPartsWithDeclaration(
+        loopVariable: ast.declaredIdentifier(
+            variableList.documentationComment,
+            variableList.metadata,
+            variableList.keyword,
+            variableList.type,
+            variableList.variables.first.name),
+        inKeyword: inKeyword,
+        iterable: iterator,
+      );
+    } else {
+      if (variableOrDeclaration is! SimpleIdentifier) {
+        // Parser has already reported the error.
+        if (!leftParenthesis.next!.isIdentifier) {
+          parser.rewriter.insertSyntheticIdentifier(leftParenthesis);
+        }
+        variableOrDeclaration = ast.simpleIdentifier(leftParenthesis.next!);
+      }
+      forLoopParts = ast.forEachPartsWithIdentifier(
+        identifier: variableOrDeclaration,
+        inKeyword: inKeyword,
+        iterable: iterator,
+      );
+    }
+
+    push(awaitToken ?? NullValue.AwaitToken);
+    push(forToken);
+    push(leftParenthesis);
+    push(forLoopParts);
+  }
+
+  @override
+  void handleForLoopParts(Token forKeyword, Token leftParen,
+      Token leftSeparator, int updateExpressionCount) {
+    assert(optional('for', forKeyword));
+    assert(optional('(', leftParen));
+    assert(optional(';', leftSeparator));
+    assert(updateExpressionCount >= 0);
+
+    var updates = popTypedList2<Expression>(updateExpressionCount);
+    var conditionStatement = pop() as Statement;
+    var initializerPart = pop();
+
+    Expression? condition;
+    Token rightSeparator;
+    if (conditionStatement is ExpressionStatement) {
+      condition = conditionStatement.expression;
+      rightSeparator = conditionStatement.semicolon!;
+    } else {
+      rightSeparator = (conditionStatement as EmptyStatement).semicolon;
+    }
+
+    ForParts forLoopParts;
+    if (initializerPart is VariableDeclarationStatement) {
+      forLoopParts = ast.forPartsWithDeclarations(
+        variables: initializerPart.variables,
+        leftSeparator: leftSeparator,
+        condition: condition,
+        rightSeparator: rightSeparator,
+        updaters: updates,
+      );
+    } else {
+      forLoopParts = ast.forPartsWithExpression(
+        initialization: initializerPart as Expression?,
+        leftSeparator: leftSeparator,
+        condition: condition,
+        rightSeparator: rightSeparator,
+        updaters: updates,
+      );
+    }
+
+    push(forKeyword);
+    push(leftParen);
+    push(forLoopParts);
+  }
+
+  @override
+  void handleFormalParameterWithoutValue(Token token) {
+    debugEvent("FormalParameterWithoutValue");
+
+    push(NullValue.ParameterDefaultValue);
+  }
+
+  @override
+  void handleIdentifier(Token token, IdentifierContext context) {
+    assert(token.isKeywordOrIdentifier);
+    debugEvent("handleIdentifier");
+
+    if (context.inSymbol) {
+      push(token);
+      return;
+    }
+
+    SimpleIdentifier identifier =
+        ast.simpleIdentifier(token, isDeclaration: context.inDeclaration);
+    if (context.inLibraryOrPartOfDeclaration) {
+      if (!context.isContinuation) {
+        push([identifier]);
+      } else {
+        push(identifier);
+      }
+    } else if (context == IdentifierContext.enumValueDeclaration) {
+      var metadata = pop() as List<Annotation>?;
+      var comment = _findComment(metadata, token);
+      push(ast.enumConstantDeclaration(comment, metadata, identifier));
+    } else {
+      push(identifier);
+    }
+  }
+
+  @override
+  void handleIdentifierList(int count) {
+    debugEvent("IdentifierList");
+
+    push(popTypedList<SimpleIdentifier>(count) ?? NullValue.IdentifierList);
+  }
+
+  @override
+  void handleImplements(Token? implementsKeyword, int interfacesCount) {
+    assert(optionalOrNull('implements', implementsKeyword));
+    debugEvent("Implements");
+
     if (implementsKeyword != null) {
-      List<TypeName> interfaces = pop();
-      implementsClause =
-          ast.implementsClause(toAnalyzerToken(implementsKeyword), interfaces);
+      var interfaces = popTypedList2<NamedType>(interfacesCount);
+      push(ast.implementsClause(implementsKeyword, interfaces));
+    } else {
+      push(NullValue.IdentifierList);
     }
-    _MixinApplication mixinApplication = pop();
-    var superclass = mixinApplication.supertype;
-    var withClause = ast.withClause(
-        toAnalyzerToken(mixinApplication.withKeyword),
-        mixinApplication.mixinTypes);
-    analyzer.Token equals = toAnalyzerToken(equalsToken);
-    TypeParameterList typeParameters = pop();
-    SimpleIdentifier name = pop();
-    _Modifiers modifiers = pop();
-    Token abstractKeyword = modifiers?.abstractKeyword;
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.classTypeAlias(
-        comment,
-        metadata,
-        toAnalyzerToken(classKeyword),
-        name,
-        typeParameters,
-        equals,
-        toAnalyzerToken(abstractKeyword),
-        superclass,
-        withClause,
-        implementsClause,
-        toAnalyzerToken(endToken)));
   }
 
   @override
-  void endLabeledStatement(int labelCount) {
-    debugEvent("LabeledStatement");
-    Statement statement = pop();
-    List<Label> labels = popList(labelCount);
-    push(ast.labeledStatement(labels, statement));
+  void handleImportPrefix(Token? deferredKeyword, Token? asKeyword) {
+    assert(optionalOrNull('deferred', deferredKeyword));
+    assert(optionalOrNull('as', asKeyword));
+    debugEvent("ImportPrefix");
+
+    if (asKeyword == null) {
+      // If asKeyword is null, then no prefix has been pushed on the stack.
+      // Push a placeholder indicating that there is no prefix.
+      push(NullValue.Prefix);
+      push(NullValue.As);
+    } else {
+      push(asKeyword);
+    }
+    push(deferredKeyword ?? NullValue.Deferred);
   }
 
   @override
-  void endLibraryName(Token libraryKeyword, Token semicolon) {
-    debugEvent("LibraryName");
-    List<SimpleIdentifier> libraryName = pop();
-    var name = ast.libraryIdentifier(libraryName);
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.libraryDirective(comment, metadata,
-        toAnalyzerToken(libraryKeyword), name, toAnalyzerToken(semicolon)));
+  void handleIndexedExpression(
+      Token? question, Token leftBracket, Token rightBracket) {
+    assert(optional('[', leftBracket) ||
+        (enableNonNullable && optional('?.[', leftBracket)));
+    assert(optional(']', rightBracket));
+    debugEvent("IndexedExpression");
+
+    if (!enableNonNullable) {
+      reportErrorIfNullableType(question);
+    }
+
+    var index = pop() as Expression;
+    var target = pop() as Expression?;
+    if (target == null) {
+      var receiver = pop() as CascadeExpression;
+      var token = peek() as Token;
+      push(receiver);
+      IndexExpression expression = ast.indexExpressionForCascade2(
+          period: token,
+          question: question,
+          leftBracket: leftBracket,
+          index: index,
+          rightBracket: rightBracket);
+      assert(expression.isCascaded);
+      push(expression);
+    } else {
+      push(ast.indexExpressionForTarget2(
+          target: target,
+          question: question,
+          leftBracket: leftBracket,
+          index: index,
+          rightBracket: rightBracket));
+    }
+  }
+
+  @override
+  void handleInterpolationExpression(Token leftBracket, Token? rightBracket) {
+    var expression = pop() as Expression;
+    push(ast.interpolationExpression(leftBracket, expression, rightBracket));
+  }
+
+  @override
+  void handleInvalidExpression(Token token) {
+    debugEvent("InvalidExpression");
+  }
+
+  @override
+  void handleInvalidFunctionBody(Token leftBracket) {
+    assert(optional('{', leftBracket));
+    assert(optional('}', leftBracket.endGroup!));
+    debugEvent("InvalidFunctionBody");
+    Block block = ast.block(leftBracket, [], leftBracket.endGroup!);
+    var star = pop() as Token?;
+    var asyncKeyword = pop() as Token?;
+    push(ast.blockFunctionBody(asyncKeyword, star, block));
+  }
+
+  @override
+  void handleInvalidMember(Token endToken) {
+    debugEvent("InvalidMember");
+    pop(); // metadata star
+  }
+
+  @override
+  void handleInvalidOperatorName(Token operatorKeyword, Token token) {
+    assert(optional('operator', operatorKeyword));
+    debugEvent("InvalidOperatorName");
+
+    push(_OperatorName(
+        operatorKeyword, ast.simpleIdentifier(token, isDeclaration: true)));
+  }
+
+  @override
+  void handleInvalidTopLevelBlock(Token token) {
+    // TODO(danrubel): Consider improved recovery by adding this block
+    // as part of a synthetic top level function.
+    pop(); // block
+  }
+
+  @override
+  void handleInvalidTopLevelDeclaration(Token endToken) {
+    debugEvent("InvalidTopLevelDeclaration");
+
+    pop(); // metadata star
+    // TODO(danrubel): consider creating a AST node
+    // representing the invalid declaration to better support code completion,
+    // quick fixes, etc, rather than discarding the metadata and token
+  }
+
+  @override
+  void handleInvalidTypeArguments(Token token) {
+    var invalidTypeArgs = pop() as TypeArgumentList;
+    var node = pop();
+    if (node is ConstructorName) {
+      push(_ConstructorNameWithInvalidTypeArgs(node, invalidTypeArgs));
+    } else {
+      throw UnimplementedError(
+          'node is an instance of ${node.runtimeType} in handleInvalidTypeArguments');
+    }
+  }
+
+  @override
+  void handleIsOperator(Token isOperator, Token? not) {
+    assert(optional('is', isOperator));
+    assert(optionalOrNull('!', not));
+    debugEvent("IsOperator");
+
+    var type = pop() as TypeAnnotation;
+    var expression = pop() as Expression;
+    push(ast.isExpression(expression, isOperator, not, type));
+  }
+
+  @override
+  void handleLabel(Token colon) {
+    assert(optionalOrNull(':', colon));
+    debugEvent("Label");
+
+    var name = pop() as SimpleIdentifier;
+    push(ast.label(name, colon));
+  }
+
+  @override
+  void handleLiteralBool(Token token) {
+    bool value = identical(token.stringValue, "true");
+    assert(value || identical(token.stringValue, "false"));
+    debugEvent("LiteralBool");
+
+    push(ast.booleanLiteral(token, value));
+  }
+
+  @override
+  void handleLiteralDouble(Token token) {
+    assert(token.type == TokenType.DOUBLE);
+    debugEvent("LiteralDouble");
+
+    push(ast.doubleLiteral(token, double.parse(token.lexeme)));
+  }
+
+  @override
+  void handleLiteralInt(Token token) {
+    assert(identical(token.kind, INT_TOKEN) ||
+        identical(token.kind, HEXADECIMAL_TOKEN));
+    debugEvent("LiteralInt");
+
+    push(ast.integerLiteral(token, int.tryParse(token.lexeme)));
+  }
+
+  @override
+  void handleLiteralList(
+      int count, Token leftBracket, Token? constKeyword, Token rightBracket) {
+    assert(optional('[', leftBracket));
+    assert(optionalOrNull('const', constKeyword));
+    assert(optional(']', rightBracket));
+    debugEvent("LiteralList");
+
+    if (enableControlFlowCollections || enableSpreadCollections) {
+      List<CollectionElement> elements = popCollectionElements(count);
+      var typeArguments = pop() as TypeArgumentList?;
+
+      // TODO(danrubel): Remove this and _InvalidCollectionElement
+      // once control flow and spread collection support is enabled by default
+      elements.removeWhere((e) => e == _invalidCollectionElement);
+
+      push(ast.listLiteral(
+          constKeyword, typeArguments, leftBracket, elements, rightBracket));
+    } else {
+      var elements = popTypedList<Expression>(count) ?? const [];
+      var typeArguments = pop() as TypeArgumentList?;
+
+      List<Expression> expressions = <Expression>[];
+      for (var elem in elements) {
+        expressions.add(elem);
+      }
+
+      push(ast.listLiteral(
+          constKeyword, typeArguments, leftBracket, expressions, rightBracket));
+    }
+  }
+
+  @override
+  void handleLiteralMapEntry(Token colon, Token endToken) {
+    assert(optional(':', colon));
+    debugEvent("LiteralMapEntry");
+
+    var value = pop() as Expression;
+    var key = pop() as Expression;
+    push(ast.mapLiteralEntry(key, colon, value));
+  }
+
+  @override
+  void handleLiteralNull(Token token) {
+    assert(optional('null', token));
+    debugEvent("LiteralNull");
+
+    push(ast.nullLiteral(token));
+  }
+
+  @override
+  void handleLiteralSetOrMap(
+    int count,
+    Token leftBrace,
+    Token? constKeyword,
+    Token rightBrace,
+    // TODO(danrubel): hasSetEntry parameter exists for replicating existing
+    // behavior and will be removed once unified collection has been enabled
+    bool hasSetEntry,
+  ) {
+    if (enableControlFlowCollections || enableSpreadCollections) {
+      List<CollectionElement> elements = popCollectionElements(count);
+
+      // TODO(danrubel): Remove this and _InvalidCollectionElement
+      // once control flow and spread collection support is enabled by default
+      elements.removeWhere((e) => e == _invalidCollectionElement);
+
+      var typeArguments = pop() as TypeArgumentList?;
+      push(ast.setOrMapLiteral(
+        constKeyword: constKeyword,
+        typeArguments: typeArguments,
+        leftBracket: leftBrace,
+        elements: elements,
+        rightBracket: rightBrace,
+      ));
+    } else {
+      var elements = popTypedList(count);
+      var typeArguments = pop() as TypeArgumentList?;
+
+      // Replicate existing behavior that has been removed from the parser.
+      // This will be removed once control flow collections
+      // and spread collections are enabled by default.
+
+      // Determine if this is a set or map based on type args and content
+      final typeArgCount = typeArguments?.arguments.length;
+      bool? isSet = typeArgCount == 1
+          ? true
+          : typeArgCount != null
+              ? false
+              : null;
+      isSet ??= hasSetEntry;
+
+      // Build the set or map
+      if (isSet) {
+        final setEntries = <Expression>[];
+        if (elements != null) {
+          for (var elem in elements) {
+            if (elem is MapLiteralEntry) {
+              setEntries.add(elem.key);
+              handleRecoverableError(
+                  templateUnexpectedToken.withArguments(elem.separator),
+                  elem.separator,
+                  elem.separator);
+            } else if (elem is Expression) {
+              setEntries.add(elem);
+            }
+          }
+        }
+        push(ast.setOrMapLiteral(
+          constKeyword: constKeyword,
+          typeArguments: typeArguments,
+          leftBracket: leftBrace,
+          elements: setEntries,
+          rightBracket: rightBrace,
+        ));
+      } else {
+        final mapEntries = <MapLiteralEntry>[];
+        if (elements != null) {
+          for (var elem in elements) {
+            if (elem is MapLiteralEntry) {
+              mapEntries.add(elem);
+            } else if (elem is Expression) {
+              Token next = elem.endToken.next!;
+              int offset = next.offset;
+              handleRecoverableError(
+                  templateExpectedButGot.withArguments(':'), next, next);
+              handleRecoverableError(
+                  templateExpectedIdentifier.withArguments(next), next, next);
+              Token separator = SyntheticToken(TokenType.COLON, offset);
+              Expression value = ast.simpleIdentifier(
+                  SyntheticStringToken(TokenType.IDENTIFIER, '', offset));
+              mapEntries.add(ast.mapLiteralEntry(elem, separator, value));
+            }
+          }
+        }
+        push(ast.setOrMapLiteral(
+          constKeyword: constKeyword,
+          typeArguments: typeArguments,
+          leftBracket: leftBrace,
+          elements: mapEntries,
+          rightBracket: rightBrace,
+        ));
+      }
+    }
+  }
+
+  @override
+  void handleMixinHeader(Token mixinKeyword) {
+    assert(optional('mixin', mixinKeyword));
+    assert(classDeclaration == null &&
+        mixinDeclaration == null &&
+        extensionDeclaration == null);
+    debugEvent("MixinHeader");
+
+    var implementsClause = pop(NullValue.IdentifierList) as ImplementsClause?;
+    var onClause = pop(NullValue.IdentifierList) as OnClause?;
+    var typeParameters = pop() as TypeParameterList?;
+    var name = pop() as SimpleIdentifier;
+    var metadata = pop() as List<Annotation>?;
+    var comment = _findComment(metadata, mixinKeyword);
+
+    mixinDeclaration = ast.mixinDeclaration(
+      comment,
+      metadata,
+      mixinKeyword,
+      name,
+      typeParameters,
+      onClause,
+      implementsClause,
+      Tokens.openCurlyBracket(), // leftBracket
+      <ClassMember>[],
+      Tokens.closeCurlyBracket(), // rightBracket
+    );
+    declarations.add(mixinDeclaration!);
+  }
+
+  @override
+  void handleMixinOn(Token? onKeyword, int typeCount) {
+    assert(onKeyword == null || onKeyword.isKeywordOrIdentifier);
+    debugEvent("MixinOn");
+
+    if (onKeyword != null) {
+      var types = popTypedList2<NamedType>(typeCount);
+      push(ast.onClause(onKeyword, types));
+    } else {
+      push(NullValue.IdentifierList);
+    }
+  }
+
+  @override
+  void handleNamedArgument(Token colon) {
+    assert(optional(':', colon));
+    debugEvent("NamedArgument");
+
+    var expression = pop() as Expression;
+    var name = pop() as SimpleIdentifier;
+    push(ast.namedExpression(ast.label(name, colon), expression));
+  }
+
+  @override
+  void handleNamedMixinApplicationWithClause(Token withKeyword) {
+    assert(optionalOrNull('with', withKeyword));
+    var mixinTypes = pop() as List<NamedType>;
+    push(ast.withClause(withKeyword, mixinTypes));
+  }
+
+  @override
+  void handleNativeClause(Token nativeToken, bool hasName) {
+    debugEvent("NativeClause");
+
+    if (hasName) {
+      nativeName = pop() as StringLiteral; // StringLiteral
+    } else {
+      nativeName = null;
+    }
+  }
+
+  @override
+  void handleNativeFunctionBody(Token nativeToken, Token semicolon) {
+    assert(optional('native', nativeToken));
+    assert(optional(';', semicolon));
+    debugEvent("NativeFunctionBody");
+
+    // TODO(danrubel) Change the parser to not produce these modifiers.
+    pop(); // star
+    pop(); // async
+    push(ast.nativeFunctionBody(nativeToken, nativeName, semicolon));
+  }
+
+  @override
+  void handleNewAsIdentifier(Token token) {
+    if (!enableConstructorTearoffs) {
+      var feature = ExperimentalFeatures.constructor_tearoffs;
+      handleRecoverableError(
+          templateExperimentNotEnabled.withArguments(
+            feature.enableString,
+            _versionAsString(ExperimentStatus.currentVersion),
+          ),
+          token,
+          token);
+    }
+  }
+
+  @override
+  void handleNoConstructorReferenceContinuationAfterTypeArguments(Token token) {
+    debugEvent("NoConstructorReferenceContinuationAfterTypeArguments");
+
+    push(NullValue.ConstructorReferenceContinuationAfterTypeArguments);
+  }
+
+  @override
+  void handleNoFieldInitializer(Token token) {
+    debugEvent("NoFieldInitializer");
+
+    var name = pop() as SimpleIdentifier;
+    push(_makeVariableDeclaration(name, null, null));
+  }
+
+  @override
+  void handleNoInitializers() {
+    debugEvent("NoInitializers");
+
+    if (!isFullAst) return;
+    push(NullValue.ConstructorInitializerSeparator);
+    push(NullValue.ConstructorInitializers);
+  }
+
+  @override
+  void handleNonNullAssertExpression(Token bang) {
+    debugEvent('NonNullAssertExpression');
+    if (!enableNonNullable) {
+      reportNonNullAssertExpressionNotEnabled(bang);
+    } else {
+      push(ast.postfixExpression(pop() as Expression, bang));
+    }
+  }
+
+  @override
+  void handleNoTypeNameInConstructorReference(Token token) {
+    debugEvent("NoTypeNameInConstructorReference");
+    assert(enumDeclaration != null);
+
+    push(ast.simpleIdentifier(enumDeclaration!.name.token));
+  }
+
+  @override
+  void handleNoVariableInitializer(Token token) {
+    debugEvent("NoVariableInitializer");
+  }
+
+  @override
+  void handleOperator(Token operatorToken) {
+    assert(operatorToken.isUserDefinableOperator);
+    debugEvent("Operator");
+
+    push(operatorToken);
+  }
+
+  @override
+  void handleOperatorName(Token operatorKeyword, Token token) {
+    assert(optional('operator', operatorKeyword));
+    assert(token.type.isUserDefinableOperator);
+    debugEvent("OperatorName");
+
+    push(_OperatorName(
+        operatorKeyword, ast.simpleIdentifier(token, isDeclaration: true)));
+  }
+
+  @override
+  void handleParenthesizedCondition(Token leftParenthesis) {
+    // TODO(danrubel): Implement rather than forwarding.
+    handleParenthesizedExpression(leftParenthesis);
+  }
+
+  @override
+  void handleParenthesizedExpression(Token leftParenthesis) {
+    assert(optional('(', leftParenthesis));
+    debugEvent("ParenthesizedExpression");
+
+    var expression = pop() as Expression;
+    push(ast.parenthesizedExpression(
+        leftParenthesis, expression, leftParenthesis.endGroup!));
   }
 
   @override
   void handleQualified(Token period) {
-    SimpleIdentifier identifier = pop();
+    assert(optional('.', period));
+
+    var identifier = pop() as SimpleIdentifier;
     var prefix = pop();
     if (prefix is List) {
       // We're just accumulating components into a list.
@@ -1497,8 +3710,8 @@ class AstBuilder extends ScopeListener {
       push(prefix);
     } else if (prefix is SimpleIdentifier) {
       // TODO(paulberry): resolve [identifier].  Note that BodyBuilder handles
-      // this situation using SendAccessor.
-      push(ast.prefixedIdentifier(prefix, toAnalyzerToken(period), identifier));
+      // this situation using SendAccessGenerator.
+      push(ast.prefixedIdentifier(prefix, period, identifier));
     } else {
       // TODO(paulberry): implement.
       logEvent('Qualified with >1 dot');
@@ -1506,518 +3719,678 @@ class AstBuilder extends ScopeListener {
   }
 
   @override
-  void endPart(Token partKeyword, Token semicolon) {
-    debugEvent("Part");
-    StringLiteral uri = pop();
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.partDirective(comment, metadata, toAnalyzerToken(partKeyword), uri,
-        toAnalyzerToken(semicolon)));
-  }
-
-  @override
-  void endPartOf(Token partKeyword, Token semicolon, bool hasName) {
-    debugEvent("PartOf");
-    List<SimpleIdentifier> libraryName = pop();
-    var name = ast.libraryIdentifier(libraryName);
-    StringLiteral uri = null; // TODO(paulberry)
-    // TODO(paulberry,ahe): seems hacky.  It would be nice if the parser passed
-    // in a reference to the "of" keyword.
-    var ofKeyword = partKeyword.next;
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.partOfDirective(comment, metadata, toAnalyzerToken(partKeyword),
-        toAnalyzerToken(ofKeyword), uri, name, toAnalyzerToken(semicolon)));
-  }
-
-  void endUnnamedFunction(Token beginToken, Token token) {
-    // TODO(paulberry): set up scopes properly to resolve parameters and type
-    // variables.  Note that this is tricky due to the handling of initializers
-    // in constructors, so the logic should be shared with BodyBuilder as much
-    // as possible.
-    debugEvent("UnnamedFunction");
-    FunctionBody body = pop();
-    FormalParameterList parameters = pop();
-    TypeParameterList typeParameters = pop();
-    push(ast.functionExpression(typeParameters, parameters, body));
-  }
-
-  @override
-  void handleNoFieldInitializer(Token token) {
-    debugEvent("NoFieldInitializer");
-    SimpleIdentifier name = pop();
-    push(ast.variableDeclaration(name, null, null));
-  }
-
-  @override
-  void endFactoryMethod(
-      Token beginToken, Token factoryKeyword, Token semicolon) {
-    debugEvent("FactoryMethod");
-
-    FunctionBody body;
-    Token separator;
-    ConstructorName redirectedConstructor;
-    Object bodyObject = pop();
-    if (bodyObject is FunctionBody) {
-      body = bodyObject;
-    } else if (bodyObject is _RedirectingFactoryBody) {
-      separator = bodyObject.equalToken;
-      redirectedConstructor = bodyObject.constructorName;
-      body = ast.emptyFunctionBody(toAnalyzerToken(semicolon));
+  void handleRecoverableError(
+      Message message, Token startToken, Token endToken) {
+    /// TODO(danrubel): Ignore this error until we deprecate `native` support.
+    if (message == messageNativeClauseShouldBeAnnotation && allowNativeClause) {
+      return;
+    }
+    debugEvent("Error: ${message.problemMessage}");
+    if (message.code.analyzerCodes == null && startToken is ErrorToken) {
+      translateErrorToken(startToken, errorReporter.reportScannerError);
     } else {
-      internalError('Unexpected body object: ${bodyObject.runtimeType}');
+      int offset = startToken.offset;
+      int length = endToken.end - offset;
+      addProblem(message, offset, length);
     }
-
-    FormalParameterList parameters = pop();
-    ConstructorName constructorName = pop();
-    _Modifiers modifiers = pop();
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-
-    // Decompose the preliminary ConstructorName into the type name and
-    // the actual constructor name.
-    SimpleIdentifier returnType;
-    analyzer.Token period;
-    SimpleIdentifier name;
-    Identifier typeName = constructorName.type.name;
-    if (typeName is SimpleIdentifier) {
-      returnType = typeName;
-    } else if (typeName is PrefixedIdentifier) {
-      returnType = typeName.prefix;
-      period = typeName.period;
-      name =
-          ast.simpleIdentifier(typeName.identifier.token, isDeclaration: true);
-    }
-
-    push(ast.constructorDeclaration(
-        comment,
-        metadata,
-        toAnalyzerToken(modifiers?.externalKeyword),
-        toAnalyzerToken(modifiers?.finalConstOrVarKeyword),
-        toAnalyzerToken(factoryKeyword),
-        ast.simpleIdentifier(returnType.token),
-        period,
-        name,
-        parameters,
-        toAnalyzerToken(separator),
-        null,
-        redirectedConstructor,
-        body));
-  }
-
-  void endFieldInitializer(Token assignment, Token token) {
-    debugEvent("FieldInitializer");
-    Expression initializer = pop();
-    SimpleIdentifier name = pop();
-    push(ast.variableDeclaration(
-        name, toAnalyzerToken(assignment), initializer));
   }
 
   @override
-  void endFunction(Token getOrSet, Token endToken) {
-    debugEvent("Function");
-    FunctionBody body = pop();
-    pop(); // constructor initializers
-    pop(); // separator before constructor initializers
-    FormalParameterList parameters = pop();
-    TypeParameterList typeParameters = pop();
-    // TODO(scheglov) It is an error if "getOrSet" is not null.
-    push(ast.functionExpression(typeParameters, parameters, body));
-  }
+  void handleRecoverClassHeader() {
+    debugEvent("RecoverClassHeader");
 
-  @override
-  void endFunctionDeclaration(Token token) {
-    debugEvent("FunctionDeclaration");
-    FunctionExpression functionExpression = pop();
-    SimpleIdentifier name = pop();
-    TypeAnnotation returnType = pop();
-    pop(); // modifiers
-    push(ast.functionDeclarationStatement(ast.functionDeclaration(
-        null, null, null, returnType, null, name, functionExpression)));
-  }
-
-  @override
-  void endFunctionName(Token beginToken, Token token) {
-    debugEvent("FunctionName");
-  }
-
-  void endTopLevelFields(int count, Token beginToken, Token endToken) {
-    debugEvent("TopLevelFields");
-    List<VariableDeclaration> variables = popList(count);
-    TypeAnnotation type = pop();
-    _Modifiers modifiers = pop();
-    Token keyword = modifiers?.finalConstOrVarKeyword;
-    var variableList = ast.variableDeclarationList(
-        null, null, toAnalyzerToken(keyword), type, variables);
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.topLevelVariableDeclaration(
-        comment, metadata, variableList, toAnalyzerToken(endToken)));
-  }
-
-  @override
-  void endTypeVariable(Token token, Token extendsOrSuper) {
-    // TODO(paulberry): set up scopes properly to resolve parameters and type
-    // variables.  Note that this is tricky due to the handling of initializers
-    // in constructors, so the logic should be shared with BodyBuilder as much
-    // as possible.
-    debugEvent("TypeVariable");
-    TypeAnnotation bound = pop();
-    SimpleIdentifier name = pop();
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.typeParameter(
-        comment, metadata, name, toAnalyzerToken(extendsOrSuper), bound));
-  }
-
-  @override
-  void endTypeVariables(int count, Token beginToken, Token endToken) {
-    debugEvent("TypeVariables");
-    List<TypeParameter> typeParameters = popList(count);
-    push(ast.typeParameterList(toAnalyzerToken(beginToken), typeParameters,
-        toAnalyzerToken(endToken)));
-  }
-
-  @override
-  void endMethod(Token getOrSet, Token beginToken, Token endToken) {
-    debugEvent("Method");
-    FunctionBody body = pop();
-    ConstructorName redirectedConstructor = null; // TODO(paulberry)
-    List<ConstructorInitializer> initializers = pop() ?? const [];
-    Token separator = pop();
-    FormalParameterList parameters = pop();
-    TypeParameterList typeParameters = pop();
-    var name = pop();
-    TypeAnnotation returnType = pop();
-    _Modifiers modifiers = pop();
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-
-    void constructor(SimpleIdentifier returnType, analyzer.Token period,
-        SimpleIdentifier name) {
-      push(ast.constructorDeclaration(
-          comment,
-          metadata,
-          toAnalyzerToken(modifiers?.externalKeyword),
-          toAnalyzerToken(modifiers?.finalConstOrVarKeyword),
-          null, // TODO(paulberry): factoryKeyword
-          ast.simpleIdentifier(returnType.token),
-          period,
-          name,
-          parameters,
-          toAnalyzerToken(separator),
-          initializers,
-          redirectedConstructor,
-          body));
-    }
-
-    void method(Token operatorKeyword, SimpleIdentifier name) {
-      push(ast.methodDeclaration(
-          comment,
-          metadata,
-          toAnalyzerToken(modifiers?.externalKeyword),
-          toAnalyzerToken(
-              modifiers?.abstractKeyword ?? modifiers?.staticKeyword),
-          returnType,
-          toAnalyzerToken(getOrSet),
-          toAnalyzerToken(operatorKeyword),
-          name,
-          typeParameters,
-          parameters,
-          body));
-    }
-
-    if (name is SimpleIdentifier) {
-      if (name.name == className) {
-        constructor(name, null, null);
-      } else {
-        method(null, name);
+    var implementsClause = pop(NullValue.IdentifierList) as ImplementsClause?;
+    var withClause = pop(NullValue.WithClause) as WithClause?;
+    var extendsClause = pop(NullValue.ExtendsClause) as ExtendsClause?;
+    var declaration = declarations.last as ClassDeclarationImpl;
+    if (extendsClause != null) {
+      if (declaration.extendsClause?.superclass2 == null) {
+        declaration.extendsClause = extendsClause;
       }
-    } else if (name is _OperatorName) {
-      method(name.operatorKeyword, name.name);
-    } else if (name is PrefixedIdentifier) {
-      constructor(name.prefix, name.period, name.identifier);
-    } else {
-      throw new UnimplementedError();
+    }
+    if (withClause != null) {
+      if (declaration.withClause == null) {
+        declaration.withClause = withClause;
+      } else {
+        declaration.withClause!.mixinTypes2.addAll(withClause.mixinTypes2);
+      }
+    }
+    if (implementsClause != null) {
+      if (declaration.implementsClause == null) {
+        declaration.implementsClause = implementsClause;
+      } else {
+        declaration.implementsClause!.interfaces2
+            .addAll(implementsClause.interfaces2);
+      }
     }
   }
 
   @override
-  void endMember() {
-    debugEvent("Member");
+  void handleRecoverImport(Token? semicolon) {
+    assert(optionalOrNull(';', semicolon));
+    debugEvent("RecoverImport");
+
+    var combinators = pop() as List<Combinator>?;
+    var deferredKeyword = pop(NullValue.Deferred) as Token?;
+    var asKeyword = pop(NullValue.As) as Token?;
+    var prefix = pop(NullValue.Prefix) as SimpleIdentifier?;
+    var configurations = pop() as List<Configuration>?;
+
+    var directive = directives.last as ImportDirectiveImpl;
+    if (combinators != null) {
+      directive.combinators.addAll(combinators);
+    }
+    directive.deferredKeyword ??= deferredKeyword;
+    if (directive.asKeyword == null && asKeyword != null) {
+      directive.asKeyword = asKeyword;
+      directive.prefix = prefix;
+    }
+    if (configurations != null) {
+      directive.configurations.addAll(configurations);
+    }
+    if (semicolon != null) {
+      directive.semicolon = semicolon;
+    }
   }
 
   @override
-  void handleVoidKeyword(Token token) {
+  void handleRecoverMixinHeader() {
+    var implementsClause = pop(NullValue.IdentifierList) as ImplementsClause?;
+    var onClause = pop(NullValue.IdentifierList) as OnClause?;
+
+    if (onClause != null) {
+      if (mixinDeclaration!.onClause == null) {
+        mixinDeclaration!.onClause = onClause;
+      } else {
+        mixinDeclaration!.onClause!.superclassConstraints2
+            .addAll(onClause.superclassConstraints2);
+      }
+    }
+    if (implementsClause != null) {
+      if (mixinDeclaration!.implementsClause == null) {
+        mixinDeclaration!.implementsClause = implementsClause;
+      } else {
+        mixinDeclaration!.implementsClause!.interfaces2
+            .addAll(implementsClause.interfaces2);
+      }
+    }
+  }
+
+  @override
+  void handleScript(Token token) {
+    assert(identical(token.type, TokenType.SCRIPT_TAG));
+    debugEvent("Script");
+
+    scriptTag = ast.scriptTag(token);
+  }
+
+  @override
+  void handleSend(Token beginToken, Token endToken) {
+    debugEvent("Send");
+
+    var arguments = pop() as MethodInvocationImpl?;
+    var typeArguments = pop() as TypeArgumentListImpl?;
+    if (arguments != null) {
+      doInvocation(typeArguments, arguments);
+    } else {
+      doPropertyGet();
+    }
+  }
+
+  @override
+  void handleShowHideIdentifier(Token? modifier, Token identifier) {
+    debugEvent("handleShowHideIdentifier");
+
+    assert(modifier == null ||
+        modifier.stringValue! == "get" ||
+        modifier.stringValue! == "set" ||
+        modifier.stringValue! == "operator");
+
+    SimpleIdentifier name = ast.simpleIdentifier(identifier);
+    ShowHideElement element =
+        ast.showHideElement(modifier: modifier, name: name);
+
+    push(element);
+  }
+
+  @override
+  void handleSpreadExpression(Token spreadToken) {
+    var expression = pop() as Expression;
+    if (enableSpreadCollections) {
+      push(ast.spreadElement(
+          spreadOperator: spreadToken, expression: expression));
+    } else {
+      var feature = Feature.spread_collections;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(feature.releaseVersion!),
+        ),
+        spreadToken,
+        spreadToken,
+      );
+      push(_invalidCollectionElement);
+    }
+  }
+
+  @override
+  void handleStringJuxtaposition(Token startToken, int literalCount) {
+    debugEvent("StringJuxtaposition");
+
+    var strings = popTypedList2<StringLiteral>(literalCount);
+    push(ast.adjacentStrings(strings));
+  }
+
+  @override
+  void handleStringPart(Token literalString) {
+    assert(identical(literalString.kind, STRING_TOKEN));
+    debugEvent("StringPart");
+
+    push(literalString);
+  }
+
+  @override
+  void handleSuperExpression(Token superKeyword, IdentifierContext context) {
+    assert(optional('super', superKeyword));
+    debugEvent("SuperExpression");
+
+    push(ast.superExpression(superKeyword));
+  }
+
+  @override
+  void handleSymbolVoid(Token voidKeyword) {
+    assert(optional('void', voidKeyword));
+    debugEvent("SymbolVoid");
+
+    push(voidKeyword);
+  }
+
+  @override
+  void handleThisExpression(Token thisKeyword, IdentifierContext context) {
+    assert(optional('this', thisKeyword));
+    debugEvent("ThisExpression");
+
+    push(ast.thisExpression(thisKeyword));
+  }
+
+  @override
+  void handleThrowExpression(Token throwToken, Token endToken) {
+    assert(optional('throw', throwToken));
+    debugEvent("ThrowExpression");
+
+    push(ast.throwExpression(throwToken, pop() as Expression));
+  }
+
+  @override
+  void handleType(Token beginToken, Token? questionMark) {
+    debugEvent("Type");
+    if (!enableNonNullable) {
+      reportErrorIfNullableType(questionMark);
+    }
+
+    var arguments = pop() as TypeArgumentList?;
+    var name = pop() as Identifier;
+    push(
+      ast.namedType(
+        name: name,
+        typeArguments: arguments,
+        question: questionMark,
+      ),
+    );
+  }
+
+  @override
+  void handleTypeArgumentApplication(Token openAngleBracket) {
+    var typeArguments = pop() as TypeArgumentList;
+    var receiver = pop() as Expression;
+    if (!enableConstructorTearoffs) {
+      var feature = ExperimentalFeatures.constructor_tearoffs;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(ExperimentStatus.currentVersion),
+        ),
+        typeArguments.leftBracket,
+        typeArguments.rightBracket,
+      );
+    }
+    push(ast.functionReference(
+        function: receiver, typeArguments: typeArguments));
+  }
+
+  @override
+  void handleTypeVariablesDefined(Token token, int count) {
+    debugEvent("handleTypeVariablesDefined");
+    assert(count > 0);
+    push(popTypedList<TypeParameter>(count));
+  }
+
+  @override
+  void handleUnaryPostfixAssignmentExpression(Token operator) {
+    assert(operator.type.isUnaryPostfixOperator);
+    debugEvent("UnaryPostfixAssignmentExpression");
+
+    var expression = pop() as Expression;
+    if (!expression.isAssignable) {
+      // This error is also reported by the body builder.
+      handleRecoverableError(
+          messageIllegalAssignmentToNonAssignable, operator, operator);
+    }
+    push(ast.postfixExpression(expression, operator));
+  }
+
+  @override
+  void handleUnaryPrefixAssignmentExpression(Token operator) {
+    assert(operator.type.isUnaryPrefixOperator);
+    debugEvent("UnaryPrefixAssignmentExpression");
+
+    var expression = pop() as Expression;
+    if (!expression.isAssignable) {
+      // This error is also reported by the body builder.
+      handleRecoverableError(messageMissingAssignableSelector,
+          expression.endToken, expression.endToken);
+    }
+    push(ast.prefixExpression(operator, expression));
+  }
+
+  @override
+  void handleUnaryPrefixExpression(Token operator) {
+    assert(operator.type.isUnaryPrefixOperator);
+    debugEvent("UnaryPrefixExpression");
+
+    push(ast.prefixExpression(operator, pop() as Expression));
+  }
+
+  @override
+  void handleValuedFormalParameter(Token equals, Token token) {
+    assert(optional('=', equals) || optional(':', equals));
+    debugEvent("ValuedFormalParameter");
+
+    var value = pop() as Expression;
+    push(_ParameterDefaultValue(equals, value));
+  }
+
+  @override
+  void handleVoidKeyword(Token voidKeyword) {
+    assert(optional('void', voidKeyword));
     debugEvent("VoidKeyword");
+
     // TODO(paulberry): is this sufficient, or do we need to hook the "void"
     // keyword up to an element?
-    handleIdentifier(token, IdentifierContext.typeReference);
-    handleNoTypeArguments(token);
-    handleType(token, token);
+    handleIdentifier(voidKeyword, IdentifierContext.typeReference);
+    handleNoTypeArguments(voidKeyword);
+    handleType(voidKeyword, null);
   }
 
   @override
-  void endFunctionTypeAlias(
-      Token typedefKeyword, Token equals, Token endToken) {
-    debugEvent("FunctionTypeAlias");
-    if (equals == null) {
-      FormalParameterList parameters = pop();
-      TypeParameterList typeParameters = pop();
-      SimpleIdentifier name = pop();
-      TypeAnnotation returnType = pop();
-      List<Annotation> metadata = pop();
-      Comment comment = pop();
-      push(ast.functionTypeAlias(
-          comment,
-          metadata,
-          toAnalyzerToken(typedefKeyword),
-          returnType,
-          name,
-          typeParameters,
-          parameters,
-          toAnalyzerToken(endToken)));
-    } else {
-      TypeAnnotation type = pop();
-      TypeParameterList templateParameters = pop();
-      SimpleIdentifier name = pop();
-      List<Annotation> metadata = pop();
-      Comment comment = pop();
-      if (type is! GenericFunctionType) {
-        // TODO(paulberry) Generate an error and recover (better than
-        // this).
-        type = null;
+  void handleVoidKeywordWithTypeArguments(Token voidKeyword) {
+    assert(optional('void', voidKeyword));
+    debugEvent("VoidKeywordWithTypeArguments");
+    var arguments = pop() as TypeArgumentList;
+
+    // TODO(paulberry): is this sufficient, or do we need to hook the "void"
+    // keyword up to an element?
+    handleIdentifier(voidKeyword, IdentifierContext.typeReference);
+    push(arguments);
+    handleType(voidKeyword, null);
+  }
+
+  @override
+  Never internalProblem(Message message, int charOffset, Uri uri) {
+    throw UnsupportedError(message.problemMessage);
+  }
+
+  /// Return `true` if [token] is either `null` or is the symbol or keyword
+  /// [value].
+  bool optionalOrNull(String value, Token? token) {
+    return token == null || identical(value, token.stringValue);
+  }
+
+  List<CommentReference> parseCommentReferences(Token dartdoc) {
+    // Parse dartdoc into potential comment reference source/offset pairs
+    int count = parser.parseCommentReferences(dartdoc);
+    List sourcesAndOffsets = List.filled(count * 2, null);
+    popList(count * 2, sourcesAndOffsets);
+
+    // Parse each of the source/offset pairs into actual comment references
+    count = 0;
+    int index = 0;
+    while (index < sourcesAndOffsets.length) {
+      String referenceSource = sourcesAndOffsets[index++];
+      int referenceOffset = sourcesAndOffsets[index++];
+      ScannerResult result = scanString(referenceSource);
+      if (!result.hasErrors) {
+        Token token = result.tokens;
+        if (parser.parseOneCommentReference(token, referenceOffset)) {
+          ++count;
+        }
       }
-      push(ast.genericTypeAlias(
-          comment,
-          metadata,
-          toAnalyzerToken(typedefKeyword),
-          name,
-          templateParameters,
-          toAnalyzerToken(equals),
-          type,
-          toAnalyzerToken(endToken)));
     }
+
+    return popTypedList<CommentReference>(count) ?? const [];
   }
 
-  @override
-  void endEnum(Token enumKeyword, Token endBrace, int count) {
-    debugEvent("Enum");
-    List<EnumConstantDeclaration> constants = popList(count);
-    // TODO(paulberry,ahe): the parser should pass in the openBrace token.
-    var openBrace = enumKeyword.next.next as BeginGroupToken;
-    // TODO(paulberry): what if the '}' is missing and the parser has performed
-    // error recovery?
-    Token closeBrace = openBrace.endGroup;
-    SimpleIdentifier name = pop();
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.enumDeclaration(
-        comment,
-        metadata,
-        toAnalyzerToken(enumKeyword),
-        name,
-        toAnalyzerToken(openBrace),
-        constants,
-        toAnalyzerToken(closeBrace)));
+  List<CollectionElement> popCollectionElements(int count) {
+    // TODO(scheglov) Not efficient.
+    final elements = <CollectionElement>[];
+    for (int index = count - 1; index >= 0; --index) {
+      var element = pop();
+      elements.add(element as CollectionElement);
+    }
+    return elements.reversed.toList();
   }
 
-  @override
-  void endTypeArguments(int count, Token beginToken, Token endToken) {
-    debugEvent("TypeArguments");
-    List<TypeAnnotation> arguments = popList(count);
-    push(ast.typeArgumentList(
-        toAnalyzerToken(beginToken), arguments, toAnalyzerToken(endToken)));
+  List? popList(int n, List list) {
+    if (n == 0) return null;
+    return stack.popList(n, list, null);
   }
 
-  @override
-  void endFields(int count, Token beginToken, Token endToken) {
-    debugEvent("Fields");
-    List<VariableDeclaration> variables = popList(count);
-    TypeAnnotation type = pop();
-    _Modifiers modifiers = pop();
-    var variableList = ast.variableDeclarationList(null, null,
-        toAnalyzerToken(modifiers?.finalConstOrVarKeyword), type, variables);
-    Token covariantKeyword = modifiers?.covariantKeyword;
-    List<Annotation> metadata = pop();
-    Comment comment = pop();
-    push(ast.fieldDeclaration2(
-        comment: comment,
-        metadata: metadata,
-        covariantKeyword: toAnalyzerToken(covariantKeyword),
-        staticKeyword: toAnalyzerToken(modifiers?.staticKeyword),
-        fieldList: variableList,
-        semicolon: toAnalyzerToken(endToken)));
+  List<T>? popTypedList<T extends Object>(int count) {
+    if (count == 0) return null;
+    assert(stack.length >= count);
+
+    final tailList = List<T?>.filled(count, null, growable: true);
+    stack.popList(count, tailList, null);
+    return tailList.whereNotNull().toList();
   }
 
-  @override
-  void handleOperatorName(Token operatorKeyword, Token token) {
-    debugEvent("OperatorName");
-    push(new _OperatorName(operatorKeyword,
-        ast.simpleIdentifier(toAnalyzerToken(token), isDeclaration: true)));
+  // List<T?>? popTypedList<T>(int count, [List<T>? list]) {
+  //   if (count == 0) return null;
+  //   assert(stack.length >= count);
+  //
+  //   final tailList = list ?? List<T?>.filled(count, null, growable: true);
+  //   stack.popList(count, tailList, null);
+  //   return tailList;
+  // }
+
+  /// TODO(scheglov) This is probably not optimal.
+  List<T> popTypedList2<T>(int count) {
+    var result = <T>[];
+    for (var i = 0; i < count; i++) {
+      var element = stack.pop(null) as T;
+      result.add(element);
+    }
+    return result.reversed.toList();
   }
 
-  @override
-  void beginMetadataStar(Token token) {
-    debugEvent("beginMetadataStar");
-    if (token.precedingComments != null) {
-      push(_toAnalyzerComment(token.precedingComments));
+  void pushForControlFlowInfo(Token? awaitToken, Token forToken,
+      Token leftParenthesis, ForLoopParts forLoopParts, Object entry) {
+    if (entry == _invalidCollectionElement) {
+      push(_invalidCollectionElement);
+    } else if (enableControlFlowCollections) {
+      push(ast.forElement(
+        awaitKeyword: awaitToken,
+        forKeyword: forToken,
+        leftParenthesis: leftParenthesis,
+        forLoopParts: forLoopParts,
+        rightParenthesis: leftParenthesis.endGroup!,
+        body: entry as CollectionElement,
+      ));
     } else {
-      push(NullValue.Comments);
+      var feature = Feature.control_flow_collections;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(feature.releaseVersion!),
+        ),
+        forToken,
+        forToken,
+      );
+      push(_invalidCollectionElement);
     }
   }
 
-  @override
-  void endMetadata(Token beginToken, Token periodBeforeName, Token endToken) {
-    debugEvent("Metadata");
-    MethodInvocation invocation = pop();
-    SimpleIdentifier constructorName = periodBeforeName != null ? pop() : null;
-    pop(); // Type arguments, not allowed.
-    Identifier name = pop();
-    push(ast.annotation(
-        toAnalyzerToken(beginToken),
-        name,
-        toAnalyzerToken(periodBeforeName),
-        constructorName,
-        invocation?.argumentList));
+  void pushIfControlFlowInfo(
+      Token ifToken,
+      ParenthesizedExpression condition,
+      CollectionElement thenElement,
+      Token? elseToken,
+      CollectionElement? elseElement) {
+    if (thenElement == _invalidCollectionElement ||
+        elseElement == _invalidCollectionElement) {
+      push(_invalidCollectionElement);
+    } else if (enableControlFlowCollections) {
+      push(ast.ifElement(
+        ifKeyword: ifToken,
+        leftParenthesis: condition.leftParenthesis,
+        condition: condition.expression,
+        rightParenthesis: condition.rightParenthesis,
+        thenElement: thenElement,
+        elseKeyword: elseToken,
+        elseElement: elseElement,
+      ));
+    } else {
+      var feature = ExperimentalFeatures.control_flow_collections;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(feature.releaseVersion!),
+        ),
+        ifToken,
+        ifToken,
+      );
+      push(_invalidCollectionElement);
+    }
   }
 
-  ParameterKind _toAnalyzerParameterKind(FormalParameterType type) {
-    if (type == FormalParameterType.POSITIONAL) {
+  void reportErrorIfNullableType(Token? questionMark) {
+    if (questionMark != null) {
+      assert(optional('?', questionMark));
+      var feature = ExperimentalFeatures.non_nullable;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(feature.releaseVersion!),
+        ),
+        questionMark,
+        questionMark,
+      );
+    }
+  }
+
+  void reportErrorIfSuper(Expression expression) {
+    if (expression is SuperExpression) {
+      // This error is also reported by the body builder.
+      handleRecoverableError(messageMissingAssignableSelector,
+          expression.beginToken, expression.endToken);
+    }
+  }
+
+  void reportNonNullableModifierError(Token? modifierToken) {
+    if (modifierToken != null) {
+      var feature = ExperimentalFeatures.non_nullable;
+      handleRecoverableError(
+        templateExperimentNotEnabled.withArguments(
+          feature.enableString,
+          _versionAsString(feature.releaseVersion!),
+        ),
+        modifierToken,
+        modifierToken,
+      );
+    }
+  }
+
+  void reportNonNullAssertExpressionNotEnabled(Token bang) {
+    var feature = ExperimentalFeatures.non_nullable;
+    handleRecoverableError(
+      templateExperimentNotEnabled.withArguments(
+        feature.enableString,
+        _versionAsString(feature.releaseVersion!),
+      ),
+      bang,
+      bang,
+    );
+  }
+
+  Comment? _findComment(List<Annotation>? metadata, Token tokenAfterMetadata) {
+    // Find the dartdoc tokens
+    var dartdoc = parser.findDartDoc(tokenAfterMetadata);
+    if (dartdoc == null) {
+      if (metadata == null) {
+        return null;
+      }
+      int index = metadata.length;
+      while (true) {
+        if (index == 0) {
+          return null;
+        }
+        --index;
+        dartdoc = parser.findDartDoc(metadata[index].beginToken);
+        if (dartdoc != null) {
+          break;
+        }
+      }
+    }
+
+    // Build and return the comment
+    List<CommentReference> references = parseCommentReferences(dartdoc);
+    List<Token> tokens = <Token>[dartdoc];
+    if (dartdoc.lexeme.startsWith('///')) {
+      dartdoc = dartdoc.next;
+      while (dartdoc != null) {
+        if (dartdoc.lexeme.startsWith('///')) {
+          tokens.add(dartdoc);
+        }
+        dartdoc = dartdoc.next;
+      }
+    }
+    return ast.documentationComment(tokens, references);
+  }
+
+  void _handleInstanceCreation(Token? token) {
+    var arguments = pop() as MethodInvocation;
+    ConstructorName constructorName;
+    TypeArgumentList? typeArguments;
+    var object = pop();
+    if (object is _ConstructorNameWithInvalidTypeArgs) {
+      constructorName = object.name;
+      typeArguments = object.invalidTypeArgs;
+    } else {
+      constructorName = object as ConstructorName;
+    }
+    push(ast.instanceCreationExpression(
+        token, constructorName, arguments.argumentList,
+        typeArguments: typeArguments));
+  }
+
+  VariableDeclaration _makeVariableDeclaration(
+      SimpleIdentifier name, Token? equals, Expression? initializer) {
+    return ast.variableDeclaration(name, equals, initializer);
+  }
+
+  ArgumentListImpl _syntheticArgumentList(Token precedingToken) {
+    var syntheticOffset = precedingToken.end;
+    var left = SyntheticToken(TokenType.OPEN_PAREN, syntheticOffset)
+      ..previous = precedingToken;
+    var right = SyntheticToken(TokenType.CLOSE_PAREN, syntheticOffset)
+      ..previous = left;
+    return ast.argumentList(left, [], right);
+  }
+
+  SimpleIdentifier _tmpSimpleIdentifier() {
+    return ast.simpleIdentifier(
+      StringToken(TokenType.STRING, '__tmp', -1),
+    );
+  }
+
+  ParameterKind _toAnalyzerParameterKind(
+      FormalParameterKind type, Token? requiredKeyword) {
+    if (type == FormalParameterKind.optionalPositional) {
       return ParameterKind.POSITIONAL;
-    } else if (type == FormalParameterType.NAMED) {
+    } else if (type == FormalParameterKind.optionalNamed) {
+      if (requiredKeyword != null) {
+        return ParameterKind.NAMED_REQUIRED;
+      }
       return ParameterKind.NAMED;
     } else {
       return ParameterKind.REQUIRED;
     }
   }
 
-  Comment _toAnalyzerComment(analyzer.Token comments) {
-    if (comments == null) return null;
-
-    // This is temporary placeholder code to get tests to pass.
-    // TODO(paulberry): after analyzer and fasta token representations are
-    // unified, refactor the code in analyzer's parser that handles
-    // documentation comments so that it is reusable, and reuse it here.
-    // See Parser.parseCommentAndMetadata
-    var tokens = <analyzer.Token>[toAnalyzerCommentToken(comments)];
-    var references = <CommentReference>[];
-    return ast.documentationComment(tokens, references);
+  static String _versionAsString(Version version) {
+    return '${version.major}.${version.minor}.${version.patch}';
   }
+}
+
+class _ConstructorNameWithInvalidTypeArgs {
+  final ConstructorName name;
+  final TypeArgumentList invalidTypeArgs;
+
+  _ConstructorNameWithInvalidTypeArgs(this.name, this.invalidTypeArgs);
+}
+
+/// When [enableSpreadCollections] and/or [enableControlFlowCollections]
+/// are false, this class is pushed on the stack when a disabled
+/// [CollectionElement] has been parsed.
+class _InvalidCollectionElement implements CollectionElement {
+  // TODO(danrubel): Remove this once control flow and spread collections
+  // have been enabled by default.
+
+  const _InvalidCollectionElement._();
 
   @override
-  void debugEvent(String name) {
-    // printEvent(name);
-  }
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
-  @override
-  Token injectGenericCommentTypeAssign(Token token) {
-    // TODO(paulberry,scheglov,ahe): figure out how to share these generic
-    // comment methods with BodyBuilder.
-    return _injectGenericComment(
-        token, TokenType.GENERIC_METHOD_TYPE_ASSIGN, 3);
-  }
+/// Data structure placed on the stack to represent a non-empty sequence
+/// of modifiers.
+class _Modifiers {
+  Token? abstractKeyword;
+  Token? externalKeyword;
+  Token? finalConstOrVarKeyword;
+  Token? staticKeyword;
+  Token? covariantKeyword;
+  Token? requiredToken;
+  Token? lateToken;
 
-  @override
-  Token injectGenericCommentTypeList(Token token) {
-    return _injectGenericComment(token, TokenType.GENERIC_METHOD_TYPE_LIST, 2);
-  }
-
-  @override
-  Token replaceTokenWithGenericCommentTypeAssign(
-      Token tokenToStartReplacing, Token tokenWithComment) {
-    Token injected = injectGenericCommentTypeAssign(tokenWithComment);
-    if (!identical(injected, tokenWithComment)) {
-      Token prev = tokenToStartReplacing.previous;
-      prev.setNextWithoutSettingPrevious(injected);
-      tokenToStartReplacing = injected;
-      tokenToStartReplacing.previous = prev;
-    }
-    return tokenToStartReplacing;
-  }
-
-  @override
-  void discardTypeReplacedWithCommentTypeAssign() {
-    pop();
-  }
-
-  /// Check if the given [token] has a comment token with the given [type],
-  /// which should be either [TokenType.GENERIC_METHOD_TYPE_ASSIGN] or
-  /// [TokenType.GENERIC_METHOD_TYPE_LIST].  If found, parse the comment
-  /// into tokens and inject into the token stream before the [token].
-  Token _injectGenericComment(Token token, TokenType type, int prefixLen) {
-    if (parseGenericMethodComments) {
-      CommentToken t = token.precedingComments;
-      for (; t != null; t = t.next) {
-        if (t.type == type) {
-          String code = t.lexeme.substring(prefixLen, t.lexeme.length - 2);
-          Token tokens = _scanGenericMethodComment(code, t.offset + prefixLen);
-          if (tokens != null) {
-            // Remove the token from the comment stream.
-            t.remove();
-            // Insert the tokens into the stream.
-            _injectTokenList(token, tokens);
-            return tokens;
-          }
+  /// Return the token that is lexically first.
+  Token? get beginToken {
+    Token? firstToken;
+    for (Token? token in [
+      abstractKeyword,
+      externalKeyword,
+      finalConstOrVarKeyword,
+      staticKeyword,
+      covariantKeyword,
+      requiredToken,
+      lateToken,
+    ]) {
+      if (firstToken == null) {
+        firstToken = token;
+      } else if (token != null) {
+        if (token.offset < firstToken.offset) {
+          firstToken = token;
         }
       }
     }
-    return token;
-  }
-
-  void _injectTokenList(Token beforeToken, Token firstToken) {
-    // Scanner creates a cyclic EOF token.
-    Token lastToken = firstToken;
-    while (lastToken.next.type != TokenType.EOF) {
-      lastToken = lastToken.next;
-    }
-    // Inject these new tokens into the stream.
-    Token previous = beforeToken.previous;
-    lastToken.setNext(beforeToken);
-    previous.setNext(firstToken);
-    beforeToken = firstToken;
-  }
-
-  /// Scans the given [code], and returns the tokens, otherwise returns `null`.
-  Token _scanGenericMethodComment(String code, int offset) {
-    var scanner = new SubStringScanner(offset, code);
-    Token firstToken = scanner.tokenize();
-    if (scanner.hasErrors) {
-      return null;
-    }
     return firstToken;
   }
+
+  /// Return the `const` keyword or `null`.
+  Token? get constKeyword {
+    return identical('const', finalConstOrVarKeyword?.lexeme)
+        ? finalConstOrVarKeyword
+        : null;
+  }
 }
 
-/// Data structure placed on the stack to represent a class body.
-///
-/// This is needed because analyzer has no separate AST representation of a
-/// class body; it simply stores all of the relevant data in the
-/// [ClassDeclaration] object.
-class _ClassBody {
-  final Token beginToken;
+/// Data structure placed on the stack to represent the keyword "operator"
+/// followed by a token.
+class _OperatorName {
+  final Token operatorKeyword;
+  final SimpleIdentifier name;
 
-  final List<ClassMember> members;
-
-  final Token endToken;
-
-  _ClassBody(this.beginToken, this.members, this.endToken);
+  _OperatorName(this.operatorKeyword, this.name);
 }
 
-/// Data structure placed on the stack to represent a mixin application (a
-/// structure of the form "A with B, C").
-///
-/// This is needed because analyzer has no separate AST representation of a
-/// mixin application; it simply stores all of the relevant data in the
-/// [ClassDeclaration] or [ClassTypeAlias] object.
-class _MixinApplication {
-  final TypeName supertype;
+/// Data structure placed on the stack as a container for optional parameters.
+class _OptionalFormalParameters {
+  final List<FormalParameter>? parameters;
+  final Token leftDelimiter;
+  final Token rightDelimiter;
 
-  final Token withKeyword;
-
-  final List<TypeName> mixinTypes;
-
-  _MixinApplication(this.supertype, this.withKeyword, this.mixinTypes);
+  _OptionalFormalParameters(
+      this.parameters, this.leftDelimiter, this.rightDelimiter);
 }
 
 /// Data structure placed on the stack to represent the default parameter
@@ -2031,66 +4404,11 @@ class _ParameterDefaultValue {
 
 /// Data structure placed on stack to represent the redirected constructor.
 class _RedirectingFactoryBody {
-  final Token asyncKeyword;
-  final Token starKeyword;
+  final Token? asyncKeyword;
+  final Token? starKeyword;
   final Token equalToken;
   final ConstructorName constructorName;
 
   _RedirectingFactoryBody(this.asyncKeyword, this.starKeyword, this.equalToken,
       this.constructorName);
-}
-
-/// Data structure placed on the stack as a container for optional parameters.
-class _OptionalFormalParameters {
-  final List<FormalParameter> parameters;
-  final Token leftDelimiter;
-  final Token rightDelimiter;
-
-  _OptionalFormalParameters(
-      this.parameters, this.leftDelimiter, this.rightDelimiter);
-}
-
-/// Data structure placed on the stack to represent the keyword "operator"
-/// followed by a token.
-class _OperatorName {
-  final Token operatorKeyword;
-  final SimpleIdentifier name;
-
-  _OperatorName(this.operatorKeyword, this.name);
-}
-
-/// Data structure placed on the stack to represent a non-empty sequence
-/// of modifiers.
-class _Modifiers {
-  Token abstractKeyword;
-  Token externalKeyword;
-  Token finalConstOrVarKeyword;
-  Token staticKeyword;
-  Token covariantKeyword;
-
-  _Modifiers(List<Token> modifierTokens) {
-    // No need to check the order and uniqueness of the modifiers, or that
-    // disallowed modifiers are not used; the parser should do that.
-    // TODO(paulberry,ahe): implement the necessary logic in the parser.
-    for (var token in modifierTokens) {
-      var s = token.lexeme;
-      if (identical('abstract', s)) {
-        abstractKeyword = token;
-      } else if (identical('const', s)) {
-        finalConstOrVarKeyword = token;
-      } else if (identical('external', s)) {
-        externalKeyword = token;
-      } else if (identical('final', s)) {
-        finalConstOrVarKeyword = token;
-      } else if (identical('static', s)) {
-        staticKeyword = token;
-      } else if (identical('var', s)) {
-        finalConstOrVarKeyword = token;
-      } else if (identical('covariant', s)) {
-        covariantKeyword = token;
-      } else {
-        internalError('Unhandled modifier: $s');
-      }
-    }
-  }
 }

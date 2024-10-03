@@ -6,35 +6,33 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' as M show IsolateRef, UnknownObjectRef;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 
-class UnknownObjectRefElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<UnknownObjectRefElement>('unknown-ref');
-
-  RenderingScheduler<UnknownObjectRefElement> _r;
+class UnknownObjectRefElement extends CustomElement implements Renderable {
+  late RenderingScheduler<UnknownObjectRefElement> _r;
 
   Stream<RenderedEvent<UnknownObjectRefElement>> get onRendered =>
       _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.UnknownObjectRef _obj;
+  late M.IsolateRef _isolate;
+  late M.UnknownObjectRef _obj;
 
   M.IsolateRef get isolate => _isolate;
   M.UnknownObjectRef get obj => _obj;
 
   factory UnknownObjectRefElement(M.IsolateRef isolate, M.UnknownObjectRef obj,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(obj != null);
-    UnknownObjectRefElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    UnknownObjectRefElement e = new UnknownObjectRefElement.created();
+    e._r = new RenderingScheduler<UnknownObjectRefElement>(e, queue: queue);
     e._isolate = isolate;
     e._obj = obj;
     return e;
   }
 
-  UnknownObjectRefElement.created() : super.created();
+  UnknownObjectRefElement.created() : super.created('unknown-ref');
 
   @override
   void attached() {
@@ -46,11 +44,11 @@ class UnknownObjectRefElement extends HtmlElement implements Renderable {
   void detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
   }
 
   void render() {
-    children = [
+    children = <Element>[
       new AnchorElement(href: Uris.inspect(_isolate, object: _obj))
         ..classes = ['emphasize']
         ..text = _obj.vmType

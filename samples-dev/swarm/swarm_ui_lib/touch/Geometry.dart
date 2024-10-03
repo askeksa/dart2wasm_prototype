@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of touch;
 
 /**
@@ -36,7 +38,7 @@ class Coordinate {
     return Math.sqrt(dx * dx + dy * dy);
   }
 
-  bool operator ==(Coordinate other) {
+  bool operator ==(covariant Coordinate other) {
     return other != null && x == other.x && y == other.y;
   }
 
@@ -73,7 +75,7 @@ class Interval {
     return end - start;
   }
 
-  bool operator ==(Interval other) {
+  bool operator ==(covariant Interval other) {
     return other != null && other.start == start && other.end == end;
   }
 

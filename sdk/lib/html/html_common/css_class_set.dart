@@ -4,7 +4,7 @@
 
 part of html_common;
 
-abstract class CssClassSetImpl implements CssClassSet {
+abstract class CssClassSetImpl extends SetBase<String> implements CssClassSet {
   static final RegExp _validTokenRE = new RegExp(r'^\S+$');
 
   String _validateToken(String value) {
@@ -23,7 +23,7 @@ abstract class CssClassSetImpl implements CssClassSet {
    * If [shouldAdd] is true, then we always add that [value] to the element. If
    * [shouldAdd] is false then we always remove [value] from the element.
    */
-  bool toggle(String value, [bool shouldAdd]) {
+  bool toggle(String value, [bool? shouldAdd]) {
     _validateToken(value);
     Set<String> s = readClasses();
     bool result = false;
@@ -89,14 +89,14 @@ abstract class CssClassSetImpl implements CssClassSet {
    * This is the Dart equivalent of jQuery's
    * [hasClass](http://api.jquery.com/hasClass/).
    */
-  bool contains(Object value) {
+  bool contains(Object? value) {
     if (value is! String) return false;
     _validateToken(value);
     return readClasses().contains(value);
   }
 
   /** Lookup from the Set interface. Not interesting for a String set. */
-  String lookup(Object value) => contains(value) ? value : null;
+  String? lookup(Object? value) => contains(value) ? value as String : null;
 
   /**
    * Add the class [value] to element.
@@ -108,7 +108,7 @@ abstract class CssClassSetImpl implements CssClassSet {
     _validateToken(value);
     // TODO - figure out if we need to do any validation here
     // or if the browser natively does enough.
-    return modify((s) => s.add(value));
+    return modify((s) => s.add(value)) ?? false;
   }
 
   /**
@@ -118,9 +118,9 @@ abstract class CssClassSetImpl implements CssClassSet {
    * This is the Dart equivalent of jQuery's
    * [removeClass](http://api.jquery.com/removeClass/).
    */
-  bool remove(Object value) {
-    _validateToken(value);
+  bool remove(Object? value) {
     if (value is! String) return false;
+    _validateToken(value);
     Set<String> s = readClasses();
     bool result = s.remove(value);
     writeClasses(s);
@@ -144,7 +144,7 @@ abstract class CssClassSetImpl implements CssClassSet {
    * This is the Dart equivalent of jQuery's
    * [removeClass](http://api.jquery.com/removeClass/).
    */
-  void removeAll(Iterable<Object> iterable) {
+  void removeAll(Iterable<Object?> iterable) {
     modify((s) => s.removeAll(iterable));
   }
 
@@ -158,11 +158,11 @@ abstract class CssClassSetImpl implements CssClassSet {
    * element. If [shouldAdd] is false then we always remove all the classes in
    * [iterable] from the element.
    */
-  void toggleAll(Iterable<String> iterable, [bool shouldAdd]) {
+  void toggleAll(Iterable<String> iterable, [bool? shouldAdd]) {
     iterable.forEach((e) => toggle(e, shouldAdd));
   }
 
-  void retainAll(Iterable<Object> iterable) {
+  void retainAll(Iterable<Object?> iterable) {
     modify((s) => s.retainAll(iterable));
   }
 
@@ -174,15 +174,15 @@ abstract class CssClassSetImpl implements CssClassSet {
     modify((s) => s.retainWhere(test));
   }
 
-  bool containsAll(Iterable<Object> collection) =>
+  bool containsAll(Iterable<Object?> collection) =>
       readClasses().containsAll(collection);
 
-  Set<String> intersection(Set<Object> other) =>
+  Set<String> intersection(Set<Object?> other) =>
       readClasses().intersection(other);
 
   Set<String> union(Set<String> other) => readClasses().union(other);
 
-  Set<String> difference(Set<Object> other) => readClasses().difference(other);
+  Set<String> difference(Set<Object?> other) => readClasses().difference(other);
 
   String get first => readClasses().first;
   String get last => readClasses().last;
@@ -196,12 +196,12 @@ abstract class CssClassSetImpl implements CssClassSet {
   Iterable<String> skip(int n) => readClasses().skip(n);
   Iterable<String> skipWhile(bool test(String value)) =>
       readClasses().skipWhile(test);
-  String firstWhere(bool test(String value), {String orElse()}) =>
+  String firstWhere(bool test(String value), {String orElse()?}) =>
       readClasses().firstWhere(test, orElse: orElse);
-  String lastWhere(bool test(String value), {String orElse()}) =>
+  String lastWhere(bool test(String value), {String orElse()?}) =>
       readClasses().lastWhere(test, orElse: orElse);
-  String singleWhere(bool test(String value)) =>
-      readClasses().singleWhere(test);
+  String singleWhere(bool test(String value), {String orElse()?}) =>
+      readClasses().singleWhere(test, orElse: orElse);
   String elementAt(int index) => readClasses().elementAt(index);
 
   void clear() {

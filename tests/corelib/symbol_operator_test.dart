@@ -4,7 +4,7 @@
 
 // Test of Symbol class for operators..
 
-var $ = new Symbolize();
+dynamic $ = new Symbolize();
 
 main() {
   testSymbol(#+, $ + $, "+");
@@ -26,16 +26,16 @@ main() {
   testSymbol(#==, new Symbol("=="), "=="); // Can't hit noSuchMethod.
   testSymbol(#[], $[$], "[]");
   testSymbol(#[]=, ($[$] = $).lastMember, "[]=");
-  testSymbol(const Symbol("unary-"), -$, "unary-");
+  testSymbol(Symbol.unaryMinus, -$, "unary-");
 
-  testSymbolThrows(">>>"); // //# 03: ok
-  testSymbolThrows("!"); //   //# 03: continued
-  testSymbolThrows("&&"); //  //# 03: continued
-  testSymbolThrows("||"); //  //# 03: continued
-  testSymbolThrows("?"); //   //# 03: continued
-  testSymbolThrows("?:"); //  //# 03: continued
-  testSymbolThrows("#"); //   //# 03: continued
-  testSymbolThrows("//"); //  //# 03: continued
+  testSymbolNotInstanceOperator(">>>");
+  testSymbolNotInstanceOperator("!");
+  testSymbolNotInstanceOperator("&&");
+  testSymbolNotInstanceOperator("||");
+  testSymbolNotInstanceOperator("?");
+  testSymbolNotInstanceOperator("?:");
+  testSymbolNotInstanceOperator("#");
+  testSymbolNotInstanceOperator("//");
 }
 
 void testSymbol(Symbol constSymbol, var mirrorSymbol, String name) {
@@ -63,19 +63,11 @@ void testSymbol(Symbol constSymbol, var mirrorSymbol, String name) {
   }
 }
 
-void testSymbolThrows(name) {
-  bool fails = false;
-  try {
-    new Symbol(name);
-  } catch (e) {
-    fails = true;
-  }
-  if (!fails) {
-    throw "Didn't throw: $name";
-  }
+void testSymbolNotInstanceOperator(name) {
+  new Symbol(name);
 }
 
 class Symbolize {
-  Symbol lastMember;
+  Symbol? lastMember;
   noSuchMethod(m) => lastMember = m.memberName;
 }

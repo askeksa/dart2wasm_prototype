@@ -9,15 +9,21 @@ import "package:expect/expect.dart";
 
 import "process_test_util.dart";
 
-runEnvironmentProcess(Map environment, name, includeParent, callback) {
+runEnvironmentProcess(
+    Map<String, String> environment, name, includeParent, callback) {
   var dartExecutable = Platform.executable;
   var printEnv = 'tests/standalone/io/print_env.dart';
   if (!new File(printEnv).existsSync()) {
     printEnv = '../$printEnv';
   }
-  Process
-      .run(dartExecutable, [printEnv, name],
-          environment: environment, includeParentEnvironment: includeParent)
+  Process.run(
+          dartExecutable,
+          []
+            ..addAll(Platform.executableArguments)
+            ..add('--verbosity=warning')
+            ..addAll([printEnv, name]),
+          environment: environment,
+          includeParentEnvironment: includeParent)
       .then((result) {
     if (result.exitCode != 0) {
       print('print_env.dart subprocess failed '
@@ -45,7 +51,7 @@ testEnvironment() {
       Expect.isTrue(output.startsWith(env[k]));
       // Add a new variable and check that it becomes an environment
       // variable in the child process.
-      var copy = new Map.from(env);
+      var copy = new Map<String, String>.from(env);
       var name = 'MYENVVAR';
       while (env.containsKey(name)) name = '${name}_';
       copy[name] = 'value';

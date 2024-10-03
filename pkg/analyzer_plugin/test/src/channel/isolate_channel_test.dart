@@ -1,8 +1,7 @@
-// Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2017, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
 import 'dart:isolate';
 
 import 'package:analyzer_plugin/protocol/protocol.dart';
@@ -17,12 +16,12 @@ void main() {
 
 @reflectiveTest
 class PluginIsolateChannelTest {
-  TestSendPort sendPort;
-  PluginIsolateChannel channel;
+  late TestSendPort sendPort;
+  late PluginIsolateChannel channel;
 
   void setUp() {
-    sendPort = new TestSendPort();
-    channel = new PluginIsolateChannel(sendPort);
+    sendPort = TestSendPort();
+    channel = PluginIsolateChannel(sendPort);
   }
 
   void tearDown() {
@@ -37,8 +36,8 @@ class PluginIsolateChannelTest {
   }
 
   @failingTest
-  Future<Null> test_close() async {
-    bool done = false;
+  Future<void> test_close() async {
+    var done = false;
     channel.listen((Request request) {}, onDone: () {
       done = true;
     });
@@ -49,59 +48,50 @@ class PluginIsolateChannelTest {
     expect(done, isTrue);
   }
 
-  Future<Null> test_listen() async {
-    Request sentRequest = new PluginShutdownParams().toRequest('5');
-    Request receivedRequest;
+  Future<void> test_listen() async {
+    var sentRequest = PluginShutdownParams().toRequest('5');
+    Request? receivedRequest;
     channel.listen((Request request) {
       receivedRequest = request;
     });
-    sendPort.receivePort.send(sentRequest.toJson());
+    sendPort.receivePort?.send(sentRequest.toJson());
     await _pumpEventQueue(1);
     expect(receivedRequest, sentRequest);
   }
 
   void test_sendNotification() {
-    Notification notification =
-        new PluginErrorParams(false, '', '').toNotification();
+    var notification = PluginErrorParams(false, '', '').toNotification();
     channel.sendNotification(notification);
     expect(sendPort.sentMessages, hasLength(1));
     expect(sendPort.sentMessages[0], notification.toJson());
   }
 
   void test_sendResponse() {
-    Response response = new PluginShutdownResult().toResponse('3', 1);
+    var response = PluginShutdownResult().toResponse('3', 1);
     channel.sendResponse(response);
     expect(sendPort.sentMessages, hasLength(1));
     expect(sendPort.sentMessages[0], response.toJson());
   }
 
-  /**
-   * Returns a [Future] that completes after pumping the event queue [times]
-   * times. By default, this should pump the event queue enough times to allow
-   * any code to run, as long as it's not waiting on some external event.
-   */
-  Future<Null> _pumpEventQueue([int times = 5000]) {
-    if (times == 0) return new Future.value();
+  /// Returns a [Future] that completes after pumping the event queue [times]
+  /// times. By default, this should pump the event queue enough times to allow
+  /// any code to run, as long as it's not waiting on some external event.
+  Future<void> _pumpEventQueue([int times = 5000]) {
+    if (times == 0) return Future.value();
     // We use a delayed future to allow microtask events to finish. The
     // Future.value or Future() constructors use scheduleMicrotask themselves and
     // would therefore not wait for microtask callbacks that are scheduled after
     // invoking this method.
-    return new Future.delayed(Duration.ZERO, () => _pumpEventQueue(times - 1));
+    return Future.delayed(Duration.zero, () => _pumpEventQueue(times - 1));
   }
 }
 
-/**
- * A send port used in tests.
- */
+/// A send port used in tests.
 class TestSendPort implements SendPort {
-  /**
-   * The receive port used to receive messages from the server.
-   */
-  SendPort receivePort;
+  /// The receive port used to receive messages from the server.
+  SendPort? receivePort;
 
-  /**
-   * The messages sent to the server.
-   */
+  /// The messages sent to the server.
   List<Object> sentMessages = <Object>[];
 
   @override
@@ -113,7 +103,7 @@ class TestSendPort implements SendPort {
         fail('Did not receive a receive port as the first communication.');
       }
     } else {
-      sentMessages.add(message);
+      sentMessages.add(message!);
     }
   }
 }

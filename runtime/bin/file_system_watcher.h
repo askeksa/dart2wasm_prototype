@@ -5,10 +5,6 @@
 #ifndef RUNTIME_BIN_FILE_SYSTEM_WATCHER_H_
 #define RUNTIME_BIN_FILE_SYSTEM_WATCHER_H_
 
-#if defined(DART_IO_DISABLED)
-#error "file_system_watcher.h can only be included on builds with IO enabled"
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +12,7 @@
 
 #include "bin/builtin.h"
 #include "bin/dartutils.h"
+#include "bin/namespace.h"
 
 namespace dart {
 namespace bin {
@@ -27,7 +24,7 @@ class FileSystemWatcher {
     kModifyContent = 1 << 1,
     kDelete = 1 << 2,
     kMove = 1 << 3,
-    kModefyAttribute = 1 << 4,
+    kModifyAttribute = 1 << 4,
     kDeleteSelf = 1 << 5,
     kIsDir = 1 << 6
   };
@@ -43,6 +40,7 @@ class FileSystemWatcher {
   static intptr_t Init();
   static void Close(intptr_t id);
   static intptr_t WatchPath(intptr_t id,
+                            Namespace* namespc,
                             const char* path,
                             int events,
                             bool recursive);
@@ -50,7 +48,15 @@ class FileSystemWatcher {
   static intptr_t GetSocketId(intptr_t id, intptr_t path_id);
   static Dart_Handle ReadEvents(intptr_t id, intptr_t path_id);
 
+  static void set_delayed_filewatch_callback(bool value) {
+    delayed_filewatch_callback_ = value;
+  }
+  static bool delayed_filewatch_callback() {
+    return delayed_filewatch_callback_;
+  }
+
  private:
+  static bool delayed_filewatch_callback_;
   DISALLOW_COPY_AND_ASSIGN(FileSystemWatcher);
 };
 

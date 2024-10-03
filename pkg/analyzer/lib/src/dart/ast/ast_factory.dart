@@ -1,285 +1,350 @@
-// Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2016, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'package:_fe_analyzer_shared/src/scanner/token.dart';
+import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/ast_factory.dart';
+import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:analyzer/src/dart/ast/ast.dart';
 import 'package:analyzer/src/generated/utilities_dart.dart';
-import 'package:front_end/src/scanner/token.dart';
-import 'package:meta/meta.dart';
 
-/**
- * Concrete implementation of [AstFactory] based on the standard AST
- * implementation.
- */
+/// The instance of [AstFactoryImpl].
+final AstFactoryImpl astFactory = AstFactoryImpl();
+
+/// Concrete implementation of [AstFactory] based on the standard AST
+/// implementation.
 class AstFactoryImpl extends AstFactory {
   @override
-  AdjacentStrings adjacentStrings(List<StringLiteral> strings) =>
-      new AdjacentStringsImpl(strings);
+  AdjacentStringsImpl adjacentStrings(List<StringLiteral> strings) =>
+      AdjacentStringsImpl(strings);
 
   @override
-  Annotation annotation(Token atSign, Identifier name, Token period,
-          SimpleIdentifier constructorName, ArgumentList arguments) =>
-      new AnnotationImpl(atSign, name, period, constructorName, arguments);
+  AnnotationImpl annotation(
+          {required Token atSign,
+          required Identifier name,
+          TypeArgumentList? typeArguments,
+          Token? period,
+          SimpleIdentifier? constructorName,
+          ArgumentList? arguments}) =>
+      AnnotationImpl(
+          atSign,
+          name as IdentifierImpl,
+          typeArguments as TypeArgumentListImpl?,
+          period,
+          constructorName as SimpleIdentifierImpl?,
+          arguments as ArgumentListImpl?);
 
   @override
-  ArgumentList argumentList(Token leftParenthesis, List<Expression> arguments,
-          Token rightParenthesis) =>
-      new ArgumentListImpl(leftParenthesis, arguments, rightParenthesis);
+  ArgumentListImpl argumentList(Token leftParenthesis,
+          List<Expression> arguments, Token rightParenthesis) =>
+      ArgumentListImpl(leftParenthesis, arguments, rightParenthesis);
 
   @override
-  AsExpression asExpression(
+  AsExpressionImpl asExpression(
           Expression expression, Token asOperator, TypeAnnotation type) =>
-      new AsExpressionImpl(expression, asOperator, type);
+      AsExpressionImpl(
+          expression as ExpressionImpl, asOperator, type as TypeAnnotationImpl);
 
   @override
-  AssertInitializer assertInitializer(
+  AssertInitializerImpl assertInitializer(
           Token assertKeyword,
           Token leftParenthesis,
           Expression condition,
-          Token comma,
-          Expression message,
+          Token? comma,
+          Expression? message,
           Token rightParenthesis) =>
-      new AssertInitializerImpl(assertKeyword, leftParenthesis, condition,
-          comma, message, rightParenthesis);
+      AssertInitializerImpl(
+          assertKeyword,
+          leftParenthesis,
+          condition as ExpressionImpl,
+          comma,
+          message as ExpressionImpl?,
+          rightParenthesis);
 
   @override
-  AssertStatement assertStatement(
+  AssertStatementImpl assertStatement(
           Token assertKeyword,
           Token leftParenthesis,
           Expression condition,
-          Token comma,
-          Expression message,
+          Token? comma,
+          Expression? message,
           Token rightParenthesis,
           Token semicolon) =>
-      new AssertStatementImpl(assertKeyword, leftParenthesis, condition, comma,
-          message, rightParenthesis, semicolon);
+      AssertStatementImpl(
+          assertKeyword,
+          leftParenthesis,
+          condition as ExpressionImpl,
+          comma,
+          message as ExpressionImpl?,
+          rightParenthesis,
+          semicolon);
 
   @override
-  AssignmentExpression assignmentExpression(
+  AssignmentExpressionImpl assignmentExpression(
           Expression leftHandSide, Token operator, Expression rightHandSide) =>
-      new AssignmentExpressionImpl(leftHandSide, operator, rightHandSide);
+      AssignmentExpressionImpl(leftHandSide as ExpressionImpl, operator,
+          rightHandSide as ExpressionImpl);
 
   @override
-  AwaitExpression awaitExpression(Token awaitKeyword, Expression expression) =>
-      new AwaitExpressionImpl(awaitKeyword, expression);
+  AwaitExpressionImpl awaitExpression(
+          Token awaitKeyword, Expression expression) =>
+      AwaitExpressionImpl(awaitKeyword, expression as ExpressionImpl);
 
   @override
-  BinaryExpression binaryExpression(
+  BinaryExpressionImpl binaryExpression(
           Expression leftOperand, Token operator, Expression rightOperand) =>
-      new BinaryExpressionImpl(leftOperand, operator, rightOperand);
-  @override
-  Block block(
-          Token leftBracket, List<Statement> statements, Token rightBracket) =>
-      new BlockImpl(leftBracket, statements, rightBracket);
+      BinaryExpressionImpl(leftOperand as ExpressionImpl, operator,
+          rightOperand as ExpressionImpl);
 
   @override
-  Comment blockComment(List<Token> tokens) =>
+  BlockImpl block(
+          Token leftBracket, List<Statement> statements, Token rightBracket) =>
+      BlockImpl(leftBracket, statements, rightBracket);
+
+  @override
+  CommentImpl blockComment(List<Token> tokens) =>
       CommentImpl.createBlockComment(tokens);
 
   @override
-  BlockFunctionBody blockFunctionBody(Token keyword, Token star, Block block) =>
-      new BlockFunctionBodyImpl(keyword, star, block);
+  BlockFunctionBodyImpl blockFunctionBody(
+          Token? keyword, Token? star, Block block) =>
+      BlockFunctionBodyImpl(keyword, star, block as BlockImpl);
 
   @override
-  BooleanLiteral booleanLiteral(Token literal, bool value) =>
-      new BooleanLiteralImpl(literal, value);
+  BooleanLiteralImpl booleanLiteral(Token literal, bool value) =>
+      BooleanLiteralImpl(literal, value);
 
   @override
-  BreakStatement breakStatement(
-          Token breakKeyword, SimpleIdentifier label, Token semicolon) =>
-      new BreakStatementImpl(breakKeyword, label, semicolon);
+  BreakStatementImpl breakStatement(
+          Token breakKeyword, SimpleIdentifier? label, Token semicolon) =>
+      BreakStatementImpl(
+          breakKeyword, label as SimpleIdentifierImpl?, semicolon);
 
   @override
-  CascadeExpression cascadeExpression(
+  CascadeExpressionImpl cascadeExpression(
           Expression target, List<Expression> cascadeSections) =>
-      new CascadeExpressionImpl(target, cascadeSections);
+      CascadeExpressionImpl(target as ExpressionImpl, cascadeSections);
 
   @override
-  CatchClause catchClause(
-          Token onKeyword,
-          TypeAnnotation exceptionType,
-          Token catchKeyword,
-          Token leftParenthesis,
-          SimpleIdentifier exceptionParameter,
-          Token comma,
-          SimpleIdentifier stackTraceParameter,
-          Token rightParenthesis,
+  CatchClauseImpl catchClause(
+          Token? onKeyword,
+          TypeAnnotation? exceptionType,
+          Token? catchKeyword,
+          Token? leftParenthesis,
+          SimpleIdentifier? exceptionParameter,
+          Token? comma,
+          SimpleIdentifier? stackTraceParameter,
+          Token? rightParenthesis,
           Block body) =>
-      new CatchClauseImpl(
+      CatchClauseImpl(
           onKeyword,
-          exceptionType,
+          exceptionType as TypeAnnotationImpl?,
           catchKeyword,
           leftParenthesis,
-          exceptionParameter,
+          exceptionParameter as SimpleIdentifierImpl?,
           comma,
-          stackTraceParameter,
+          stackTraceParameter as SimpleIdentifierImpl?,
           rightParenthesis,
-          body);
+          body as BlockImpl);
 
   @override
-  ClassDeclaration classDeclaration(
-          Comment comment,
-          List<Annotation> metadata,
-          Token abstractKeyword,
+  ClassDeclarationImpl classDeclaration(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token? abstractKeyword,
+          Token? macroKeyword,
           Token classKeyword,
           SimpleIdentifier name,
-          TypeParameterList typeParameters,
-          ExtendsClause extendsClause,
-          WithClause withClause,
-          ImplementsClause implementsClause,
+          TypeParameterList? typeParameters,
+          ExtendsClause? extendsClause,
+          WithClause? withClause,
+          ImplementsClause? implementsClause,
           Token leftBracket,
           List<ClassMember> members,
           Token rightBracket) =>
-      new ClassDeclarationImpl(
-          comment,
+      ClassDeclarationImpl(
+          comment as CommentImpl?,
           metadata,
           abstractKeyword,
+          macroKeyword,
           classKeyword,
-          name,
-          typeParameters,
-          extendsClause,
-          withClause,
-          implementsClause,
+          name as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
+          extendsClause as ExtendsClauseImpl?,
+          withClause as WithClauseImpl?,
+          implementsClause as ImplementsClauseImpl?,
           leftBracket,
           members,
           rightBracket);
 
   @override
-  ClassTypeAlias classTypeAlias(
-          Comment comment,
-          List<Annotation> metadata,
+  ClassTypeAliasImpl classTypeAlias(
+          Comment? comment,
+          List<Annotation>? metadata,
           Token keyword,
           SimpleIdentifier name,
-          TypeParameterList typeParameters,
+          TypeParameterList? typeParameters,
           Token equals,
-          Token abstractKeyword,
-          TypeName superclass,
+          Token? abstractKeyword,
+          Token? macroKeyword,
+          NamedType superclass,
           WithClause withClause,
-          ImplementsClause implementsClause,
+          ImplementsClause? implementsClause,
           Token semicolon) =>
-      new ClassTypeAliasImpl(
-          comment,
+      ClassTypeAliasImpl(
+          comment as CommentImpl?,
           metadata,
           keyword,
-          name,
-          typeParameters,
+          name as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
           equals,
           abstractKeyword,
-          superclass,
-          withClause,
-          implementsClause,
+          macroKeyword,
+          superclass as NamedTypeImpl,
+          withClause as WithClauseImpl,
+          implementsClause as ImplementsClauseImpl?,
           semicolon);
 
   @override
-  CommentReference commentReference(Token newKeyword, Identifier identifier) =>
-      new CommentReferenceImpl(newKeyword, identifier);
+  CommentReferenceImpl commentReference(
+          Token? newKeyword, CommentReferableExpression expression) =>
+      CommentReferenceImpl(
+          newKeyword, expression as CommentReferableExpressionImpl);
 
   @override
-  CompilationUnit compilationUnit(
-          Token beginToken,
-          ScriptTag scriptTag,
-          List<Directive> directives,
-          List<CompilationUnitMember> declarations,
-          Token endToken) =>
-      new CompilationUnitImpl(
-          beginToken, scriptTag, directives, declarations, endToken);
+  CompilationUnitImpl compilationUnit(
+          {required Token beginToken,
+          ScriptTag? scriptTag,
+          List<Directive>? directives,
+          List<CompilationUnitMember>? declarations,
+          required Token endToken,
+          required FeatureSet featureSet}) =>
+      CompilationUnitImpl(beginToken, scriptTag as ScriptTagImpl?, directives,
+          declarations, endToken, featureSet);
 
   @override
-  ConditionalExpression conditionalExpression(
+  ConditionalExpressionImpl conditionalExpression(
           Expression condition,
           Token question,
           Expression thenExpression,
           Token colon,
           Expression elseExpression) =>
-      new ConditionalExpressionImpl(
-          condition, question, thenExpression, colon, elseExpression);
+      ConditionalExpressionImpl(
+          condition as ExpressionImpl,
+          question,
+          thenExpression as ExpressionImpl,
+          colon,
+          elseExpression as ExpressionImpl);
 
   @override
-  Configuration configuration(
+  ConfigurationImpl configuration(
           Token ifKeyword,
           Token leftParenthesis,
           DottedName name,
-          Token equalToken,
-          StringLiteral value,
+          Token? equalToken,
+          StringLiteral? value,
           Token rightParenthesis,
           StringLiteral libraryUri) =>
-      new ConfigurationImpl(ifKeyword, leftParenthesis, name, equalToken, value,
-          rightParenthesis, libraryUri);
+      ConfigurationImpl(
+          ifKeyword,
+          leftParenthesis,
+          name as DottedNameImpl,
+          equalToken,
+          value as StringLiteralImpl?,
+          rightParenthesis,
+          libraryUri as StringLiteralImpl);
 
   @override
-  ConstructorDeclaration constructorDeclaration(
-          Comment comment,
-          List<Annotation> metadata,
-          Token externalKeyword,
-          Token constKeyword,
-          Token factoryKeyword,
+  ConstructorDeclarationImpl constructorDeclaration(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token? externalKeyword,
+          Token? constKeyword,
+          Token? factoryKeyword,
           Identifier returnType,
-          Token period,
-          SimpleIdentifier name,
+          Token? period,
+          SimpleIdentifier? name,
           FormalParameterList parameters,
-          Token separator,
-          List<ConstructorInitializer> initializers,
-          ConstructorName redirectedConstructor,
-          FunctionBody body) =>
-      new ConstructorDeclarationImpl(
-          comment,
+          Token? separator,
+          List<ConstructorInitializer>? initializers,
+          ConstructorName? redirectedConstructor,
+          FunctionBody? body) =>
+      ConstructorDeclarationImpl(
+          comment as CommentImpl?,
           metadata,
           externalKeyword,
           constKeyword,
           factoryKeyword,
-          returnType,
+          returnType as IdentifierImpl,
           period,
-          name,
-          parameters,
+          name as SimpleIdentifierImpl?,
+          parameters as FormalParameterListImpl,
           separator,
           initializers,
-          redirectedConstructor,
-          body);
+          redirectedConstructor as ConstructorNameImpl?,
+          body as FunctionBodyImpl);
 
   @override
-  ConstructorFieldInitializer constructorFieldInitializer(
-          Token thisKeyword,
-          Token period,
+  ConstructorFieldInitializerImpl constructorFieldInitializer(
+          Token? thisKeyword,
+          Token? period,
           SimpleIdentifier fieldName,
           Token equals,
           Expression expression) =>
-      new ConstructorFieldInitializerImpl(
-          thisKeyword, period, fieldName, equals, expression);
+      ConstructorFieldInitializerImpl(
+          thisKeyword,
+          period,
+          fieldName as SimpleIdentifierImpl,
+          equals,
+          expression as ExpressionImpl);
 
   @override
-  ConstructorName constructorName(
-          TypeName type, Token period, SimpleIdentifier name) =>
-      new ConstructorNameImpl(type, period, name);
+  ConstructorNameImpl constructorName(
+          NamedType type, Token? period, SimpleIdentifier? name) =>
+      ConstructorNameImpl(
+          type as NamedTypeImpl, period, name as SimpleIdentifierImpl?);
 
   @override
-  ContinueStatement continueStatement(
-          Token continueKeyword, SimpleIdentifier label, Token semicolon) =>
-      new ContinueStatementImpl(continueKeyword, label, semicolon);
+  ConstructorReferenceImpl constructorReference(
+          {required ConstructorName constructorName}) =>
+      ConstructorReferenceImpl(constructorName as ConstructorNameImpl);
 
   @override
-  DeclaredIdentifier declaredIdentifier(
-          Comment comment,
-          List<Annotation> metadata,
-          Token keyword,
-          TypeAnnotation type,
+  ContinueStatementImpl continueStatement(
+          Token continueKeyword, SimpleIdentifier? label, Token semicolon) =>
+      ContinueStatementImpl(
+          continueKeyword, label as SimpleIdentifierImpl?, semicolon);
+
+  @override
+  DeclaredIdentifierImpl declaredIdentifier(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token? keyword,
+          TypeAnnotation? type,
           SimpleIdentifier identifier) =>
-      new DeclaredIdentifierImpl(comment, metadata, keyword, type, identifier);
+      DeclaredIdentifierImpl(comment as CommentImpl?, metadata, keyword,
+          type as TypeAnnotationImpl?, identifier as SimpleIdentifierImpl);
 
   @override
-  DefaultFormalParameter defaultFormalParameter(NormalFormalParameter parameter,
-          ParameterKind kind, Token separator, Expression defaultValue) =>
-      new DefaultFormalParameterImpl(parameter, kind, separator, defaultValue);
+  DefaultFormalParameterImpl defaultFormalParameter(
+          NormalFormalParameter parameter,
+          ParameterKind kind,
+          Token? separator,
+          Expression? defaultValue) =>
+      DefaultFormalParameterImpl(parameter as NormalFormalParameterImpl, kind,
+          separator, defaultValue as ExpressionImpl?);
 
   @override
-  Comment documentationComment(List<Token> tokens,
-          [List<CommentReference> references]) =>
+  CommentImpl documentationComment(List<Token> tokens,
+          [List<CommentReference>? references]) =>
       CommentImpl.createDocumentationCommentWithReferences(
           tokens, references ?? <CommentReference>[]);
 
   @override
-  DoStatement doStatement(
+  DoStatementImpl doStatement(
           Token doKeyword,
           Statement body,
           Token whileKeyword,
@@ -287,591 +352,930 @@ class AstFactoryImpl extends AstFactory {
           Expression condition,
           Token rightParenthesis,
           Token semicolon) =>
-      new DoStatementImpl(doKeyword, body, whileKeyword, leftParenthesis,
-          condition, rightParenthesis, semicolon);
+      DoStatementImpl(
+          doKeyword,
+          body as StatementImpl,
+          whileKeyword,
+          leftParenthesis,
+          condition as ExpressionImpl,
+          rightParenthesis,
+          semicolon);
 
   @override
-  DottedName dottedName(List<SimpleIdentifier> components) =>
-      new DottedNameImpl(components);
+  DottedNameImpl dottedName(List<SimpleIdentifier> components) =>
+      DottedNameImpl(components);
 
   @override
-  DoubleLiteral doubleLiteral(Token literal, double value) =>
-      new DoubleLiteralImpl(literal, value);
+  DoubleLiteralImpl doubleLiteral(Token literal, double value) =>
+      DoubleLiteralImpl(literal, value);
 
   @override
-  EmptyFunctionBody emptyFunctionBody(Token semicolon) =>
-      new EmptyFunctionBodyImpl(semicolon);
+  EmptyFunctionBodyImpl emptyFunctionBody(Token semicolon) =>
+      EmptyFunctionBodyImpl(semicolon);
 
   @override
-  EmptyStatement emptyStatement(Token semicolon) =>
-      new EmptyStatementImpl(semicolon);
+  EmptyStatementImpl emptyStatement(Token semicolon) =>
+      EmptyStatementImpl(semicolon);
 
   @override
-  Comment endOfLineComment(List<Token> tokens) =>
+  CommentImpl endOfLineComment(List<Token> tokens) =>
       CommentImpl.createEndOfLineComment(tokens);
 
   @override
-  EnumConstantDeclaration enumConstantDeclaration(
-          Comment comment, List<Annotation> metadata, SimpleIdentifier name) =>
-      new EnumConstantDeclarationImpl(comment, metadata, name);
+  EnumConstantDeclarationImpl enumConstantDeclaration(Comment? comment,
+          List<Annotation>? metadata, SimpleIdentifier name) =>
+      EnumConstantDeclarationImpl(
+        documentationComment: comment as CommentImpl?,
+        metadata: metadata,
+        name: name as SimpleIdentifierImpl,
+        arguments: null,
+      );
 
+  @Deprecated('Use enumDeclaration2() instead')
   @override
-  EnumDeclaration enumDeclaration(
-          Comment comment,
-          List<Annotation> metadata,
+  EnumDeclarationImpl enumDeclaration(
+          Comment? comment,
+          List<Annotation>? metadata,
           Token enumKeyword,
           SimpleIdentifier name,
           Token leftBracket,
           List<EnumConstantDeclaration> constants,
           Token rightBracket) =>
-      new EnumDeclarationImpl(comment, metadata, enumKeyword, name, leftBracket,
-          constants, rightBracket);
+      enumDeclaration2(
+          comment: comment,
+          metadata: metadata,
+          enumKeyword: enumKeyword,
+          name: name,
+          typeParameters: null,
+          withClause: null,
+          implementsClause: null,
+          leftBracket: leftBracket,
+          constants: constants,
+          semicolon: null,
+          members: [],
+          rightBracket: rightBracket);
 
   @override
-  ExportDirective exportDirective(
-          Comment comment,
-          List<Annotation> metadata,
+  EnumDeclarationImpl enumDeclaration2({
+    required Comment? comment,
+    required List<Annotation>? metadata,
+    required Token enumKeyword,
+    required SimpleIdentifier name,
+    required TypeParameterList? typeParameters,
+    required WithClause? withClause,
+    required ImplementsClause? implementsClause,
+    required Token leftBracket,
+    required List<EnumConstantDeclaration> constants,
+    required List<ClassMember> members,
+    required Token? semicolon,
+    required Token rightBracket,
+  }) {
+    return EnumDeclarationImpl(
+      comment as CommentImpl?,
+      metadata,
+      enumKeyword,
+      name as SimpleIdentifierImpl,
+      typeParameters as TypeParameterListImpl?,
+      withClause as WithClauseImpl?,
+      implementsClause as ImplementsClauseImpl?,
+      leftBracket,
+      constants,
+      semicolon,
+      members,
+      rightBracket,
+    );
+  }
+
+  @override
+  ExportDirectiveImpl exportDirective(
+          Comment? comment,
+          List<Annotation>? metadata,
           Token keyword,
           StringLiteral libraryUri,
-          List<Configuration> configurations,
-          List<Combinator> combinators,
+          List<Configuration>? configurations,
+          List<Combinator>? combinators,
           Token semicolon) =>
-      new ExportDirectiveImpl(comment, metadata, keyword, libraryUri,
-          configurations, combinators, semicolon);
-  @override
-  ExpressionFunctionBody expressionFunctionBody(Token keyword,
-          Token functionDefinition, Expression expression, Token semicolon) =>
-      new ExpressionFunctionBodyImpl(
-          keyword, functionDefinition, expression, semicolon);
+      ExportDirectiveImpl(
+          comment as CommentImpl?,
+          metadata,
+          keyword,
+          libraryUri as StringLiteralImpl,
+          configurations,
+          combinators,
+          semicolon);
 
   @override
-  ExpressionStatement expressionStatement(
-          Expression expression, Token semicolon) =>
-      new ExpressionStatementImpl(expression, semicolon);
+  ExpressionFunctionBodyImpl expressionFunctionBody(Token? keyword,
+          Token functionDefinition, Expression expression, Token? semicolon) =>
+      ExpressionFunctionBodyImpl(keyword, null, functionDefinition,
+          expression as ExpressionImpl, semicolon);
 
   @override
-  ExtendsClause extendsClause(Token extendsKeyword, TypeName superclass) =>
-      new ExtendsClauseImpl(extendsKeyword, superclass);
+  ExpressionFunctionBodyImpl expressionFunctionBody2({
+    Token? keyword,
+    Token? star,
+    required Token functionDefinition,
+    required Expression expression,
+    Token? semicolon,
+  }) =>
+      ExpressionFunctionBodyImpl(keyword, star, functionDefinition,
+          expression as ExpressionImpl, semicolon);
 
   @override
-  FieldDeclaration fieldDeclaration(
-          Comment comment,
-          List<Annotation> metadata,
-          Token staticKeyword,
-          VariableDeclarationList fieldList,
-          Token semicolon) =>
-      new FieldDeclarationImpl(
-          comment, metadata, null, staticKeyword, fieldList, semicolon);
+  ExpressionStatementImpl expressionStatement(
+          Expression expression, Token? semicolon) =>
+      ExpressionStatementImpl(expression as ExpressionImpl, semicolon);
 
   @override
-  FieldDeclaration fieldDeclaration2(
-          {Comment comment,
-          List<Annotation> metadata,
-          Token covariantKeyword,
-          Token staticKeyword,
-          @required VariableDeclarationList fieldList,
-          @required Token semicolon}) =>
-      new FieldDeclarationImpl(comment, metadata, covariantKeyword,
-          staticKeyword, fieldList, semicolon);
+  ExtendsClauseImpl extendsClause(Token extendsKeyword, NamedType superclass) =>
+      ExtendsClauseImpl(extendsKeyword, superclass as NamedTypeImpl);
 
   @override
-  FieldFormalParameter fieldFormalParameter(
-          Comment comment,
-          List<Annotation> metadata,
-          Token keyword,
-          TypeAnnotation type,
-          Token thisKeyword,
-          Token period,
-          SimpleIdentifier identifier,
-          TypeParameterList typeParameters,
-          FormalParameterList parameters) =>
-      new FieldFormalParameterImpl(comment, metadata, null, keyword, type,
-          thisKeyword, period, identifier, typeParameters, parameters);
+  ExtensionDeclarationImpl extensionDeclaration(
+          {Comment? comment,
+          List<Annotation>? metadata,
+          required Token extensionKeyword,
+          Token? typeKeyword,
+          SimpleIdentifier? name,
+          TypeParameterList? typeParameters,
+          required Token onKeyword,
+          required TypeAnnotation extendedType,
+          ShowClause? showClause,
+          HideClause? hideClause,
+          required Token leftBracket,
+          required List<ClassMember> members,
+          required Token rightBracket}) =>
+      ExtensionDeclarationImpl(
+          comment as CommentImpl?,
+          metadata,
+          extensionKeyword,
+          typeKeyword,
+          name as SimpleIdentifierImpl?,
+          typeParameters as TypeParameterListImpl?,
+          onKeyword,
+          extendedType as TypeAnnotationImpl,
+          showClause as ShowClauseImpl?,
+          hideClause as HideClauseImpl?,
+          leftBracket,
+          members,
+          rightBracket);
 
   @override
-  FieldFormalParameter fieldFormalParameter2(
-          {Comment comment,
-          List<Annotation> metadata,
-          Token covariantKeyword,
-          Token keyword,
-          TypeAnnotation type,
-          @required Token thisKeyword,
-          @required Token period,
-          @required SimpleIdentifier identifier,
-          TypeParameterList typeParameters,
-          FormalParameterList parameters}) =>
-      new FieldFormalParameterImpl(comment, metadata, covariantKeyword, keyword,
-          type, thisKeyword, period, identifier, typeParameters, parameters);
+  ExtensionOverrideImpl extensionOverride(
+          {required Identifier extensionName,
+          TypeArgumentList? typeArguments,
+          required ArgumentList argumentList}) =>
+      ExtensionOverrideImpl(
+          extensionName as IdentifierImpl,
+          typeArguments as TypeArgumentListImpl?,
+          argumentList as ArgumentListImpl);
 
   @override
-  ForEachStatement forEachStatementWithDeclaration(
-          Token awaitKeyword,
-          Token forKeyword,
-          Token leftParenthesis,
-          DeclaredIdentifier loopVariable,
-          Token inKeyword,
-          Expression iterator,
-          Token rightParenthesis,
-          Statement body) =>
-      new ForEachStatementImpl.withDeclaration(
+  FieldDeclarationImpl fieldDeclaration2(
+          {Comment? comment,
+          List<Annotation>? metadata,
+          Token? abstractKeyword,
+          Token? covariantKeyword,
+          Token? externalKeyword,
+          Token? staticKeyword,
+          required VariableDeclarationList fieldList,
+          required Token semicolon}) =>
+      FieldDeclarationImpl(
+          comment as CommentImpl?,
+          metadata,
+          abstractKeyword,
+          covariantKeyword,
+          externalKeyword,
+          staticKeyword,
+          fieldList as VariableDeclarationListImpl,
+          semicolon);
+
+  @override
+  FieldFormalParameterImpl fieldFormalParameter2(
+          {Comment? comment,
+          List<Annotation>? metadata,
+          Token? covariantKeyword,
+          Token? requiredKeyword,
+          Token? keyword,
+          TypeAnnotation? type,
+          required Token thisKeyword,
+          required Token period,
+          required SimpleIdentifier identifier,
+          TypeParameterList? typeParameters,
+          FormalParameterList? parameters,
+          Token? question}) =>
+      FieldFormalParameterImpl(
+          comment as CommentImpl?,
+          metadata,
+          covariantKeyword,
+          requiredKeyword,
+          keyword,
+          type as TypeAnnotationImpl?,
+          thisKeyword,
+          period,
+          identifier as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
+          parameters as FormalParameterListImpl?,
+          question);
+
+  @override
+  ForEachPartsWithDeclarationImpl forEachPartsWithDeclaration(
+          {required DeclaredIdentifier loopVariable,
+          required Token inKeyword,
+          required Expression iterable}) =>
+      ForEachPartsWithDeclarationImpl(loopVariable as DeclaredIdentifierImpl,
+          inKeyword, iterable as ExpressionImpl);
+
+  @override
+  ForEachPartsWithIdentifierImpl forEachPartsWithIdentifier(
+          {required SimpleIdentifier identifier,
+          required Token inKeyword,
+          required Expression iterable}) =>
+      ForEachPartsWithIdentifierImpl(identifier as SimpleIdentifierImpl,
+          inKeyword, iterable as ExpressionImpl);
+
+  @override
+  ForElementImpl forElement(
+          {Token? awaitKeyword,
+          required Token forKeyword,
+          required Token leftParenthesis,
+          required ForLoopParts forLoopParts,
+          required Token rightParenthesis,
+          required CollectionElement body}) =>
+      ForElementImpl(
           awaitKeyword,
           forKeyword,
           leftParenthesis,
-          loopVariable,
-          inKeyword,
-          iterator,
+          forLoopParts as ForLoopPartsImpl,
           rightParenthesis,
-          body);
+          body as CollectionElementImpl);
 
   @override
-  ForEachStatement forEachStatementWithReference(
-          Token awaitKeyword,
-          Token forKeyword,
-          Token leftParenthesis,
-          SimpleIdentifier identifier,
-          Token inKeyword,
-          Expression iterator,
-          Token rightParenthesis,
-          Statement body) =>
-      new ForEachStatementImpl.withReference(
-          awaitKeyword,
-          forKeyword,
-          leftParenthesis,
-          identifier,
-          inKeyword,
-          iterator,
-          rightParenthesis,
-          body);
-
-  @override
-  FormalParameterList formalParameterList(
+  FormalParameterListImpl formalParameterList(
           Token leftParenthesis,
           List<FormalParameter> parameters,
-          Token leftDelimiter,
-          Token rightDelimiter,
+          Token? leftDelimiter,
+          Token? rightDelimiter,
           Token rightParenthesis) =>
-      new FormalParameterListImpl(leftParenthesis, parameters, leftDelimiter,
+      FormalParameterListImpl(leftParenthesis, parameters, leftDelimiter,
           rightDelimiter, rightParenthesis);
 
   @override
-  ForStatement forStatement(
-          Token forKeyword,
-          Token leftParenthesis,
-          VariableDeclarationList variableList,
-          Expression initialization,
-          Token leftSeparator,
-          Expression condition,
-          Token rightSeparator,
-          List<Expression> updaters,
-          Token rightParenthesis,
-          Statement body) =>
-      new ForStatementImpl(
-          forKeyword,
-          leftParenthesis,
-          variableList,
-          initialization,
+  ForPartsWithDeclarationsImpl forPartsWithDeclarations(
+          {required VariableDeclarationList variables,
+          required Token leftSeparator,
+          Expression? condition,
+          required Token rightSeparator,
+          List<Expression>? updaters}) =>
+      ForPartsWithDeclarationsImpl(
+          variables as VariableDeclarationListImpl,
           leftSeparator,
-          condition,
+          condition as ExpressionImpl?,
           rightSeparator,
-          updaters,
-          rightParenthesis,
-          body);
+          updaters);
 
   @override
-  FunctionDeclaration functionDeclaration(
-          Comment comment,
-          List<Annotation> metadata,
-          Token externalKeyword,
-          TypeAnnotation returnType,
-          Token propertyKeyword,
+  ForPartsWithExpressionImpl forPartsWithExpression(
+          {Expression? initialization,
+          required Token leftSeparator,
+          Expression? condition,
+          required Token rightSeparator,
+          List<Expression>? updaters}) =>
+      ForPartsWithExpressionImpl(
+          initialization as ExpressionImpl?,
+          leftSeparator,
+          condition as ExpressionImpl?,
+          rightSeparator,
+          updaters);
+
+  @override
+  ForStatementImpl forStatement(
+      {Token? awaitKeyword,
+      required Token forKeyword,
+      required Token leftParenthesis,
+      required ForLoopParts forLoopParts,
+      required Token rightParenthesis,
+      required Statement body}) {
+    return ForStatementImpl(
+        awaitKeyword,
+        forKeyword,
+        leftParenthesis,
+        forLoopParts as ForLoopPartsImpl,
+        rightParenthesis,
+        body as StatementImpl);
+  }
+
+  @override
+  FunctionDeclarationImpl functionDeclaration(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token? externalKeyword,
+          TypeAnnotation? returnType,
+          Token? propertyKeyword,
           SimpleIdentifier name,
           FunctionExpression functionExpression) =>
-      new FunctionDeclarationImpl(comment, metadata, externalKeyword,
-          returnType, propertyKeyword, name, functionExpression);
+      FunctionDeclarationImpl(
+          comment as CommentImpl?,
+          metadata,
+          externalKeyword,
+          returnType as TypeAnnotationImpl?,
+          propertyKeyword,
+          name as SimpleIdentifierImpl,
+          functionExpression as FunctionExpressionImpl);
 
   @override
-  FunctionDeclarationStatement functionDeclarationStatement(
+  FunctionDeclarationStatementImpl functionDeclarationStatement(
           FunctionDeclaration functionDeclaration) =>
-      new FunctionDeclarationStatementImpl(functionDeclaration);
+      FunctionDeclarationStatementImpl(
+          functionDeclaration as FunctionDeclarationImpl);
 
   @override
-  FunctionExpression functionExpression(TypeParameterList typeParameters,
-          FormalParameterList parameters, FunctionBody body) =>
-      new FunctionExpressionImpl(typeParameters, parameters, body);
+  FunctionExpressionImpl functionExpression(TypeParameterList? typeParameters,
+          FormalParameterList? parameters, FunctionBody body) =>
+      FunctionExpressionImpl(typeParameters as TypeParameterListImpl?,
+          parameters as FormalParameterListImpl?, body as FunctionBodyImpl);
 
   @override
-  FunctionExpressionInvocation functionExpressionInvocation(Expression function,
-          TypeArgumentList typeArguments, ArgumentList argumentList) =>
-      new FunctionExpressionInvocationImpl(
-          function, typeArguments, argumentList);
+  FunctionExpressionInvocationImpl functionExpressionInvocation(
+          Expression function,
+          TypeArgumentList? typeArguments,
+          ArgumentList argumentList) =>
+      FunctionExpressionInvocationImpl(
+          function as ExpressionImpl,
+          typeArguments as TypeArgumentListImpl?,
+          argumentList as ArgumentListImpl);
 
   @override
-  FunctionTypeAlias functionTypeAlias(
-          Comment comment,
-          List<Annotation> metadata,
+  FunctionReferenceImpl functionReference(
+          {required Expression function, TypeArgumentList? typeArguments}) =>
+      FunctionReferenceImpl(function as ExpressionImpl,
+          typeArguments: typeArguments as TypeArgumentListImpl?);
+
+  @override
+  FunctionTypeAliasImpl functionTypeAlias(
+          Comment? comment,
+          List<Annotation>? metadata,
           Token keyword,
-          TypeAnnotation returnType,
+          TypeAnnotation? returnType,
           SimpleIdentifier name,
-          TypeParameterList typeParameters,
+          TypeParameterList? typeParameters,
           FormalParameterList parameters,
           Token semicolon) =>
-      new FunctionTypeAliasImpl(comment, metadata, keyword, returnType, name,
-          typeParameters, parameters, semicolon);
+      FunctionTypeAliasImpl(
+          comment as CommentImpl?,
+          metadata,
+          keyword,
+          returnType as TypeAnnotationImpl?,
+          name as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
+          parameters as FormalParameterListImpl,
+          semicolon);
 
   @override
-  FunctionTypedFormalParameter functionTypedFormalParameter(
-          Comment comment,
-          List<Annotation> metadata,
-          TypeAnnotation returnType,
-          SimpleIdentifier identifier,
-          TypeParameterList typeParameters,
-          FormalParameterList parameters,
-          {Token question: null}) =>
-      new FunctionTypedFormalParameterImpl(comment, metadata, null, returnType,
-          identifier, typeParameters, parameters, question);
+  FunctionTypedFormalParameterImpl functionTypedFormalParameter2(
+          {Comment? comment,
+          List<Annotation>? metadata,
+          Token? covariantKeyword,
+          Token? requiredKeyword,
+          TypeAnnotation? returnType,
+          required SimpleIdentifier identifier,
+          TypeParameterList? typeParameters,
+          required FormalParameterList parameters,
+          Token? question}) =>
+      FunctionTypedFormalParameterImpl(
+          comment as CommentImpl?,
+          metadata,
+          covariantKeyword,
+          requiredKeyword,
+          returnType as TypeAnnotationImpl?,
+          identifier as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
+          parameters as FormalParameterListImpl,
+          question);
 
   @override
-  FunctionTypedFormalParameter functionTypedFormalParameter2(
-          {Comment comment,
-          List<Annotation> metadata,
-          Token covariantKeyword,
-          TypeAnnotation returnType,
-          @required SimpleIdentifier identifier,
-          TypeParameterList typeParameters,
-          @required FormalParameterList parameters,
-          Token question}) =>
-      new FunctionTypedFormalParameterImpl(comment, metadata, covariantKeyword,
-          returnType, identifier, typeParameters, parameters, question);
-
-  @override
-  GenericFunctionType genericFunctionType(
-          TypeAnnotation returnType,
+  GenericFunctionTypeImpl genericFunctionType(
+          TypeAnnotation? returnType,
           Token functionKeyword,
-          TypeParameterList typeParameters,
-          FormalParameterList parameters) =>
-      new GenericFunctionTypeImpl(
-          returnType, functionKeyword, typeParameters, parameters);
+          TypeParameterList? typeParameters,
+          FormalParameterList parameters,
+          {Token? question}) =>
+      GenericFunctionTypeImpl(
+          returnType as TypeAnnotationImpl?,
+          functionKeyword,
+          typeParameters as TypeParameterListImpl?,
+          parameters as FormalParameterListImpl,
+          question: question);
 
   @override
-  GenericTypeAlias genericTypeAlias(
-          Comment comment,
-          List<Annotation> metadata,
+  GenericTypeAliasImpl genericTypeAlias(
+          Comment? comment,
+          List<Annotation>? metadata,
           Token typedefKeyword,
           SimpleIdentifier name,
-          TypeParameterList typeParameters,
+          TypeParameterList? typeParameters,
           Token equals,
-          GenericFunctionType functionType,
+          TypeAnnotation type,
           Token semicolon) =>
-      new GenericTypeAliasImpl(comment, metadata, typedefKeyword, name,
-          typeParameters, equals, functionType, semicolon);
+      GenericTypeAliasImpl(
+          comment as CommentImpl?,
+          metadata,
+          typedefKeyword,
+          name as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
+          equals,
+          type as TypeAnnotationImpl,
+          semicolon);
 
   @override
-  HideCombinator hideCombinator(
+  HideClauseImpl hideClause(
+          {required Token hideKeyword,
+          required List<ShowHideClauseElement> elements}) =>
+      HideClauseImpl(hideKeyword, elements);
+
+  @override
+  HideCombinatorImpl hideCombinator(
           Token keyword, List<SimpleIdentifier> hiddenNames) =>
-      new HideCombinatorImpl(keyword, hiddenNames);
+      HideCombinatorImpl(keyword, hiddenNames);
 
   @override
-  IfStatement ifStatement(
+  IfElementImpl ifElement(
+          {required Token ifKeyword,
+          required Token leftParenthesis,
+          required Expression condition,
+          required Token rightParenthesis,
+          required CollectionElement thenElement,
+          Token? elseKeyword,
+          CollectionElement? elseElement}) =>
+      IfElementImpl(
+          ifKeyword,
+          leftParenthesis,
+          condition as ExpressionImpl,
+          rightParenthesis,
+          thenElement as CollectionElementImpl,
+          elseKeyword,
+          elseElement as CollectionElementImpl?);
+
+  @override
+  IfStatementImpl ifStatement(
           Token ifKeyword,
           Token leftParenthesis,
           Expression condition,
           Token rightParenthesis,
           Statement thenStatement,
-          Token elseKeyword,
-          Statement elseStatement) =>
-      new IfStatementImpl(ifKeyword, leftParenthesis, condition,
-          rightParenthesis, thenStatement, elseKeyword, elseStatement);
+          Token? elseKeyword,
+          Statement? elseStatement) =>
+      IfStatementImpl(
+          ifKeyword,
+          leftParenthesis,
+          condition as ExpressionImpl,
+          rightParenthesis,
+          thenStatement as StatementImpl,
+          elseKeyword,
+          elseStatement as StatementImpl?);
 
   @override
-  ImplementsClause implementsClause(
-          Token implementsKeyword, List<TypeName> interfaces) =>
-      new ImplementsClauseImpl(implementsKeyword, interfaces);
+  ImplementsClauseImpl implementsClause(
+          Token implementsKeyword, List<NamedType> interfaces) =>
+      ImplementsClauseImpl(implementsKeyword, interfaces);
 
   @override
-  ImportDirective importDirective(
-          Comment comment,
-          List<Annotation> metadata,
+  ImplicitCallReferenceImpl implicitCallReference({
+    required Expression expression,
+    required MethodElement staticElement,
+    required TypeArgumentList? typeArguments,
+    required List<DartType> typeArgumentTypes,
+  }) =>
+      ImplicitCallReferenceImpl(expression as ExpressionImpl,
+          staticElement: staticElement,
+          typeArguments: typeArguments as TypeArgumentListImpl?,
+          typeArgumentTypes: typeArgumentTypes);
+
+  @override
+  ImportDirectiveImpl importDirective(
+          Comment? comment,
+          List<Annotation>? metadata,
           Token keyword,
           StringLiteral libraryUri,
-          List<Configuration> configurations,
-          Token deferredKeyword,
-          Token asKeyword,
-          SimpleIdentifier prefix,
-          List<Combinator> combinators,
+          List<Configuration>? configurations,
+          Token? deferredKeyword,
+          Token? asKeyword,
+          SimpleIdentifier? prefix,
+          List<Combinator>? combinators,
           Token semicolon) =>
-      new ImportDirectiveImpl(
-          comment,
+      ImportDirectiveImpl(
+          comment as CommentImpl?,
           metadata,
           keyword,
-          libraryUri,
+          libraryUri as StringLiteralImpl,
           configurations,
           deferredKeyword,
           asKeyword,
-          prefix,
+          prefix as SimpleIdentifierImpl?,
           combinators,
           semicolon);
 
   @override
-  IndexExpression indexExpressionForCascade(Token period, Token leftBracket,
-          Expression index, Token rightBracket) =>
-      new IndexExpressionImpl.forCascade(
-          period, leftBracket, index, rightBracket);
+  IndexExpressionImpl indexExpressionForCascade2(
+          {required Token period,
+          Token? question,
+          required Token leftBracket,
+          required Expression index,
+          required Token rightBracket}) =>
+      IndexExpressionImpl.forCascade(
+          period, question, leftBracket, index as ExpressionImpl, rightBracket);
 
   @override
-  IndexExpression indexExpressionForTarget(Expression target, Token leftBracket,
-          Expression index, Token rightBracket) =>
-      new IndexExpressionImpl.forTarget(
-          target, leftBracket, index, rightBracket);
+  IndexExpressionImpl indexExpressionForTarget2(
+          {required Expression target,
+          Token? question,
+          required Token leftBracket,
+          required Expression index,
+          required Token rightBracket}) =>
+      IndexExpressionImpl.forTarget(target as ExpressionImpl, question,
+          leftBracket, index as ExpressionImpl, rightBracket);
 
   @override
-  InstanceCreationExpression instanceCreationExpression(Token keyword,
-          ConstructorName constructorName, ArgumentList argumentList) =>
-      new InstanceCreationExpressionImpl(
-          keyword, constructorName, argumentList);
+  InstanceCreationExpressionImpl instanceCreationExpression(Token? keyword,
+          ConstructorName constructorName, ArgumentList argumentList,
+          {TypeArgumentList? typeArguments}) =>
+      InstanceCreationExpressionImpl(
+          keyword,
+          constructorName as ConstructorNameImpl,
+          argumentList as ArgumentListImpl,
+          typeArguments: typeArguments as TypeArgumentListImpl?);
 
   @override
-  IntegerLiteral integerLiteral(Token literal, int value) =>
-      new IntegerLiteralImpl(literal, value);
+  IntegerLiteralImpl integerLiteral(Token literal, int? value) =>
+      IntegerLiteralImpl(literal, value);
 
   @override
-  InterpolationExpression interpolationExpression(
-          Token leftBracket, Expression expression, Token rightBracket) =>
-      new InterpolationExpressionImpl(leftBracket, expression, rightBracket);
+  InterpolationExpressionImpl interpolationExpression(
+          Token leftBracket, Expression expression, Token? rightBracket) =>
+      InterpolationExpressionImpl(
+          leftBracket, expression as ExpressionImpl, rightBracket);
 
   @override
-  InterpolationString interpolationString(Token contents, String value) =>
-      new InterpolationStringImpl(contents, value);
+  InterpolationStringImpl interpolationString(Token contents, String value) =>
+      InterpolationStringImpl(contents, value);
 
   @override
-  IsExpression isExpression(Expression expression, Token isOperator,
-          Token notOperator, TypeAnnotation type) =>
-      new IsExpressionImpl(expression, isOperator, notOperator, type);
+  IsExpressionImpl isExpression(Expression expression, Token isOperator,
+          Token? notOperator, TypeAnnotation type) =>
+      IsExpressionImpl(expression as ExpressionImpl, isOperator, notOperator,
+          type as TypeAnnotationImpl);
 
   @override
-  Label label(SimpleIdentifier label, Token colon) =>
-      new LabelImpl(label, colon);
+  LabelImpl label(SimpleIdentifier label, Token colon) =>
+      LabelImpl(label as SimpleIdentifierImpl, colon);
 
   @override
-  LabeledStatement labeledStatement(List<Label> labels, Statement statement) =>
-      new LabeledStatementImpl(labels, statement);
+  LabeledStatementImpl labeledStatement(
+          List<Label> labels, Statement statement) =>
+      LabeledStatementImpl(labels, statement as StatementImpl);
 
   @override
-  LibraryDirective libraryDirective(Comment comment, List<Annotation> metadata,
-          Token libraryKeyword, LibraryIdentifier name, Token semicolon) =>
-      new LibraryDirectiveImpl(
-          comment, metadata, libraryKeyword, name, semicolon);
-
-  @override
-  LibraryIdentifier libraryIdentifier(List<SimpleIdentifier> components) =>
-      new LibraryIdentifierImpl(components);
-
-  @override
-  ListLiteral listLiteral(Token constKeyword, TypeArgumentList typeArguments,
-          Token leftBracket, List<Expression> elements, Token rightBracket) =>
-      new ListLiteralImpl(
-          constKeyword, typeArguments, leftBracket, elements, rightBracket);
-
-  @override
-  MapLiteral mapLiteral(
-          Token constKeyword,
-          TypeArgumentList typeArguments,
-          Token leftBracket,
-          List<MapLiteralEntry> entries,
-          Token rightBracket) =>
-      new MapLiteralImpl(
-          constKeyword, typeArguments, leftBracket, entries, rightBracket);
-
-  @override
-  MapLiteralEntry mapLiteralEntry(
-          Expression key, Token separator, Expression value) =>
-      new MapLiteralEntryImpl(key, separator, value);
-
-  @override
-  MethodDeclaration methodDeclaration(
-          Comment comment,
-          List<Annotation> metadata,
-          Token externalKeyword,
-          Token modifierKeyword,
-          TypeAnnotation returnType,
-          Token propertyKeyword,
-          Token operatorKeyword,
-          SimpleIdentifier name,
-          TypeParameterList typeParameters,
-          FormalParameterList parameters,
-          FunctionBody body) =>
-      new MethodDeclarationImpl(
-          comment,
-          metadata,
-          externalKeyword,
-          modifierKeyword,
-          returnType,
-          propertyKeyword,
-          operatorKeyword,
-          name,
-          typeParameters,
-          parameters,
-          body);
-
-  @override
-  MethodInvocation methodInvocation(
-          Expression target,
-          Token operator,
-          SimpleIdentifier methodName,
-          TypeArgumentList typeArguments,
-          ArgumentList argumentList) =>
-      new MethodInvocationImpl(
-          target, operator, methodName, typeArguments, argumentList);
-
-  @override
-  NamedExpression namedExpression(Label name, Expression expression) =>
-      new NamedExpressionImpl(name, expression);
-
-  @override
-  NativeClause nativeClause(Token nativeKeyword, StringLiteral name) =>
-      new NativeClauseImpl(nativeKeyword, name);
-
-  @override
-  NativeFunctionBody nativeFunctionBody(
-          Token nativeKeyword, StringLiteral stringLiteral, Token semicolon) =>
-      new NativeFunctionBodyImpl(nativeKeyword, stringLiteral, semicolon);
-
-  @override
-  NodeList/*<E>*/ nodeList/*<E extends AstNode>*/(AstNode owner,
-          [List/*<E>*/ elements]) =>
-      new NodeListImpl/*<E>*/(owner as AstNodeImpl, elements);
-
-  @override
-  NullLiteral nullLiteral(Token literal) => new NullLiteralImpl(literal);
-
-  @override
-  ParenthesizedExpression parenthesizedExpression(Token leftParenthesis,
-          Expression expression, Token rightParenthesis) =>
-      new ParenthesizedExpressionImpl(
-          leftParenthesis, expression, rightParenthesis);
-
-  @override
-  PartDirective partDirective(Comment comment, List<Annotation> metadata,
-          Token partKeyword, StringLiteral partUri, Token semicolon) =>
-      new PartDirectiveImpl(comment, metadata, partKeyword, partUri, semicolon);
-
-  @override
-  PartOfDirective partOfDirective(
-          Comment comment,
-          List<Annotation> metadata,
-          Token partKeyword,
-          Token ofKeyword,
-          StringLiteral uri,
-          LibraryIdentifier libraryName,
+  LibraryDirectiveImpl libraryDirective(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token libraryKeyword,
+          LibraryIdentifier name,
           Token semicolon) =>
-      new PartOfDirectiveImpl(comment, metadata, partKeyword, ofKeyword, uri,
-          libraryName, semicolon);
+      LibraryDirectiveImpl(comment as CommentImpl?, metadata, libraryKeyword,
+          name as LibraryIdentifierImpl, semicolon);
 
   @override
-  PostfixExpression postfixExpression(Expression operand, Token operator) =>
-      new PostfixExpressionImpl(operand, operator);
+  LibraryIdentifierImpl libraryIdentifier(List<SimpleIdentifier> components) =>
+      LibraryIdentifierImpl(components);
 
   @override
-  PrefixedIdentifier prefixedIdentifier(
-          SimpleIdentifier prefix, Token period, SimpleIdentifier identifier) =>
-      new PrefixedIdentifierImpl(prefix, period, identifier);
-
-  @override
-  PrefixExpression prefixExpression(Token operator, Expression operand) =>
-      new PrefixExpressionImpl(operator, operand);
-
-  @override
-  PropertyAccess propertyAccess(
-          Expression target, Token operator, SimpleIdentifier propertyName) =>
-      new PropertyAccessImpl(target, operator, propertyName);
-
-  @override
-  RedirectingConstructorInvocation redirectingConstructorInvocation(
-          Token thisKeyword,
-          Token period,
-          SimpleIdentifier constructorName,
-          ArgumentList argumentList) =>
-      new RedirectingConstructorInvocationImpl(
-          thisKeyword, period, constructorName, argumentList);
-
-  @override
-  RethrowExpression rethrowExpression(Token rethrowKeyword) =>
-      new RethrowExpressionImpl(rethrowKeyword);
-
-  @override
-  ReturnStatement returnStatement(
-          Token returnKeyword, Expression expression, Token semicolon) =>
-      new ReturnStatementImpl(returnKeyword, expression, semicolon);
-
-  @override
-  ScriptTag scriptTag(Token scriptTag) => new ScriptTagImpl(scriptTag);
-
-  @override
-  ShowCombinator showCombinator(
-          Token keyword, List<SimpleIdentifier> shownNames) =>
-      new ShowCombinatorImpl(keyword, shownNames);
-
-  @override
-  SimpleFormalParameter simpleFormalParameter(
-          Comment comment,
-          List<Annotation> metadata,
-          Token keyword,
-          TypeAnnotation type,
-          SimpleIdentifier identifier) =>
-      new SimpleFormalParameterImpl(
-          comment, metadata, null, keyword, type, identifier);
-
-  @override
-  SimpleFormalParameter simpleFormalParameter2(
-          {Comment comment,
-          List<Annotation> metadata,
-          Token covariantKeyword,
-          Token keyword,
-          TypeAnnotation type,
-          @required SimpleIdentifier identifier}) =>
-      new SimpleFormalParameterImpl(
-          comment, metadata, covariantKeyword, keyword, type, identifier);
-
-  @override
-  SimpleIdentifier simpleIdentifier(Token token, {bool isDeclaration: false}) {
-    if (isDeclaration) {
-      return new DeclaredSimpleIdentifier(token);
+  ListLiteralImpl listLiteral(
+      Token? constKeyword,
+      TypeArgumentList? typeArguments,
+      Token leftBracket,
+      List<CollectionElement> elements,
+      Token rightBracket) {
+    if (elements is List<Expression>) {
+      return ListLiteralImpl(
+          constKeyword,
+          typeArguments as TypeArgumentListImpl?,
+          leftBracket,
+          elements,
+          rightBracket);
     }
-    return new SimpleIdentifierImpl(token);
+    return ListLiteralImpl.experimental(
+        constKeyword,
+        typeArguments as TypeArgumentListImpl?,
+        leftBracket,
+        elements,
+        rightBracket);
   }
 
   @override
-  SimpleStringLiteral simpleStringLiteral(Token literal, String value) =>
-      new SimpleStringLiteralImpl(literal, value);
+  MapLiteralEntryImpl mapLiteralEntry(
+          Expression key, Token separator, Expression value) =>
+      MapLiteralEntryImpl(
+          key as ExpressionImpl, separator, value as ExpressionImpl);
 
   @override
-  StringInterpolation stringInterpolation(
-          List<InterpolationElement> elements) =>
-      new StringInterpolationImpl(elements);
+  MethodDeclarationImpl methodDeclaration(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token? externalKeyword,
+          Token? modifierKeyword,
+          TypeAnnotation? returnType,
+          Token? propertyKeyword,
+          Token? operatorKeyword,
+          SimpleIdentifier name,
+          TypeParameterList? typeParameters,
+          FormalParameterList? parameters,
+          FunctionBody body) =>
+      MethodDeclarationImpl(
+          comment as CommentImpl?,
+          metadata,
+          externalKeyword,
+          modifierKeyword,
+          returnType as TypeAnnotationImpl?,
+          propertyKeyword,
+          operatorKeyword,
+          name as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
+          parameters as FormalParameterListImpl?,
+          body as FunctionBodyImpl);
 
   @override
-  SuperConstructorInvocation superConstructorInvocation(
-          Token superKeyword,
-          Token period,
-          SimpleIdentifier constructorName,
+  MethodInvocationImpl methodInvocation(
+          Expression? target,
+          Token? operator,
+          SimpleIdentifier methodName,
+          TypeArgumentList? typeArguments,
           ArgumentList argumentList) =>
-      new SuperConstructorInvocationImpl(
-          superKeyword, period, constructorName, argumentList);
+      MethodInvocationImpl(
+          target as ExpressionImpl?,
+          operator,
+          methodName as SimpleIdentifierImpl,
+          typeArguments as TypeArgumentListImpl?,
+          argumentList as ArgumentListImpl);
 
   @override
-  SuperExpression superExpression(Token superKeyword) =>
-      new SuperExpressionImpl(superKeyword);
+  MixinDeclarationImpl mixinDeclaration(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token mixinKeyword,
+          SimpleIdentifier name,
+          TypeParameterList? typeParameters,
+          OnClause? onClause,
+          ImplementsClause? implementsClause,
+          Token leftBracket,
+          List<ClassMember> members,
+          Token rightBracket) =>
+      MixinDeclarationImpl(
+          comment as CommentImpl?,
+          metadata,
+          mixinKeyword,
+          name as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
+          onClause as OnClauseImpl?,
+          implementsClause as ImplementsClauseImpl?,
+          leftBracket,
+          members,
+          rightBracket);
+
   @override
-  SwitchCase switchCase(List<Label> labels, Token keyword,
+  NamedExpressionImpl namedExpression(Label name, Expression expression) =>
+      NamedExpressionImpl(name as LabelImpl, expression as ExpressionImpl);
+
+  @override
+  NamedTypeImpl namedType({
+    required Identifier name,
+    TypeArgumentList? typeArguments,
+    Token? question,
+  }) =>
+      NamedTypeImpl(
+          name as IdentifierImpl, typeArguments as TypeArgumentListImpl?,
+          question: question);
+
+  @override
+  NativeClauseImpl nativeClause(Token nativeKeyword, StringLiteral? name) =>
+      NativeClauseImpl(nativeKeyword, name as StringLiteralImpl?);
+
+  @override
+  NativeFunctionBodyImpl nativeFunctionBody(
+          Token nativeKeyword, StringLiteral? stringLiteral, Token semicolon) =>
+      NativeFunctionBodyImpl(
+          nativeKeyword, stringLiteral as StringLiteralImpl?, semicolon);
+
+  @override
+  NodeListImpl<E> nodeList<E extends AstNode>(AstNode owner) =>
+      NodeListImpl<E>(owner as AstNodeImpl);
+
+  @override
+  NullLiteralImpl nullLiteral(Token literal) => NullLiteralImpl(literal);
+
+  @override
+  OnClauseImpl onClause(
+          Token onKeyword, List<NamedType> superclassConstraints) =>
+      OnClauseImpl(onKeyword, superclassConstraints);
+
+  @override
+  ParenthesizedExpressionImpl parenthesizedExpression(Token leftParenthesis,
+          Expression expression, Token rightParenthesis) =>
+      ParenthesizedExpressionImpl(
+          leftParenthesis, expression as ExpressionImpl, rightParenthesis);
+
+  @override
+  PartDirectiveImpl partDirective(Comment? comment, List<Annotation>? metadata,
+          Token partKeyword, StringLiteral partUri, Token semicolon) =>
+      PartDirectiveImpl(comment as CommentImpl?, metadata, partKeyword,
+          partUri as StringLiteralImpl, semicolon);
+
+  @override
+  PartOfDirectiveImpl partOfDirective(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token partKeyword,
+          Token ofKeyword,
+          StringLiteral? uri,
+          LibraryIdentifier? libraryName,
+          Token semicolon) =>
+      PartOfDirectiveImpl(
+          comment as CommentImpl?,
+          metadata,
+          partKeyword,
+          ofKeyword,
+          uri as StringLiteralImpl?,
+          libraryName as LibraryIdentifierImpl?,
+          semicolon);
+
+  @override
+  PostfixExpressionImpl postfixExpression(Expression operand, Token operator) =>
+      PostfixExpressionImpl(operand as ExpressionImpl, operator);
+
+  @override
+  PrefixedIdentifierImpl prefixedIdentifier(
+          SimpleIdentifier prefix, Token period, SimpleIdentifier identifier) =>
+      PrefixedIdentifierImpl(prefix as SimpleIdentifierImpl, period,
+          identifier as SimpleIdentifierImpl);
+
+  @override
+  PrefixExpressionImpl prefixExpression(Token operator, Expression operand) =>
+      PrefixExpressionImpl(operator, operand as ExpressionImpl);
+
+  @override
+  PropertyAccessImpl propertyAccess(
+          Expression? target, Token operator, SimpleIdentifier propertyName) =>
+      PropertyAccessImpl(target as ExpressionImpl?, operator,
+          propertyName as SimpleIdentifierImpl);
+
+  @override
+  RedirectingConstructorInvocationImpl redirectingConstructorInvocation(
+          Token thisKeyword,
+          Token? period,
+          SimpleIdentifier? constructorName,
+          ArgumentList argumentList) =>
+      RedirectingConstructorInvocationImpl(
+          thisKeyword,
+          period,
+          constructorName as SimpleIdentifierImpl?,
+          argumentList as ArgumentListImpl);
+
+  @override
+  RethrowExpressionImpl rethrowExpression(Token rethrowKeyword) =>
+      RethrowExpressionImpl(rethrowKeyword);
+
+  @override
+  ReturnStatementImpl returnStatement(
+          Token returnKeyword, Expression? expression, Token semicolon) =>
+      ReturnStatementImpl(
+          returnKeyword, expression as ExpressionImpl?, semicolon);
+
+  @override
+  ScriptTagImpl scriptTag(Token scriptTag) => ScriptTagImpl(scriptTag);
+
+  @override
+  SetOrMapLiteralImpl setOrMapLiteral(
+          {Token? constKeyword,
+          TypeArgumentList? typeArguments,
+          required Token leftBracket,
+          required List<CollectionElement> elements,
+          required Token rightBracket}) =>
+      SetOrMapLiteralImpl(constKeyword, typeArguments as TypeArgumentListImpl?,
+          leftBracket, elements, rightBracket);
+
+  @override
+  ShowClauseImpl showClause(
+          {required Token showKeyword,
+          required List<ShowHideClauseElement> elements}) =>
+      ShowClauseImpl(showKeyword, elements);
+
+  @override
+  ShowCombinatorImpl showCombinator(
+          Token keyword, List<SimpleIdentifier> shownNames) =>
+      ShowCombinatorImpl(keyword, shownNames);
+
+  @override
+  ShowHideElementImpl showHideElement(
+          {required Token? modifier, required SimpleIdentifier name}) =>
+      ShowHideElementImpl(modifier, name);
+
+  @override
+  SimpleFormalParameterImpl simpleFormalParameter2(
+          {Comment? comment,
+          List<Annotation>? metadata,
+          Token? covariantKeyword,
+          Token? requiredKeyword,
+          Token? keyword,
+          TypeAnnotation? type,
+          required SimpleIdentifier? identifier}) =>
+      SimpleFormalParameterImpl(
+          comment as CommentImpl?,
+          metadata,
+          covariantKeyword,
+          requiredKeyword,
+          keyword,
+          type as TypeAnnotationImpl?,
+          identifier as SimpleIdentifierImpl?);
+
+  @override
+  SimpleIdentifierImpl simpleIdentifier(Token token,
+      {bool isDeclaration = false}) {
+    if (isDeclaration) {
+      return DeclaredSimpleIdentifier(token);
+    }
+    return SimpleIdentifierImpl(token);
+  }
+
+  @override
+  SimpleStringLiteralImpl simpleStringLiteral(Token literal, String value) =>
+      SimpleStringLiteralImpl(literal, value);
+
+  @override
+  SpreadElementImpl spreadElement(
+          {required Token spreadOperator, required Expression expression}) =>
+      SpreadElementImpl(spreadOperator, expression as ExpressionImpl);
+
+  @override
+  StringInterpolationImpl stringInterpolation(
+          List<InterpolationElement> elements) =>
+      StringInterpolationImpl(elements);
+
+  @override
+  SuperConstructorInvocationImpl superConstructorInvocation(
+          Token superKeyword,
+          Token? period,
+          SimpleIdentifier? constructorName,
+          ArgumentList argumentList) =>
+      SuperConstructorInvocationImpl(
+          superKeyword,
+          period,
+          constructorName as SimpleIdentifierImpl?,
+          argumentList as ArgumentListImpl);
+
+  @override
+  SuperExpressionImpl superExpression(Token superKeyword) =>
+      SuperExpressionImpl(superKeyword);
+
+  @override
+  SuperFormalParameterImpl superFormalParameter(
+          {Comment? comment,
+          List<Annotation>? metadata,
+          Token? covariantKeyword,
+          Token? requiredKeyword,
+          Token? keyword,
+          TypeAnnotation? type,
+          required Token superKeyword,
+          required Token period,
+          required SimpleIdentifier identifier,
+          TypeParameterList? typeParameters,
+          FormalParameterList? parameters,
+          Token? question}) =>
+      SuperFormalParameterImpl(
+          comment as CommentImpl?,
+          metadata,
+          covariantKeyword,
+          requiredKeyword,
+          keyword,
+          type as TypeAnnotationImpl?,
+          superKeyword,
+          period,
+          identifier as SimpleIdentifierImpl,
+          typeParameters as TypeParameterListImpl?,
+          parameters as FormalParameterListImpl?,
+          question);
+
+  @override
+  SwitchCaseImpl switchCase(List<Label> labels, Token keyword,
           Expression expression, Token colon, List<Statement> statements) =>
-      new SwitchCaseImpl(labels, keyword, expression, colon, statements);
+      SwitchCaseImpl(
+          labels, keyword, expression as ExpressionImpl, colon, statements);
 
   @override
-  SwitchDefault switchDefault(List<Label> labels, Token keyword, Token colon,
-          List<Statement> statements) =>
-      new SwitchDefaultImpl(labels, keyword, colon, statements);
+  SwitchDefaultImpl switchDefault(List<Label> labels, Token keyword,
+          Token colon, List<Statement> statements) =>
+      SwitchDefaultImpl(labels, keyword, colon, statements);
 
   @override
-  SwitchStatement switchStatement(
+  SwitchStatementImpl switchStatement(
           Token switchKeyword,
           Token leftParenthesis,
           Expression expression,
@@ -879,92 +1283,142 @@ class AstFactoryImpl extends AstFactory {
           Token leftBracket,
           List<SwitchMember> members,
           Token rightBracket) =>
-      new SwitchStatementImpl(switchKeyword, leftParenthesis, expression,
-          rightParenthesis, leftBracket, members, rightBracket);
+      SwitchStatementImpl(
+          switchKeyword,
+          leftParenthesis,
+          expression as ExpressionImpl,
+          rightParenthesis,
+          leftBracket,
+          members,
+          rightBracket);
 
   @override
-  SymbolLiteral symbolLiteral(Token poundSign, List<Token> components) =>
-      new SymbolLiteralImpl(poundSign, components);
+  SymbolLiteralImpl symbolLiteral(Token poundSign, List<Token> components) =>
+      SymbolLiteralImpl(poundSign, components);
 
   @override
-  ThisExpression thisExpression(Token thisKeyword) =>
-      new ThisExpressionImpl(thisKeyword);
+  ThisExpressionImpl thisExpression(Token thisKeyword) =>
+      ThisExpressionImpl(thisKeyword);
 
   @override
-  ThrowExpression throwExpression(Token throwKeyword, Expression expression) =>
-      new ThrowExpressionImpl(throwKeyword, expression);
+  ThrowExpressionImpl throwExpression(
+          Token throwKeyword, Expression expression) =>
+      ThrowExpressionImpl(throwKeyword, expression as ExpressionImpl);
 
   @override
-  TopLevelVariableDeclaration topLevelVariableDeclaration(
-          Comment comment,
-          List<Annotation> metadata,
+  TopLevelVariableDeclarationImpl topLevelVariableDeclaration(
+          Comment? comment,
+          List<Annotation>? metadata,
           VariableDeclarationList variableList,
-          Token semicolon) =>
-      new TopLevelVariableDeclarationImpl(
-          comment, metadata, variableList, semicolon);
+          Token semicolon,
+          {Token? externalKeyword}) =>
+      TopLevelVariableDeclarationImpl(
+          comment as CommentImpl?,
+          metadata,
+          externalKeyword,
+          variableList as VariableDeclarationListImpl,
+          semicolon);
 
   @override
-  TryStatement tryStatement(
+  TryStatementImpl tryStatement(
           Token tryKeyword,
           Block body,
           List<CatchClause> catchClauses,
-          Token finallyKeyword,
-          Block finallyBlock) =>
-      new TryStatementImpl(
-          tryKeyword, body, catchClauses, finallyKeyword, finallyBlock);
+          Token? finallyKeyword,
+          Block? finallyBlock) =>
+      TryStatementImpl(tryKeyword, body as BlockImpl, catchClauses,
+          finallyKeyword, finallyBlock as BlockImpl?);
 
   @override
-  TypeArgumentList typeArgumentList(Token leftBracket,
+  TypeArgumentListImpl typeArgumentList(Token leftBracket,
           List<TypeAnnotation> arguments, Token rightBracket) =>
-      new TypeArgumentListImpl(leftBracket, arguments, rightBracket);
+      TypeArgumentListImpl(leftBracket, arguments, rightBracket);
 
   @override
-  TypeName typeName(Identifier name, TypeArgumentList typeArguments,
-          {Token question: null}) =>
-      new TypeNameImpl(name, typeArguments, question);
+  TypeLiteralImpl typeLiteral({required NamedType typeName}) =>
+      TypeLiteralImpl(typeName as NamedTypeImpl);
 
   @override
-  TypeParameter typeParameter(Comment comment, List<Annotation> metadata,
-          SimpleIdentifier name, Token extendsKeyword, TypeAnnotation bound) =>
-      new TypeParameterImpl(comment, metadata, name, extendsKeyword, bound);
+  TypeParameterImpl typeParameter(
+          Comment? comment,
+          List<Annotation>? metadata,
+          SimpleIdentifier name,
+          Token? extendsKeyword,
+          TypeAnnotation? bound) =>
+      TypeParameterImpl(
+          comment as CommentImpl?,
+          metadata,
+          name as SimpleIdentifierImpl,
+          extendsKeyword,
+          bound as TypeAnnotationImpl?);
+
+  TypeParameterImpl typeParameter2(
+          {Comment? comment,
+          List<Annotation>? metadata,
+          required SimpleIdentifier name,
+          Token? extendsKeyword,
+          TypeAnnotation? bound,
+          Token? varianceKeyword}) =>
+      TypeParameterImpl(
+          comment as CommentImpl?,
+          metadata,
+          name as SimpleIdentifierImpl,
+          extendsKeyword,
+          bound as TypeAnnotationImpl?)
+        ..varianceKeyword = varianceKeyword;
 
   @override
-  TypeParameterList typeParameterList(Token leftBracket,
+  TypeParameterListImpl typeParameterList(Token leftBracket,
           List<TypeParameter> typeParameters, Token rightBracket) =>
-      new TypeParameterListImpl(leftBracket, typeParameters, rightBracket);
+      TypeParameterListImpl(leftBracket, typeParameters, rightBracket);
 
   @override
-  VariableDeclaration variableDeclaration(
-          SimpleIdentifier name, Token equals, Expression initializer) =>
-      new VariableDeclarationImpl(name, equals, initializer);
+  VariableDeclarationImpl variableDeclaration(
+          SimpleIdentifier name, Token? equals, Expression? initializer) =>
+      VariableDeclarationImpl(
+          name as SimpleIdentifierImpl, equals, initializer as ExpressionImpl?);
 
   @override
-  VariableDeclarationList variableDeclarationList(
-          Comment comment,
-          List<Annotation> metadata,
-          Token keyword,
-          TypeAnnotation type,
+  VariableDeclarationListImpl variableDeclarationList(
+          Comment? comment,
+          List<Annotation>? metadata,
+          Token? keyword,
+          TypeAnnotation? type,
           List<VariableDeclaration> variables) =>
-      new VariableDeclarationListImpl(
-          comment, metadata, keyword, type, variables);
+      VariableDeclarationListImpl(comment as CommentImpl?, metadata, null,
+          keyword, type as TypeAnnotationImpl?, variables);
 
   @override
-  VariableDeclarationStatement variableDeclarationStatement(
+  VariableDeclarationListImpl variableDeclarationList2(
+      {Comment? comment,
+      List<Annotation>? metadata,
+      Token? lateKeyword,
+      Token? keyword,
+      TypeAnnotation? type,
+      required List<VariableDeclaration> variables}) {
+    return VariableDeclarationListImpl(comment as CommentImpl?, metadata,
+        lateKeyword, keyword, type as TypeAnnotationImpl?, variables);
+  }
+
+  @override
+  VariableDeclarationStatementImpl variableDeclarationStatement(
           VariableDeclarationList variableList, Token semicolon) =>
-      new VariableDeclarationStatementImpl(variableList, semicolon);
+      VariableDeclarationStatementImpl(
+          variableList as VariableDeclarationListImpl, semicolon);
 
   @override
-  WhileStatement whileStatement(Token whileKeyword, Token leftParenthesis,
+  WhileStatementImpl whileStatement(Token whileKeyword, Token leftParenthesis,
           Expression condition, Token rightParenthesis, Statement body) =>
-      new WhileStatementImpl(
-          whileKeyword, leftParenthesis, condition, rightParenthesis, body);
+      WhileStatementImpl(whileKeyword, leftParenthesis,
+          condition as ExpressionImpl, rightParenthesis, body as StatementImpl);
 
   @override
-  WithClause withClause(Token withKeyword, List<TypeName> mixinTypes) =>
-      new WithClauseImpl(withKeyword, mixinTypes);
+  WithClauseImpl withClause(Token withKeyword, List<NamedType> mixinTypes) =>
+      WithClauseImpl(withKeyword, mixinTypes);
 
   @override
-  YieldStatement yieldStatement(Token yieldKeyword, Token star,
+  YieldStatementImpl yieldStatement(Token yieldKeyword, Token? star,
           Expression expression, Token semicolon) =>
-      new YieldStatementImpl(yieldKeyword, star, expression, semicolon);
+      YieldStatementImpl(
+          yieldKeyword, star, expression as ExpressionImpl, semicolon);
 }

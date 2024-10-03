@@ -3,9 +3,11 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:typed_data';
+
 import 'package:expect/expect.dart';
 
-void testIterableFunctions(list, first, last) {
+void testIterableFunctions<T extends num>(
+    List<T> list, T first, T last, T zero) {
   assert(list.length > 0);
 
   Expect.equals(first, list.first);
@@ -16,7 +18,7 @@ void testIterableFunctions(list, first, last) {
     Expect.equals(first, list.single);
     Expect.equals(first, list.singleWhere((x) => x == last));
   } else {
-    Expect.throws(() => list.single, (e) => e is StateError);
+    Expect.throwsStateError(() => list.single);
     bool isFirst = true;
     Expect.equals(first, list.singleWhere((x) {
       if (isFirst) {
@@ -75,8 +77,8 @@ void testIterableFunctions(list, first, last) {
   Expect.equals(list.length, whereCount);
 
   if (list.length > 1) {
-    int reduceResult = 1;
-    Expect.equals(list.length, list.reduce((x, y) => ++reduceResult));
+    var reduceResult = zero + 1;
+    Expect.equals(list.length, list.reduce((x, y) => ++reduceResult as T));
   } else {
     Expect.equals(first, list.reduce((x, y) {
       throw "should not be called";
@@ -96,20 +98,20 @@ void testIterableFunctions(list, first, last) {
   l2.add(first);
   Expect.equals(first, l2.last);
   var l3 = list.toList(growable: false);
-  Expect.throws(() => l3.add(last), (e) => e is UnsupportedError);
+  Expect.throwsUnsupportedError(() => l3.add(last));
 }
 
-void emptyChecks(list) {
+void emptyChecks<T extends num>(List<T> list, T zero) {
   assert(list.length == 0);
 
   Expect.isTrue(list.isEmpty);
 
-  Expect.throws(() => list.first, (e) => e is StateError);
-  Expect.throws(() => list.last, (e) => e is StateError);
-  Expect.throws(() => list.single, (e) => e is StateError);
-  Expect.throws(() => list.firstWhere((x) => true), (e) => e is StateError);
-  Expect.throws(() => list.lastWhere((x) => true), (e) => e is StateError);
-  Expect.throws(() => list.singleWhere((x) => true), (e) => e is StateError);
+  Expect.throwsStateError(() => list.first);
+  Expect.throwsStateError(() => list.last);
+  Expect.throwsStateError(() => list.single);
+  Expect.throwsStateError(() => list.firstWhere((x) => true));
+  Expect.throwsStateError(() => list.lastWhere((x) => true));
+  Expect.throwsStateError(() => list.singleWhere((x) => true));
 
   Expect.isFalse(list.any((x) => true));
   Expect.isFalse(list.contains(null));
@@ -146,7 +148,7 @@ void emptyChecks(list) {
   Expect.equals(list.length, whereList.length);
   Expect.equals(list.length, whereCount);
 
-  Expect.throws(() => list.reduce((x, y) => x), (e) => e is StateError);
+  Expect.throwsStateError(() => list.reduce((x, y) => x));
 
   Expect.isTrue(list.skip(list.length).isEmpty);
   Expect.isTrue(list.skip(0).isEmpty);
@@ -158,29 +160,28 @@ void emptyChecks(list) {
   Expect.isTrue(list.takeWhile((x) => true).isEmpty);
   Expect.isTrue(list.toList().isEmpty);
   var l2 = list.toList();
-  var sampleValue = list is List<int> ? 0 : 0.0;
-  l2.add(sampleValue);
-  Expect.equals(sampleValue, l2.last);
+  l2.add(zero);
+  Expect.equals(zero, l2.last);
   var l3 = list.toList(growable: false);
-  Expect.throws(() => l3.add(sampleValue), (e) => e is UnsupportedError);
+  Expect.throwsUnsupportedError(() => l3.add(zero));
 }
 
 main() {
-  testIterableFunctions(new Float32List.fromList([1.5, 9.5]), 1.5, 9.5);
-  testIterableFunctions(new Float64List.fromList([1.5, 9.5]), 1.5, 9.5);
-  testIterableFunctions(new Int8List.fromList([3, 9]), 3, 9);
-  testIterableFunctions(new Int16List.fromList([3, 9]), 3, 9);
-  testIterableFunctions(new Int32List.fromList([3, 9]), 3, 9);
-  testIterableFunctions(new Uint8List.fromList([3, 9]), 3, 9);
-  testIterableFunctions(new Uint16List.fromList([3, 9]), 3, 9);
-  testIterableFunctions(new Uint32List.fromList([3, 9]), 3, 9);
+  testIterableFunctions(new Float32List.fromList([1.5, 9.5]), 1.5, 9.5, 0.0);
+  testIterableFunctions(new Float64List.fromList([1.5, 9.5]), 1.5, 9.5, 0.0);
+  testIterableFunctions(new Int8List.fromList([3, 9]), 3, 9, 0);
+  testIterableFunctions(new Int16List.fromList([3, 9]), 3, 9, 0);
+  testIterableFunctions(new Int32List.fromList([3, 9]), 3, 9, 0);
+  testIterableFunctions(new Uint8List.fromList([3, 9]), 3, 9, 0);
+  testIterableFunctions(new Uint16List.fromList([3, 9]), 3, 9, 0);
+  testIterableFunctions(new Uint32List.fromList([3, 9]), 3, 9, 0);
 
-  emptyChecks(new Float32List(0));
-  emptyChecks(new Float64List(0));
-  emptyChecks(new Int8List(0));
-  emptyChecks(new Int16List(0));
-  emptyChecks(new Int32List(0));
-  emptyChecks(new Uint8List(0));
-  emptyChecks(new Uint16List(0));
-  emptyChecks(new Uint32List(0));
+  emptyChecks(new Float32List(0), 0.0);
+  emptyChecks(new Float64List(0), 0.0);
+  emptyChecks(new Int8List(0), 0);
+  emptyChecks(new Int16List(0), 0);
+  emptyChecks(new Int32List(0), 0);
+  emptyChecks(new Uint8List(0), 0);
+  emptyChecks(new Uint16List(0), 0);
+  emptyChecks(new Uint32List(0), 0);
 }

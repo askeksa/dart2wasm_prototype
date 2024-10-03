@@ -13,10 +13,10 @@ Fasta sounds like faster, and that's a promise we intend to keep.
 
 ## Getting Started
 
-1. [Build](https://github.com/dart-lang/sdk/wiki/Building#building) the VM and patched SDK. Note: you only need to build the targets `runtime_kernel`, and `dart_precompiled_runtime`, so you only need to run this command:
+1. [Build](https://github.com/dart-lang/sdk/wiki/Building#building) the VM and patched SDK. Note: you only need to build the targets `runtime` and `dart_precompiled_runtime`, so you only need to run this command:
 
 ```bash
-./tools/build.py --mode release --arch x64 runtime_kernel dart_precompiled_runtime
+./tools/build.py --mode release --arch x64 runtime dart_precompiled_runtime
 ```
 
 ## Create an Outline File
@@ -26,15 +26,6 @@ Fasta sounds like faster, and that's a promise we intend to keep.
 2. Optionally, run `./pkg/front_end/tool/fasta dump-ir pkg/kernel/bin/dump.dart pkg/compiler/lib/src/dart2js.dart.dill` to view the generated outline.
 
 This will generate a file named `pkg/compiler/lib/src/dart2js.dart.dill` which contains a serialized representation of the input program excluding method bodies. This is similar to an analyzer summary.
-
-
-## Create a Platform Dill File
-
-A `platform.dill` is a dill file that contains the Dart SDK platform libraries.
-
-```bash
-./pkg/front_end/tool/fasta compile-platform platform.dill
-```
 
 ## Compiling a Program
 

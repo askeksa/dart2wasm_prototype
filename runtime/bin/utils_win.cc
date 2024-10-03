@@ -3,18 +3,35 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "platform/globals.h"
-#if defined(HOST_OS_WINDOWS)
+#if defined(DART_HOST_OS_WINDOWS)
 
 #include <errno.h>  // NOLINT
 #include <time.h>   // NOLINT
 
-#include "bin/log.h"
 #include "bin/utils.h"
 #include "bin/utils_win.h"
 #include "platform/assert.h"
+#include "platform/syslog.h"
 
 namespace dart {
 namespace bin {
+
+// The offset between a `FILETIME` epoch (January 1, 1601 UTC) and a Unix
+// epoch (January 1, 1970 UTC) measured in 100ns intervals.
+//
+// See https://docs.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-filetime
+static const int64_t kFileTimeEpoch = 116444736000000000LL;
+
+// Although win32 uses 64-bit integers for representing timestamps,
+// these are packed into a FILETIME structure. The FILETIME
+// structure is just a struct representing a 64-bit integer. The
+// TimeStamp union allows access to both a FILETIME and an integer
+// representation of the timestamp. The Windows timestamp is in
+// 100-nanosecond intervals since January 1, 1601.
+union TimeStamp {
+  FILETIME ft_;
+  int64_t t_;
+};
 
 void FormatMessageIntoBuffer(DWORD code, wchar_t* buffer, int buffer_length) {
   DWORD message_size = FormatMessageW(
@@ -22,8 +39,8 @@ void FormatMessageIntoBuffer(DWORD code, wchar_t* buffer, int buffer_length) {
       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), buffer, buffer_length, NULL);
   if (message_size == 0) {
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-      Log::PrintErr("FormatMessage failed for error code %d (error %d)\n", code,
-                    GetLastError());
+      Syslog::PrintErr("FormatMessage failed for error code %d (error %d)\n",
+                       code, GetLastError());
     }
     _snwprintf(buffer, buffer_length, L"OS Error %d", code);
   }
@@ -31,17 +48,19 @@ void FormatMessageIntoBuffer(DWORD code, wchar_t* buffer, int buffer_length) {
   buffer[buffer_length - 1] = 0;
 }
 
-
-OSError::OSError() : sub_system_(kSystem), code_(0), message_(NULL) {
-  set_code(GetLastError());
-
-  static const int kMaxMessageLength = 256;
-  wchar_t message[kMaxMessageLength];
-  FormatMessageIntoBuffer(code_, message, kMaxMessageLength);
-  char* utf8 = StringUtilsWin::WideToUtf8(message);
-  SetMessage(utf8);
+FILETIME GetFiletimeFromMillis(int64_t millis) {
+  static const int64_t kTimeScaler = 10000;  // 100 ns to ms.
+  TimeStamp t = {.t_ = millis * kTimeScaler + kFileTimeEpoch};
+  return t.ft_;
 }
 
+OSError::OSError() : sub_system_(kSystem), code_(0), message_(NULL) {
+  Reload();
+}
+
+void OSError::Reload() {
+  SetCodeAndMessage(kSystem, GetLastError());
+}
 
 void OSError::SetCodeAndMessage(SubSystem sub_system, int code) {
   set_sub_system(sub_system);
@@ -54,7 +73,6 @@ void OSError::SetCodeAndMessage(SubSystem sub_system, int code) {
   SetMessage(utf8);
 }
 
-
 char* StringUtils::ConsoleStringToUtf8(char* str,
                                        intptr_t len,
                                        intptr_t* result_len) {
@@ -66,7 +84,6 @@ char* StringUtils::ConsoleStringToUtf8(char* str,
   char* utf8 = StringUtilsWin::WideToUtf8(wide, wide_len, result_len);
   return utf8;
 }
-
 
 char* StringUtils::Utf8ToConsoleString(char* utf8,
                                        intptr_t len,
@@ -88,7 +105,6 @@ char* StringUtils::Utf8ToConsoleString(char* utf8,
   return ansi;
 }
 
-
 char* StringUtilsWin::WideToUtf8(wchar_t* wide,
                                  intptr_t len,
                                  intptr_t* result_len) {
@@ -104,7 +120,6 @@ char* StringUtilsWin::WideToUtf8(wchar_t* wide,
   }
   return utf8;
 }
-
 
 wchar_t* StringUtilsWin::Utf8ToWide(char* utf8,
                                     intptr_t len,
@@ -122,14 +137,12 @@ wchar_t* StringUtilsWin::Utf8ToWide(char* utf8,
   return wide;
 }
 
-
 const char* StringUtils::Utf8ToConsoleString(const char* utf8,
                                              intptr_t len,
                                              intptr_t* result_len) {
   return const_cast<const char*>(StringUtils::Utf8ToConsoleString(
       const_cast<char*>(utf8), len, result_len));
 }
-
 
 const char* StringUtils::ConsoleStringToUtf8(const char* str,
                                              intptr_t len,
@@ -138,7 +151,6 @@ const char* StringUtils::ConsoleStringToUtf8(const char* str,
       const_cast<char*>(str), len, result_len));
 }
 
-
 const char* StringUtilsWin::WideToUtf8(const wchar_t* wide,
                                        intptr_t len,
                                        intptr_t* result_len) {
@@ -146,31 +158,12 @@ const char* StringUtilsWin::WideToUtf8(const wchar_t* wide,
       StringUtilsWin::WideToUtf8(const_cast<wchar_t*>(wide), len, result_len));
 }
 
-
 const wchar_t* StringUtilsWin::Utf8ToWide(const char* utf8,
                                           intptr_t len,
                                           intptr_t* result_len) {
   return const_cast<const wchar_t*>(
       StringUtilsWin::Utf8ToWide(const_cast<char*>(utf8), len, result_len));
 }
-
-
-char* StringUtils::StrNDup(const char* s, intptr_t n) {
-  intptr_t len = strlen(s);
-  if ((n < 0) || (len < 0)) {
-    return NULL;
-  }
-  if (n < len) {
-    len = n;
-  }
-  char* result = reinterpret_cast<char*>(malloc(len + 1));
-  if (result == NULL) {
-    return NULL;
-  }
-  result[len] = '\0';
-  return reinterpret_cast<char*>(memmove(result, s, len));
-}
-
 
 bool ShellUtils::GetUtf8Argv(int argc, char** argv) {
   wchar_t* command_line = GetCommandLineW();
@@ -195,28 +188,13 @@ bool ShellUtils::GetUtf8Argv(int argc, char** argv) {
   return true;
 }
 
-
-// Although win32 uses 64-bit integers for representing timestamps,
-// these are packed into a FILETIME structure. The FILETIME
-// structure is just a struct representing a 64-bit integer. The
-// TimeStamp union allows access to both a FILETIME and an integer
-// representation of the timestamp. The Windows timestamp is in
-// 100-nanosecond intervals since January 1, 1601.
-union TimeStamp {
-  FILETIME ft_;
-  int64_t t_;
-};
-
-
 static int64_t GetCurrentTimeMicros() {
-  static const int64_t kTimeEpoc = 116444736000000000LL;
   static const int64_t kTimeScaler = 10;  // 100 ns to us.
 
   TimeStamp time;
   GetSystemTimeAsFileTime(&time.ft_);
-  return (time.t_ - kTimeEpoc) / kTimeScaler;
+  return (time.t_ - kFileTimeEpoch) / kTimeScaler;
 }
-
 
 static int64_t qpc_ticks_per_second = 0;
 
@@ -229,11 +207,9 @@ void TimerUtils::InitOnce() {
   }
 }
 
-
 int64_t TimerUtils::GetCurrentMonotonicMillis() {
   return GetCurrentMonotonicMicros() / 1000;
 }
-
 
 int64_t TimerUtils::GetCurrentMonotonicMicros() {
   if (qpc_ticks_per_second == 0) {
@@ -252,7 +228,6 @@ int64_t TimerUtils::GetCurrentMonotonicMicros() {
   return result;
 }
 
-
 void TimerUtils::Sleep(int64_t millis) {
   ::Sleep(millis);
 }
@@ -260,4 +235,4 @@ void TimerUtils::Sleep(int64_t millis) {
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_WINDOWS)
+#endif  // defined(DART_HOST_OS_WINDOWS)

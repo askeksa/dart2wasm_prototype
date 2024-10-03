@@ -5,13 +5,7 @@
 import 'dart:async';
 import 'dart:io';
 
-Future<int> freeIPv4AndIPv6Port() async {
-  var socket =
-      await ServerSocket.bind(InternetAddress.ANY_IP_V6, 0, v6Only: false);
-  int port = socket.port;
-  await socket.close();
-  return port;
-}
+import "package:expect/expect.dart";
 
 int lastRetryId = 0;
 
@@ -30,4 +24,37 @@ Future retry(Future fun(), {int maxCount: 10}) async {
     }
   }
   return await fun();
+}
+
+Future throws(Function f, bool check(Object exception)) async {
+  try {
+    await f();
+  } catch (e) {
+    if (!check(e)) {
+      Expect.fail('Unexpected: $e');
+    }
+    return;
+  }
+  Expect.fail('Did not throw');
+}
+
+// Create a temporary directory and delete it when the test function exits.
+Future withTempDir(String prefix, Future<void> test(Directory dir)) async {
+  final tempDir = Directory.systemTemp.createTempSync(prefix);
+  try {
+    await runZonedGuarded(() => test(tempDir), (e, st) {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {
+        // ignore errors
+      }
+      throw e;
+    });
+  } finally {
+    try {
+      tempDir.deleteSync(recursive: true);
+    } catch (_) {
+      // ignore errors
+    }
+  }
 }

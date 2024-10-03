@@ -14,15 +14,15 @@ main() {
 
 testNumberIdentity() {
   const int smi = 8;
-  const int bigint = 22107138293752210713829375;
+  const int mint = 9223372036854775807;
   const double dbl = 8.0;
   // No int/double differences in dart2js.
   var a = smi + 0;
   Expect.isFalse(identical(a, dbl));
-  a = dbl + 0.0;
-  Expect.isFalse(identical(a, smi));
+  var c = dbl + 0.0;
+  Expect.isFalse(identical(c, smi));
 
-  a = bigint;
+  a = mint;
   var b = a + 0;
   Expect.isTrue(identical(a, b));
   b = a + 1;

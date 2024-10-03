@@ -5,10 +5,13 @@
 #ifndef RUNTIME_VM_PORT_H_
 #define RUNTIME_VM_PORT_H_
 
+#include <memory>
+
 #include "include/dart_api.h"
 #include "vm/allocation.h"
 #include "vm/globals.h"
 #include "vm/json_stream.h"
+#include "vm/port_set.h"
 #include "vm/random.h"
 
 namespace dart {
@@ -25,6 +28,8 @@ class PortMap : public AllStatic {
     kNewPort = 0,      // a newly allocated port
     kLivePort = 1,     // a regular port (has a ReceivePort)
     kControlPort = 2,  // a special control port (has a ReceivePort)
+    kInactivePort =
+        3,  // an inactive port (has a ReceivePort) not considered live.
   };
 
   // Allocate a port for the provided handler and return its VM-global id.
@@ -46,15 +51,24 @@ class PortMap : public AllStatic {
   // active any longer.
   //
   // Claims ownership of 'message'.
-  static bool PostMessage(Message* message);
+  static bool PostMessage(std::unique_ptr<Message> message,
+                          bool before_events = false);
 
   // Returns whether a port is local to the current isolate.
   static bool IsLocalPort(Dart_Port id);
 
+  // Returns whether a port is live (e.g., is not new or inactive).
+  static bool IsLivePort(Dart_Port id);
+
   // Returns the owning Isolate for port 'id'.
   static Isolate* GetIsolate(Dart_Port id);
 
-  static void InitOnce();
+  // Whether the destination port's isolate is a member of [isolate_group].
+  static bool IsReceiverInThisIsolateGroup(Dart_Port receiver,
+                                           IsolateGroup* group);
+
+  static void Init();
+  static void Cleanup();
 
   static void PrintPortsForMessageHandler(MessageHandler* handler,
                                           JSONStream* stream);
@@ -64,38 +78,23 @@ class PortMap : public AllStatic {
  private:
   friend class dart::PortMapTestPeer;
 
-  // Mapping between port numbers and handlers.
-  //
-  // Free entries have id == 0 and handler == NULL. Deleted entries
-  // have id == 0 and handler == deleted_entry_.
-  typedef struct {
-    Dart_Port port;
+  struct Entry : public PortSet<Entry>::Entry {
+    Entry() : handler(nullptr), state(kNewPort) {}
+
     MessageHandler* handler;
     PortState state;
-  } Entry;
+  };
 
   static const char* PortStateString(PortState state);
 
   // Allocate a new unique port.
   static Dart_Port AllocatePort();
 
-  static bool IsActivePort(Dart_Port id);
-  static bool IsLivePort(Dart_Port id);
-
-  static intptr_t FindPort(Dart_Port port);
-  static void Rehash(intptr_t new_capacity);
-
-  static void MaintainInvariants();
-
   // Lock protecting access to the port map.
   static Mutex* mutex_;
 
-  // Hashmap of ports.
-  static Entry* map_;
+  static PortSet<Entry>* ports_;
   static MessageHandler* deleted_entry_;
-  static intptr_t capacity_;
-  static intptr_t used_;
-  static intptr_t deleted_;
 
   static Random* prng_;
 };

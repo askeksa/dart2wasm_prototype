@@ -3,10 +3,10 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_WINDOWS)
+#if defined(DART_HOST_OS_WINDOWS)
 
-#include "vm/cpuinfo.h"
 #include "vm/cpuid.h"
+#include "vm/cpuinfo.h"
 
 // __cpuid()
 #include <intrin.h>  // NOLINT
@@ -19,11 +19,11 @@ namespace dart {
 CpuInfoMethod CpuInfo::method_ = kCpuInfoDefault;
 const char* CpuInfo::fields_[kCpuInfoMax] = {0};
 
-void CpuInfo::InitOnce() {
+void CpuInfo::Init() {
   method_ = kCpuInfoCpuId;
 
   // Initialize the CpuId information.
-  CpuId::InitOnce();
+  CpuId::Init();
 
   fields_[kCpuInfoProcessor] = "Processor";
   fields_[kCpuInfoModel] = "Hardware";
@@ -32,23 +32,19 @@ void CpuInfo::InitOnce() {
   fields_[kCpuInfoArchitecture] = NULL;
 }
 
-
 void CpuInfo::Cleanup() {
   CpuId::Cleanup();
 }
-
 
 bool CpuInfo::FieldContains(CpuInfoIndices idx, const char* search_string) {
   ASSERT(method_ != kCpuInfoDefault);
   return strstr(CpuId::field(idx), search_string);
 }
 
-
 const char* CpuInfo::ExtractField(CpuInfoIndices idx) {
   ASSERT(method_ != kCpuInfoDefault);
   return CpuId::field(idx);
 }
-
 
 bool CpuInfo::HasField(const char* field) {
   ASSERT(method_ != kCpuInfoDefault);
@@ -60,4 +56,4 @@ bool CpuInfo::HasField(const char* field) {
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_WINDOWS)
+#endif  // defined(DART_HOST_OS_WINDOWS)

@@ -5,6 +5,8 @@
 
 library library12.dart;
 
+import 'package:expect/expect.dart';
+
 import "library11.dart";
 
 class Library12 {

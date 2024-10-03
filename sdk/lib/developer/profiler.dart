@@ -4,7 +4,8 @@
 
 part of dart.developer;
 
-/// A UserTag can be used to group samples in the Observatory profiler.
+/// A UserTag can be used to group samples in the
+/// [DevTools CPU profiler](https://flutter.dev/docs/development/tools/devtools/cpu-profiler).
 abstract class UserTag {
   /// The maximum number of UserTag instances that can be created by a program.
   static const MAX_USER_TAGS = 64;
@@ -46,7 +47,7 @@ abstract class Metric {
 }
 
 /// A measured value with a min and max. Initial value is min. Value will
-/// be clamped to the interval [min, max].
+/// be clamped to the interval `[min, max]`.
 class Gauge extends Metric {
   final double min;
   final double max;
@@ -63,17 +64,12 @@ class Gauge extends Metric {
   }
 
   Gauge(String name, String description, this.min, this.max)
-      : super(name, description) {
-    if (min is! double) {
-      throw new ArgumentError('min must be a double');
-    }
-    if (max is! double) {
-      throw new ArgumentError('max must be a double');
-    }
-    if (!(min < max)) {
-      throw new ArgumentError('min must be less than max');
-    }
-    _value = min;
+      : _value = min,
+        super(name, description) {
+    // TODO: When NNBD is complete, delete the following two lines.
+    ArgumentError.checkNotNull(min, 'min');
+    ArgumentError.checkNotNull(max, 'max');
+    if (!(min < max)) throw new ArgumentError('min must be less than max');
   }
 
   Map _toJSON() {
@@ -117,9 +113,8 @@ class Metrics {
 
   /// Register [Metric]s to make them visible to Observatory.
   static void register(Metric metric) {
-    if (metric is! Metric) {
-      throw new ArgumentError('metric must be a Metric');
-    }
+    // TODO: When NNBD is complete, delete the following line.
+    ArgumentError.checkNotNull(metric, 'metric');
     if (_metrics[metric.name] != null) {
       throw new ArgumentError('Registered metrics have unique names');
     }
@@ -128,20 +123,21 @@ class Metrics {
 
   /// Deregister [Metric]s to make them not visible to Observatory.
   static void deregister(Metric metric) {
-    if (metric is! Metric) {
-      throw new ArgumentError('metric must be a Metric');
-    }
+    // TODO: When NNBD is complete, delete the following line.
+    ArgumentError.checkNotNull(metric, 'metric');
     _metrics.remove(metric.name);
   }
 
-  static String _printMetric(String id) {
+  @pragma("vm:entry-point", !const bool.fromEnvironment("dart.vm.product"))
+  static String? _printMetric(String id) {
     var metric = _metrics[id];
     if (metric == null) {
       return null;
     }
-    return JSON.encode(metric._toJSON());
+    return json.encode(metric._toJSON());
   }
 
+  @pragma("vm:entry-point", !const bool.fromEnvironment("dart.vm.product"))
   static String _printMetrics() {
     var metrics = [];
     for (var metric in _metrics.values) {
@@ -151,6 +147,6 @@ class Metrics {
       'type': 'MetricList',
       'metrics': metrics,
     };
-    return JSON.encode(map);
+    return json.encode(map);
   }
 }

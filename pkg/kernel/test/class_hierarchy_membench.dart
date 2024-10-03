@@ -2,8 +2,10 @@
 // Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
+
 import 'package:kernel/kernel.dart';
 import 'package:kernel/class_hierarchy.dart';
+import 'package:kernel/core_types.dart';
 import 'package:args/args.dart';
 import 'class_hierarchy_basic.dart';
 import 'dart:io';
@@ -16,15 +18,15 @@ ArgParser argParser = new ArgParser()
       defaultsTo: '300');
 
 String usage = """
-Usage: class_hierarchy_membench [options] FILE.dart
+Usage: class_hierarchy_membench [options] FILE.dill
 
 Options:
 ${argParser.usage}
 """;
 
-/// Builds N copies of the class hierarchy for the given program.
+/// Builds N copies of the class hierarchy for the given component.
 /// Pass --print-metrics to the Dart VM to measure the memory use.
-main(List<String> args) {
+void main(List<String> args) {
   if (args.length == 0) {
     print(usage);
     exit(1);
@@ -36,19 +38,21 @@ main(List<String> args) {
   }
   String filename = options.rest.single;
 
-  Program program = loadProgramFromBinary(filename);
+  Component component = loadComponentFromBinary(filename);
+  CoreTypes coreTypes = new CoreTypes(component);
 
   int copyCount = int.parse(options['count']);
 
   ClassHierarchy buildHierarchy() {
     return options['basic']
-        ? new BasicClassHierarchy(program)
-        : new ClassHierarchy(program);
+        ? new BasicClassHierarchy(component)
+        : new ClassHierarchy(component, coreTypes);
   }
 
-  List<ClassHierarchy> keepAlive = <ClassHierarchy>[];
+  List<ClosedWorldClassHierarchy> keepAlive = <ClosedWorldClassHierarchy>[];
   for (int i = 0; i < copyCount; ++i) {
-    keepAlive.add(buildHierarchy());
+    // TODO(johnniwinther): This doesn't work for the [BasicClassHierarchy].
+    keepAlive.add(buildHierarchy() as ClosedWorldClassHierarchy);
   }
 
   print('$copyCount copies built');

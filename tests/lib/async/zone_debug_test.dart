@@ -6,8 +6,6 @@ import 'package:expect/expect.dart';
 import 'package:async_helper/async_helper.dart';
 import 'dart:async';
 
-import 'dart:collection';
-
 /**
  * We represent the current stack trace by an integer. From time to time we
  * increment the variable. This corresponds to a new stack trace.
@@ -17,7 +15,8 @@ List restoredStackTrace = [];
 
 List events = [];
 
-debugZoneRegisterCallback(Zone self, ZoneDelegate parent, Zone origin, f()) {
+ZoneCallback<R> debugZoneRegisterCallback<R>(
+    Zone self, ZoneDelegate parent, Zone origin, R f()) {
   List savedTrace = [stackTrace]..addAll(restoredStackTrace);
   return parent.registerCallback(origin, () {
     restoredStackTrace = savedTrace;
@@ -25,8 +24,8 @@ debugZoneRegisterCallback(Zone self, ZoneDelegate parent, Zone origin, f()) {
   });
 }
 
-debugZoneRegisterUnaryCallback(
-    Zone self, ZoneDelegate parent, Zone origin, f(arg)) {
+ZoneUnaryCallback<R, T> debugZoneRegisterUnaryCallback<R, T>(
+    Zone self, ZoneDelegate parent, Zone origin, R f(T arg)) {
   List savedTrace = [stackTrace]..addAll(restoredStackTrace);
   return parent.registerUnaryCallback(origin, (arg) {
     restoredStackTrace = savedTrace;
@@ -34,22 +33,27 @@ debugZoneRegisterUnaryCallback(
   });
 }
 
-debugZoneRun(Zone self, ZoneDelegate parent, Zone origin, f()) {
+T debugZoneRun<T>(Zone self, ZoneDelegate parent, Zone origin, T f()) {
   stackTrace++;
   restoredStackTrace = [];
   return parent.run(origin, f);
 }
 
-debugZoneRunUnary(Zone self, ZoneDelegate parent, Zone origin, f(arg), arg) {
+R debugZoneRunUnary<R, T>(
+    Zone self, ZoneDelegate parent, Zone origin, R f(T arg), T arg) {
   stackTrace++;
   restoredStackTrace = [];
   return parent.runUnary(origin, f, arg);
 }
 
-List expectedDebugTrace;
+late List expectedDebugTrace;
 
-debugUncaughtHandler(
-    Zone self, ZoneDelegate parent, Zone origin, error, StackTrace stackTrace) {
+void debugUncaughtHandler(
+    Zone self,
+    ZoneDelegate parent,
+    Zone origin,
+    error,
+    StackTrace? stackTrace) {
   events.add("handling uncaught error $error");
   Expect.listEquals(expectedDebugTrace, restoredStackTrace);
   // Suppress the error and don't propagate to parent.
@@ -68,7 +72,7 @@ main() {
   // runGuarded calls run, captures the synchronous error (if any) and
   // gives that one to handleUncaughtError.
 
-  Expect.identical(Zone.ROOT, Zone.current);
+  Expect.identical(Zone.root, Zone.current);
   Zone forked;
   forked = Zone.current.fork(specification: DEBUG_SPECIFICATION);
 
@@ -116,8 +120,8 @@ main() {
         expectedDebugTrace = [fork3Trace, fork2Trace, globalTrace];
         throw "gee";
       });
-    }, runGuarded: false);
-  }, runGuarded: false);
+    });
+  });
   openTests++;
   f();
   f2();

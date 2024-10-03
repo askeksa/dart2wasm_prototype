@@ -1,16 +1,15 @@
 // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override
 
 library set_library_debuggable_rpc_test;
 
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 
 import 'test_helper.dart';
 
-var tests = [
+var tests = <IsolateTest>[
   (Isolate isolate) async {
     var result;
 
@@ -41,7 +40,7 @@ var tests = [
       'libraryId': 'libraries/9999999',
       'isDebuggable': false,
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await isolate.invokeRpcNoUpgrade('setLibraryDebuggable', params);
       expect(false, isTrue, reason: 'Unreachable');
@@ -52,30 +51,6 @@ var tests = [
           e.message,
           "setLibraryDebuggable: "
           "invalid 'libraryId' parameter: libraries/9999999");
-    }
-    expect(caughtException, isTrue);
-  },
-
-  // illegal (dart:_*) library.
-  (Isolate isolate) async {
-    await isolate.load();
-    Library dartInternal = isolate.libraries
-        .firstWhere((Library library) => library.uri == 'dart:_internal');
-    var params = {
-      'libraryId': dartInternal.id,
-      'isDebuggable': false,
-    };
-    bool caughtException;
-    try {
-      await isolate.invokeRpcNoUpgrade('setLibraryDebuggable', params);
-      expect(false, isTrue, reason: 'Unreachable');
-    } on ServerRpcException catch (e) {
-      caughtException = true;
-      expect(e.code, equals(ServerRpcException.kInvalidParams));
-      expect(
-          e.message,
-          "setLibraryDebuggable: "
-          "illegal 'libraryId' parameter: ${dartInternal.id}");
     }
     expect(caughtException, isTrue);
   },

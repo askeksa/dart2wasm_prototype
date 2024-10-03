@@ -1,4 +1,4 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -9,7 +9,7 @@ import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import '../support/integration_tests.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(AnalysisNavigationTest);
   });
@@ -17,9 +17,9 @@ main() {
 
 @reflectiveTest
 class AnalysisNavigationTest extends AbstractAnalysisServerIntegrationTest {
-  test_navigation() async {
-    String pathname1 = sourcePath('test1.dart');
-    String text1 = r'''
+  Future<void> test_navigation() async {
+    var pathname1 = sourcePath('test1.dart');
+    var text1 = r'''
 library foo;
 
 import 'dart:async';
@@ -28,7 +28,7 @@ part 'test2.dart';
 class Class<TypeParameter> {
   Class.constructor(); /* constructor declaration */
 
-  TypeParameter field;
+  TypeParameter field = (throw 0);
 
   method() {}
 }
@@ -39,7 +39,7 @@ function(FunctionTypeAlias parameter) {
   print(parameter());
 }
 
-int topLevelVariable;
+int topLevelVariable = 0;
 
 main() {
   Class<int> localVariable = new Class<int>.constructor(); // usage
@@ -49,8 +49,8 @@ main() {
 }
 ''';
     writeFile(pathname1, text1);
-    String pathname2 = sourcePath('test2.dart');
-    String text2 = r'''
+    var pathname2 = sourcePath('test2.dart');
+    var text2 = r'''
 part of foo;
 ''';
     writeFile(pathname2, text2);
@@ -58,39 +58,35 @@ part of foo;
     sendAnalysisSetSubscriptions({
       AnalysisService.NAVIGATION: [pathname1]
     });
-    List<NavigationRegion> regions;
-    List<NavigationTarget> targets;
-    List<String> targetFiles;
-    onAnalysisNavigation.listen((AnalysisNavigationParams params) {
-      expect(params.file, equals(pathname1));
-      regions = params.regions;
-      targets = params.targets;
-      targetFiles = params.files;
-    });
-
-    await analysisFinished;
 
     // There should be a single error, due to the fact that 'dart:async' is not
     // used.
+    await analysisFinished;
     expect(currentAnalysisErrors[pathname1], hasLength(1));
     expect(currentAnalysisErrors[pathname2], isEmpty);
+
+    var params = await onAnalysisNavigation.first;
+    expect(params.file, equals(pathname1));
+    var regions = params.regions;
+    var targets = params.targets;
+    var targetFiles = params.files;
+
     NavigationTarget findTargetElement(int index) {
-      for (NavigationRegion region in regions) {
+      for (var region in regions) {
         if (region.offset <= index && index < region.offset + region.length) {
           expect(region.targets, hasLength(1));
-          int targetIndex = region.targets[0];
+          var targetIndex = region.targets[0];
           return targets[targetIndex];
         }
       }
       fail('No element found for index $index');
-      return null;
     }
 
     void checkLocal(
         String source, String expectedTarget, ElementKind expectedKind) {
-      int sourceIndex = text1.indexOf(source);
-      int targetIndex = text1.indexOf(expectedTarget);
-      NavigationTarget element = findTargetElement(sourceIndex);
+      var sourceIndex = text1.indexOf(source);
+      var targetIndex = text1.indexOf(expectedTarget);
+      var element = findTargetElement(sourceIndex);
       expect(targetFiles[element.fileIndex], equals(pathname1));
       expect(element.offset, equals(targetIndex));
       expect(element.kind, equals(expectedKind));
@@ -98,8 +94,8 @@ part of foo;
 
     void checkRemote(
         String source, String expectedTargetRegexp, ElementKind expectedKind) {
-      int sourceIndex = text1.indexOf(source);
-      NavigationTarget element = findTargetElement(sourceIndex);
+      var sourceIndex = text1.indexOf(source);
+      var element = findTargetElement(sourceIndex);
       expect(targetFiles[element.fileIndex], matches(expectedTargetRegexp));
       expect(element.kind, equals(expectedKind));
     }
@@ -116,21 +112,21 @@ part of foo;
         'constructor(); // usage',
         'constructor(); /* constructor declaration */',
         ElementKind.CONSTRUCTOR);
-    checkLocal('field;', 'field;', ElementKind.FIELD);
+    checkLocal('field = (', 'field = (', ElementKind.FIELD);
     checkLocal('function(() => localVariable.field)',
         'function(FunctionTypeAlias parameter)', ElementKind.FUNCTION);
     checkLocal('FunctionTypeAlias parameter', 'FunctionTypeAlias();',
-        ElementKind.FUNCTION_TYPE_ALIAS);
-    checkLocal('field)', 'field;', ElementKind.GETTER);
+        ElementKind.TYPE_ALIAS);
+    checkLocal('field)', 'field = (', ElementKind.FIELD);
     checkRemote("'dart:async'", r'async\.dart$', ElementKind.LIBRARY);
     checkLocal(
         'localVariable.field', 'localVariable =', ElementKind.LOCAL_VARIABLE);
     checkLocal('method();', 'method() {', ElementKind.METHOD);
     checkLocal('parameter());', 'parameter) {', ElementKind.PARAMETER);
-    checkLocal('field = 1', 'field;', ElementKind.SETTER);
-    checkLocal('topLevelVariable;', 'topLevelVariable;',
+    checkLocal('field = 1', 'field = (', ElementKind.FIELD);
+    checkLocal('topLevelVariable = 0;', 'topLevelVariable = 0;',
         ElementKind.TOP_LEVEL_VARIABLE);
-    checkLocal(
-        'TypeParameter field;', 'TypeParameter>', ElementKind.TYPE_PARAMETER);
+    checkLocal('TypeParameter field = (', 'TypeParameter>',
+        ElementKind.TYPE_PARAMETER);
   }
 }

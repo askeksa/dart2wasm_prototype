@@ -20,16 +20,15 @@ class IOBuffer {
   // Allocate IO buffer storage.
   static uint8_t* Allocate(intptr_t size);
 
+  // Reallocate IO buffer storage.
+  static uint8_t* Reallocate(uint8_t* buffer, intptr_t new_size);
+
   // Function for disposing of IO buffer storage. All backing storage
   // for IO buffers must be freed using this function.
-  static void Free(void* buffer) {
-    delete[] reinterpret_cast<uint8_t*>(buffer);
-  }
+  static void Free(void* buffer) { free(buffer); }
 
   // Function for finalizing external byte arrays used as IO buffers.
-  static void Finalizer(void* isolate_callback_data,
-                        Dart_WeakPersistentHandle handle,
-                        void* buffer) {
+  static void Finalizer(void* isolate_callback_data, void* buffer) {
     Free(buffer);
   }
 

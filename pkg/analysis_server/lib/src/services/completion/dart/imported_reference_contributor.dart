@@ -1,88 +1,56 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
-library services.completion.contributor.dart.imported_ref;
-
-import 'dart:async';
 
 import 'package:analysis_server/src/provisional/completion/dart/completion_dart.dart';
 import 'package:analysis_server/src/services/completion/dart/completion_manager.dart';
 import 'package:analysis_server/src/services/completion/dart/local_library_contributor.dart';
-import 'package:analysis_server/src/services/completion/dart/optype.dart';
+import 'package:analysis_server/src/services/completion/dart/suggestion_builder.dart'
+    show SuggestionBuilder;
 import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/src/generated/resolver.dart';
+import 'package:analyzer/src/dart/resolver/scope.dart';
 
-import '../../../protocol_server.dart' show CompletionSuggestion;
-
-List<String> hiddenNamesIn(ImportElement importElem) {
-  for (NamespaceCombinator combinator in importElem.combinators) {
-    if (combinator is HideElementCombinator) {
-      return combinator.hiddenNames;
-    }
-  }
-  return null;
-}
-
-List<String> showNamesIn(ImportElement importElem) {
-  for (NamespaceCombinator combinator in importElem.combinators) {
-    if (combinator is ShowElementCombinator) {
-      return combinator.shownNames;
-    }
-  }
-  return null;
-}
-
-/**
- * A contributor for calculating suggestions for imported top level members.
- */
+/// A contributor for calculating suggestions for imported top level members.
 class ImportedReferenceContributor extends DartCompletionContributor {
-  DartCompletionRequest request;
-  OpType optype;
+  ImportedReferenceContributor(
+    DartCompletionRequest request,
+    SuggestionBuilder builder,
+  ) : super(request, builder);
 
   @override
-  Future<List<CompletionSuggestion>> computeSuggestions(
-      DartCompletionRequest request) async {
+  Future<void> computeSuggestions() async {
     if (!request.includeIdentifiers) {
-      return EMPTY_LIST;
+      return;
     }
-
-    List<ImportElement> imports = request.libraryElement.imports;
-    if (imports == null) {
-      return EMPTY_LIST;
-    }
-
-    this.request = request;
-    this.optype = (request as DartCompletionRequestImpl).opType;
-    List<CompletionSuggestion> suggestions = <CompletionSuggestion>[];
 
     // Traverse imports including dart:core
-    for (ImportElement importElem in imports) {
-      LibraryElement libElem = importElem?.importedLibrary;
-      if (libElem != null) {
-        suggestions.addAll(_buildSuggestions(libElem.exportNamespace,
-            prefix: importElem.prefix?.name,
-            showNames: showNamesIn(importElem),
-            hiddenNames: hiddenNamesIn(importElem)));
+    var imports = request.libraryElement.imports;
+    for (var importElement in imports) {
+      var libraryElement = importElement.importedLibrary;
+      if (libraryElement != null) {
+        _buildSuggestions(
+          libraryElement: libraryElement,
+          namespace: importElement.namespace,
+          prefix: importElement.prefix?.name,
+        );
+        if (libraryElement.isDartCore &&
+            request.opType.includeTypeNameSuggestions) {
+          builder.suggestName('Never');
+        }
       }
     }
-
-    return suggestions;
   }
 
-  List<CompletionSuggestion> _buildSuggestions(Namespace namespace,
-      {String prefix, List<String> showNames, List<String> hiddenNames}) {
-    LibraryElementSuggestionBuilder visitor =
-        new LibraryElementSuggestionBuilder(request, optype, prefix);
-    for (Element elem in namespace.definedNames.values) {
-      if (showNames != null && !showNames.contains(elem.name)) {
-        continue;
-      }
-      if (hiddenNames != null && hiddenNames.contains(elem.name)) {
-        continue;
-      }
+  void _buildSuggestions({
+    required LibraryElement libraryElement,
+    required Namespace namespace,
+    String? prefix,
+  }) {
+    builder.libraryUriStr = libraryElement.source.uri.toString();
+    var visitor = LibraryElementSuggestionBuilder(request, builder, prefix);
+    for (var elem in namespace.definedNames.values) {
       elem.accept(visitor);
     }
-    return visitor.suggestions;
+    builder.libraryUriStr = null;
   }
 }

@@ -10,9 +10,10 @@
 #include "bin/builtin.h"
 #include "bin/io_buffer.h"
 #include "bin/lockers.h"
+#include "bin/namespace.h"
 #include "bin/thread.h"
 #include "platform/globals.h"
-#if !defined(HOST_OS_WINDOWS)
+#if !defined(DART_HOST_OS_WINDOWS)
 #include "platform/signal_blocker.h"
 #endif
 #include "platform/utils.h"
@@ -40,7 +41,6 @@ class ProcessResult {
 
   DISALLOW_ALLOCATION();
 };
-
 
 // To be kept in sync with ProcessSignal consts in sdk/lib/io/process.dart
 // Note that this map is as on Linux.
@@ -77,20 +77,23 @@ enum ProcessSignals {
   kLastSignal = kSigsys,
 };
 
-
 // To be kept in sync with ProcessStartMode consts in sdk/lib/io/process.dart.
 enum ProcessStartMode {
   kNormal = 0,
-  kDetached = 1,
-  kDetachedWithStdio = 2,
+  kInheritStdio = 1,
+  kDetached = 2,
+  kDetachedWithStdio = 3,
 };
-
 
 class Process {
  public:
+  static void Init();
+  static void Cleanup();
+
   // Start a new process providing access to stdin, stdout, stderr and
   // process exit streams.
-  static int Start(const char* path,
+  static int Start(Namespace* namespc,
+                   const char* path,
                    char* arguments[],
                    intptr_t arguments_length,
                    const char* working_directory,
@@ -139,7 +142,12 @@ class Process {
   static intptr_t CurrentProcessId();
 
   static intptr_t SetSignalHandler(intptr_t signal);
-  static void ClearSignalHandler(intptr_t signal);
+  // When there is a current Isolate and the 'port' argument is
+  // Dart_GetMainPortId(), this clears the signal handler for the current
+  // isolate. When 'port' is ILLEGAL_PORT, this clears all signal handlers for
+  // 'signal' for all Isolates.
+  static void ClearSignalHandler(intptr_t signal, Dart_Port port);
+  static void ClearSignalHandlerByFd(intptr_t fd, Dart_Port port);
   static void ClearAllSignalHandlers();
 
   static Dart_Handle GetProcessIdNativeField(Dart_Handle process,
@@ -148,6 +156,10 @@ class Process {
 
   static int64_t CurrentRSS();
   static int64_t MaxRSS();
+  static void GetRSSInformation(int64_t* max_rss, int64_t* current_rss);
+
+  static bool ModeIsAttached(ProcessStartMode mode);
+  static bool ModeHasStdio(ProcessStartMode mode);
 
  private:
   static int global_exit_code_;
@@ -158,12 +170,17 @@ class Process {
   DISALLOW_IMPLICIT_CONSTRUCTORS(Process);
 };
 
+typedef void (*sa_handler_t)(int);
 
 class SignalInfo {
  public:
-  SignalInfo(intptr_t fd, intptr_t signal, SignalInfo* next)
+  SignalInfo(intptr_t fd,
+             intptr_t signal,
+             sa_handler_t oldact,
+             SignalInfo* next)
       : fd_(fd),
         signal_(signal),
+        oldact_(oldact),
         // SignalInfo is expected to be created when in a isolate.
         port_(Dart_GetMainPortId()),
         next_(next),
@@ -186,12 +203,14 @@ class SignalInfo {
 
   intptr_t fd() const { return fd_; }
   intptr_t signal() const { return signal_; }
+  sa_handler_t oldact() const { return oldact_; }
   Dart_Port port() const { return port_; }
   SignalInfo* next() const { return next_; }
 
  private:
   intptr_t fd_;
   intptr_t signal_;
+  sa_handler_t oldact_;
   // The port_ is used to identify what isolate the signal-info belongs to.
   Dart_Port port_;
   SignalInfo* next_;
@@ -199,7 +218,6 @@ class SignalInfo {
 
   DISALLOW_COPY_AND_ASSIGN(SignalInfo);
 };
-
 
 // Utility class for collecting the output when running a process
 // synchronously by using Process::Wait. This class is sub-classed in
@@ -245,6 +263,9 @@ class BufferListBase {
     uint8_t* buffer;
     intptr_t buffer_position = 0;
     Dart_Handle result = IOBuffer::Allocate(data_size_, &buffer);
+    if (Dart_IsNull(result)) {
+      return DartUtils::NewDartOSError();
+    }
     if (Dart_IsError(result)) {
       Free();
       return result;
@@ -327,8 +348,8 @@ class BufferListBase {
   DISALLOW_COPY_AND_ASSIGN(BufferListBase);
 };
 
-#if defined(HOST_OS_ANDROID) || defined(HOST_OS_FUCHSIA) ||                    \
-    defined(HOST_OS_LINUX) || defined(HOST_OS_MACOS)
+#if defined(DART_HOST_OS_ANDROID) || defined(DART_HOST_OS_FUCHSIA) ||          \
+    defined(DART_HOST_OS_LINUX) || defined(DART_HOST_OS_MACOS)
 class BufferList : public BufferListBase {
  public:
   BufferList() {}
@@ -345,13 +366,13 @@ class BufferList : public BufferListBase {
       ASSERT(free_size() > 0);
       ASSERT(free_size() <= kBufferSize);
       intptr_t block_size = dart::Utils::Minimum(free_size(), available);
-#if defined(HOST_OS_FUCHSIA)
+#if defined(DART_HOST_OS_FUCHSIA)
       intptr_t bytes = NO_RETRY_EXPECTED(
           read(fd, reinterpret_cast<void*>(FreeSpaceAddress()), block_size));
 #else
       intptr_t bytes = TEMP_FAILURE_RETRY(
           read(fd, reinterpret_cast<void*>(FreeSpaceAddress()), block_size));
-#endif  // defined(HOST_OS_FUCHSIA)
+#endif  // defined(DART_HOST_OS_FUCHSIA)
       if (bytes < 0) {
         return false;
       }
@@ -365,7 +386,7 @@ class BufferList : public BufferListBase {
  private:
   DISALLOW_COPY_AND_ASSIGN(BufferList);
 };
-#endif  // defined(HOST_OS_ANDROID) ...
+#endif  // defined(DART_HOST_OS_ANDROID) ...
 
 }  // namespace bin
 }  // namespace dart

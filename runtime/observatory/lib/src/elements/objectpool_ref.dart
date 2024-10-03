@@ -6,34 +6,32 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' as M show IsolateRef, ObjectPoolRef;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 
-class ObjectPoolRefElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<ObjectPoolRefElement>('object-pool-ref');
-
-  RenderingScheduler<ObjectPoolRefElement> _r;
+class ObjectPoolRefElement extends CustomElement implements Renderable {
+  late RenderingScheduler<ObjectPoolRefElement> _r;
 
   Stream<RenderedEvent<ObjectPoolRefElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.ObjectPoolRef _pool;
+  late M.IsolateRef _isolate;
+  late M.ObjectPoolRef _pool;
 
   M.IsolateRef get isolate => _isolate;
   M.ObjectPoolRef get pool => _pool;
 
   factory ObjectPoolRefElement(M.IsolateRef isolate, M.ObjectPoolRef pool,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(pool != null);
-    ObjectPoolRefElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    ObjectPoolRefElement e = new ObjectPoolRefElement.created();
+    e._r = new RenderingScheduler<ObjectPoolRefElement>(e, queue: queue);
     e._isolate = isolate;
     e._pool = pool;
     return e;
   }
 
-  ObjectPoolRefElement.created() : super.created();
+  ObjectPoolRefElement.created() : super.created('object-pool-ref');
 
   @override
   void attached() {
@@ -45,13 +43,13 @@ class ObjectPoolRefElement extends HtmlElement implements Renderable {
   void detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
   }
 
   void render() {
-    children = [
+    children = <Element>[
       new AnchorElement(href: Uris.inspect(_isolate, object: _pool))
-        ..children = [
+        ..children = <Element>[
           new SpanElement()
             ..classes = ['emphasize']
             ..text = 'ObjectPool',

@@ -8,34 +8,32 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' as M show IsolateRef, EventRepository;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 
-class IsolateRefElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<IsolateRefElement>('isolate-ref');
-
-  RenderingScheduler<IsolateRefElement> _r;
+class IsolateRefElement extends CustomElement implements Renderable {
+  late RenderingScheduler<IsolateRefElement> _r;
 
   Stream<RenderedEvent<IsolateRefElement>> get onRendered => _r.onRendered;
 
-  M.IsolateRef _isolate;
-  M.EventRepository _events;
-  StreamSubscription _updatesSubscription;
+  late M.IsolateRef _isolate;
+  late M.EventRepository _events;
+  late StreamSubscription _updatesSubscription;
 
   M.IsolateRef get isolate => _isolate;
 
   factory IsolateRefElement(M.IsolateRef isolate, M.EventRepository events,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(isolate != null);
     assert(events != null);
-    IsolateRefElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    IsolateRefElement e = new IsolateRefElement.created();
+    e._r = new RenderingScheduler<IsolateRefElement>(e, queue: queue);
     e._isolate = isolate;
     e._events = events;
     return e;
   }
 
-  IsolateRefElement.created() : super.created();
+  IsolateRefElement.created() : super.created('isolate-ref');
 
   @override
   void attached() {
@@ -52,15 +50,16 @@ class IsolateRefElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
     _updatesSubscription.cancel();
   }
 
   void render() {
-    children = [
+    final isolateType = isolate.isSystemIsolate! ? 'System Isolate' : 'Isolate';
+    children = <Element>[
       new AnchorElement(href: Uris.inspect(isolate))
-        ..text = 'Isolate ${isolate.number} (${isolate.name})'
+        ..text = '$isolateType ${isolate.number} (${isolate.name})'
         ..classes = ['isolate-ref']
     ];
   }

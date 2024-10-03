@@ -1,14 +1,13 @@
 // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override
 
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 
 import 'test_helper.dart';
 
-var tests = [
+var tests = <VMTest>[
   (VM vm) async {
     var params = {
       'isolateId': vm.isolates.first.id,
@@ -16,15 +15,16 @@ var tests = [
     var result = await vm.invokeRpcNoUpgrade('getIsolate', params);
     expect(result['type'], equals('Isolate'));
     expect(result['id'], startsWith('isolates/'));
-    expect(result['number'], new isInstanceOf<String>());
+    expect(result['number'], isA<String>());
+    expect(result['isolateFlags'], isA<List>());
+    expect(result['isolateFlags'].length, isPositive);
+    expect(result['isSystemIsolate'], isFalse);
     expect(result['_originNumber'], equals(result['number']));
     expect(result['startTime'], isPositive);
     expect(result['livePorts'], isPositive);
     expect(result['pauseOnExit'], isFalse);
     expect(result['pauseEvent']['type'], equals('Event'));
     expect(result['error'], isNull);
-    expect(result['_numZoneHandles'], isPositive);
-    expect(result['_numScopedHandles'], isPositive);
     expect(result['rootLib']['type'], equals('@Library'));
     expect(result['libraries'].length, isPositive);
     expect(result['libraries'][0]['type'], equals('@Library'));
@@ -37,7 +37,7 @@ var tests = [
     var params = {
       'isolateId': 'badid',
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await vm.invokeRpcNoUpgrade('getIsolate', params);
       expect(false, isTrue, reason: 'Unreachable');

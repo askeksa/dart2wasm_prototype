@@ -1,13 +1,13 @@
 // Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override  --verbose_debug
+// VMOptions=--verbose_debug
 
-// This test is mostly interesting for DBC, which needs to patch two bytecodes
+// This test was mostly interesting for DBC, which needed to patch two bytecodes
 // to create a breakpoint for fast Smi ops.
 
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'service_test_common.dart';
 import 'test_helper.dart';
 import 'dart:developer';
@@ -19,7 +19,7 @@ const int LINE_C = 28;
 class NotGeneric {}
 
 testeeMain() {
-  var x = new List(1);
+  var x = new List<dynamic>.filled(1, null);
   var y = 7;
   debugger();
   print("Statement");
@@ -28,28 +28,28 @@ testeeMain() {
   y & 4; // Line C.
 }
 
-var tests = [
+var tests = <IsolateTest>[
   hasStoppedAtBreakpoint,
 
 // Add breakpoints.
   (Isolate isolate) async {
-    var rootLib = await isolate.rootLibrary.load();
+    Library rootLib = await isolate.rootLibrary.load() as Library;
     var script = rootLib.scripts[0];
 
     var bpt1 = await isolate.addBreakpoint(script, LINE_A);
     print(bpt1);
     expect(bpt1.resolved, isTrue);
-    expect(await bpt1.location.getLine(), equals(LINE_A));
+    expect(await bpt1.location!.getLine(), equals(LINE_A));
 
     var bpt2 = await isolate.addBreakpoint(script, LINE_B);
     print(bpt2);
     expect(bpt2.resolved, isTrue);
-    expect(await bpt2.location.getLine(), equals(LINE_B));
+    expect(await bpt2.location!.getLine(), equals(LINE_B));
 
     var bpt3 = await isolate.addBreakpoint(script, LINE_C);
     print(bpt3);
     expect(bpt3.resolved, isTrue);
-    expect(await bpt3.location.getLine(), equals(LINE_C));
+    expect(await bpt3.location!.getLine(), equals(LINE_C));
   },
 
   resumeIsolate,

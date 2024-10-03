@@ -4,19 +4,18 @@
 
 library compiler.src.inferrer.list_tracer;
 
-import '../elements/elements.dart';
-import '../js_backend/backend.dart' show JavaScriptBackend;
+import '../common/names.dart';
+import '../elements/entities.dart';
+import '../native/behavior.dart';
 import '../universe/selector.dart' show Selector;
 import '../util/util.dart' show Setlet;
 import 'node_tracer.dart';
 import 'type_graph_nodes.dart';
 
-/**
- * A set of selector names that [List] implements, that we know do not
- * change the element type of the list, or let the list escape to code
- * that might change the element type.
- */
-Set<String> okListSelectorsSet = new Set<String>.from(const <String>[
+/// A set of selector names that [List] implements, that we know do not
+/// change the element type of the list, or let the list escape to code
+/// that might change the element type.
+Set<String> okListSelectorsSet = Set<String>.from(const <String>[
   // From Object.
   '==',
   'hashCode',
@@ -76,7 +75,7 @@ Set<String> okListSelectorsSet = new Set<String>.from(const <String>[
   'checkGrowable',
 ]);
 
-Set<String> doNotChangeLengthSelectorsSet = new Set<String>.from(const <String>[
+Set<String> doNotChangeLengthSelectorsSet = Set<String>.from(const <String>[
   // From Object.
   '==',
   'hashCode',
@@ -132,16 +131,14 @@ Set<String> doNotChangeLengthSelectorsSet = new Set<String>.from(const <String>[
 
 class ListTracerVisitor extends TracerVisitor {
   // The [Set] of found assignments to the list.
-  Set<TypeInformation> assignments = new Setlet<TypeInformation>();
+  Set<TypeInformation> inputs = Setlet<TypeInformation>();
   bool callsGrowableMethod = false;
 
   ListTracerVisitor(tracedType, inferrer) : super(tracedType, inferrer);
 
-  /**
-   * Returns [true] if the analysis completed successfully, [false] if it
-   * bailed out. In the former case, [assignments] holds a list of
-   * [TypeInformation] nodes that flow into the element type of this list.
-   */
+  /// Returns [true] if the analysis completed successfully, [false] if it
+  /// bailed out. In the former case, [inputs] holds a list of
+  /// [TypeInformation] nodes that flow into the element type of this list.
   bool run() {
     analyze();
     ListTypeInformation list = tracedType;
@@ -153,24 +150,33 @@ class ListTracerVisitor extends TracerVisitor {
       return true;
     } else {
       callsGrowableMethod = true;
-      assignments = null;
+      inputs = null;
       return false;
     }
   }
 
+  @override
   visitClosureCallSiteTypeInformation(ClosureCallSiteTypeInformation info) {
     bailout('Passed to a closure');
   }
 
+  @override
   visitStaticCallSiteTypeInformation(StaticCallSiteTypeInformation info) {
     super.visitStaticCallSiteTypeInformation(info);
-    Element called = info.calledElement;
-    if (compiler.backend.isForeign(called) &&
-        called.name == JavaScriptBackend.JS) {
-      bailout('Used in JS ${info.call}');
+    final commonElements = inferrer.closedWorld.commonElements;
+    MemberEntity called = info.calledElement;
+    if (commonElements.isForeign(called) && called.name == Identifiers.JS) {
+      NativeBehavior nativeBehavior = inferrer.closedWorld.elementMap
+          .getNativeBehaviorForJsCall(info.invocationNode);
+      // Assume side-effects means that the list has escaped to some unknown
+      // location.
+      if (nativeBehavior.sideEffects.hasSideEffects()) {
+        bailout('Used in JS ${info.debugName}');
+      }
     }
   }
 
+  @override
   visitDynamicCallSiteTypeInformation(DynamicCallSiteTypeInformation info) {
     super.visitDynamicCallSiteTypeInformation(info);
     Selector selector = info.selector;
@@ -181,18 +187,18 @@ class ListTracerVisitor extends TracerVisitor {
           int positionalLength = info.arguments.positional.length;
           if (selectorName == 'add') {
             if (positionalLength == 1) {
-              assignments.add(info.arguments.positional[0]);
+              inputs.add(info.arguments.positional[0]);
             }
           } else if (selectorName == 'insert') {
             if (positionalLength == 2) {
-              assignments.add(info.arguments.positional[1]);
+              inputs.add(info.arguments.positional[1]);
             }
           } else {
             bailout('Used in a not-ok selector');
             return;
           }
         } else if (selector.isIndexSet) {
-          assignments.add(info.arguments.positional[1]);
+          inputs.add(info.arguments.positional[1]);
         } else if (!selector.isIndex) {
           bailout('Used in a not-ok selector');
           return;
@@ -203,10 +209,11 @@ class ListTracerVisitor extends TracerVisitor {
       }
       if (selectorName == 'length' && selector.isSetter) {
         callsGrowableMethod = true;
-        assignments.add(inferrer.types.nullType);
+        inputs.add(inferrer.types.nullType);
       }
     } else if (selector.isCall &&
-        !info.targets.every((element) => element.isFunction)) {
+        (info.hasClosureCallTargets ||
+            info.concreteTargets.any((element) => !element.isFunction))) {
       bailout('Passed to a closure');
       return;
     }

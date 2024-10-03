@@ -2,18 +2,24 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+#include <memory>
+
 #include "platform/globals.h"
 
 #include "include/dart_tools_api.h"
 #include "vm/dart_api_impl.h"
 #include "vm/dart_entry.h"
 #include "vm/debugger.h"
+#include "vm/debugger_api_impl_test.h"
 #include "vm/globals.h"
+#include "vm/heap/safepoint.h"
 #include "vm/message_handler.h"
+#include "vm/message_snapshot.h"
 #include "vm/object_id_ring.h"
 #include "vm/os.h"
 #include "vm/port.h"
-#include "vm/safepoint.h"
+#include "vm/profiler.h"
+#include "vm/resolver.h"
 #include "vm/service.h"
 #include "vm/unit_test.h"
 
@@ -28,9 +34,12 @@ class ServiceTestMessageHandler : public MessageHandler {
  public:
   ServiceTestMessageHandler() : _msg(NULL) {}
 
-  ~ServiceTestMessageHandler() { free(_msg); }
+  ~ServiceTestMessageHandler() {
+    PortMap::ClosePorts(this);
+    free(_msg);
+  }
 
-  MessageStatus HandleMessage(Message* message) {
+  MessageStatus HandleMessage(std::unique_ptr<Message> message) {
     if (_msg != NULL) {
       free(_msg);
       _msg = NULL;
@@ -42,24 +51,21 @@ class ServiceTestMessageHandler : public MessageHandler {
       response_obj = message->raw_obj();
     } else {
       Thread* thread = Thread::Current();
-      MessageSnapshotReader reader(message->data(), message->len(), thread);
-      response_obj = reader.ReadObject();
+      response_obj = ReadMessage(thread, message.get());
     }
     if (response_obj.IsString()) {
       String& response = String::Handle();
-      response ^= response_obj.raw();
-      _msg = strdup(response.ToCString());
+      response ^= response_obj.ptr();
+      _msg = Utils::StrDup(response.ToCString());
     } else {
       ASSERT(response_obj.IsArray());
       Array& response_array = Array::Handle();
-      response_array ^= response_obj.raw();
+      response_array ^= response_obj.ptr();
       ASSERT(response_array.Length() == 1);
       ExternalTypedData& response = ExternalTypedData::Handle();
       response ^= response_array.At(0);
-      _msg = strdup(reinterpret_cast<char*>(response.DataAddr(0)));
+      _msg = Utils::StrDup(reinterpret_cast<char*>(response.DataAddr(0)));
     }
-
-    delete message;
 
     return kOK;
   }
@@ -72,92 +78,86 @@ class ServiceTestMessageHandler : public MessageHandler {
   char* _msg;
 };
 
-
-static RawArray* Eval(Dart_Handle lib, const char* expr) {
+static ArrayPtr Eval(Dart_Handle lib, const char* expr) {
   const String& dummy_isolate_id = String::Handle(String::New("isolateId"));
-  Dart_Handle expr_val = Dart_EvaluateExpr(lib, NewString(expr));
-  EXPECT_VALID(expr_val);
+  Dart_Handle expr_val;
+  {
+    TransitionVMToNative transiton(Thread::Current());
+    expr_val = Dart_EvaluateStaticExpr(lib, NewString(expr));
+    EXPECT_VALID(expr_val);
+  }
   Zone* zone = Thread::Current()->zone();
   const GrowableObjectArray& value =
       Api::UnwrapGrowableObjectArrayHandle(zone, expr_val);
-  const Array& result = Array::Handle(Array::MakeArray(value));
+  const Array& result = Array::Handle(Array::MakeFixedLength(value));
   GrowableObjectArray& growable = GrowableObjectArray::Handle();
   growable ^= result.At(4);
   // Append dummy isolate id to parameter values.
   growable.Add(dummy_isolate_id);
-  Array& array = Array::Handle(Array::MakeArray(growable));
+  Array& array = Array::Handle(Array::MakeFixedLength(growable));
   result.SetAt(4, array);
   growable ^= result.At(5);
   // Append dummy isolate id to parameter values.
   growable.Add(dummy_isolate_id);
-  array = Array::MakeArray(growable);
+  array = Array::MakeFixedLength(growable);
   result.SetAt(5, array);
-  return result.raw();
+  return result.ptr();
 }
 
-
-static RawArray* EvalF(Dart_Handle lib, const char* fmt, ...) {
-  va_list args;
-  va_start(args, fmt);
-  intptr_t len = OS::VSNPrint(NULL, 0, fmt, args);
-  va_end(args);
+static ArrayPtr EvalF(Dart_Handle lib, const char* fmt, ...) {
+  va_list messure_args;
+  va_start(messure_args, fmt);
+  intptr_t len = Utils::VSNPrint(NULL, 0, fmt, messure_args);
+  va_end(messure_args);
 
   char* buffer = Thread::Current()->zone()->Alloc<char>(len + 1);
-  va_list args2;
-  va_start(args2, fmt);
-  OS::VSNPrint(buffer, (len + 1), fmt, args2);
-  va_end(args2);
+  va_list print_args;
+  va_start(print_args, fmt);
+  Utils::VSNPrint(buffer, (len + 1), fmt, print_args);
+  va_end(print_args);
 
   return Eval(lib, buffer);
 }
 
-
-static RawFunction* GetFunction(const Class& cls, const char* name) {
-  const Function& result = Function::Handle(
-      cls.LookupDynamicFunction(String::Handle(String::New(name))));
+static FunctionPtr GetFunction(const Class& cls, const char* name) {
+  const Function& result = Function::Handle(Resolver::ResolveDynamicFunction(
+      Thread::Current()->zone(), cls, String::Handle(String::New(name))));
   EXPECT(!result.IsNull());
-  return result.raw();
+  return result.ptr();
 }
 
-
-static RawClass* GetClass(const Library& lib, const char* name) {
+static ClassPtr GetClass(const Library& lib, const char* name) {
   const Class& cls = Class::Handle(
       lib.LookupClass(String::Handle(Symbols::New(Thread::Current(), name))));
   EXPECT(!cls.IsNull());  // No ambiguity error expected.
-  return cls.raw();
+  return cls.ptr();
 }
 
-
 static void HandleIsolateMessage(Isolate* isolate, const Array& msg) {
-  TransitionNativeToVM transition(Thread::Current());
   Service::HandleIsolateMessage(isolate, msg);
 }
 
-
 static void HandleRootMessage(const Array& message) {
-  TransitionNativeToVM transition(Thread::Current());
   Service::HandleRootMessage(message);
 }
 
-
-TEST_CASE(Service_IsolateStickyError) {
+ISOLATE_UNIT_TEST_CASE(Service_IsolateStickyError) {
   const char* kScript = "main() => throw 'HI THERE STICKY';\n";
 
   Isolate* isolate = thread->isolate();
   isolate->set_is_runnable(true);
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
-  Library& vmlib = Library::Handle();
-  vmlib ^= Api::UnwrapHandle(lib);
-  EXPECT(!vmlib.IsNull());
-  Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
-  EXPECT(Dart_IsUnhandledExceptionError(result));
-  EXPECT(!Dart_HasStickyError());
+  Dart_Handle result;
+  {
+    TransitionVMToNative transition(thread);
+    Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
+    EXPECT_VALID(lib);
+    result = Dart_Invoke(lib, NewString("main"), 0, NULL);
+    EXPECT(Dart_IsUnhandledExceptionError(result));
+    EXPECT(!Dart_HasStickyError());
+  }
   EXPECT(Thread::Current()->sticky_error() == Error::null());
 
   {
-    TransitionNativeToVM transition(thread);
-
     JSONStream js;
     isolate->PrintJSON(&js, false);
     // No error property and no PauseExit state.
@@ -166,14 +166,15 @@ TEST_CASE(Service_IsolateStickyError) {
     EXPECT_NOTSUBSTRING("PauseExit", js.ToCString());
   }
 
-  // Set the sticky error.
-  Dart_SetStickyError(result);
-  Dart_SetPausedOnExit(true);
-  EXPECT(Dart_HasStickyError());
+  {
+    // Set the sticky error.
+    TransitionVMToNative transition(thread);
+    Dart_SetStickyError(result);
+    Dart_SetPausedOnExit(true);
+    EXPECT(Dart_HasStickyError());
+  }
 
   {
-    TransitionNativeToVM transition(thread);
-
     JSONStream js;
     isolate->PrintJSON(&js, false);
     // Error and PauseExit set.
@@ -183,11 +184,10 @@ TEST_CASE(Service_IsolateStickyError) {
   }
 }
 
-
-TEST_CASE(Service_IdZones) {
+ISOLATE_UNIT_TEST_CASE(Service_IdZones) {
   Zone* zone = thread->zone();
   Isolate* isolate = thread->isolate();
-  ObjectIdRing* ring = isolate->object_id_ring();
+  ObjectIdRing* ring = isolate->EnsureObjectIdRing();
 
   const String& test_a = String::Handle(zone, String::New("a"));
   const String& test_b = String::Handle(zone, String::New("b"));
@@ -218,8 +218,7 @@ TEST_CASE(Service_IdZones) {
   EXPECT_STREQ("objects/5", reuse_zone.GetServiceId(test_d));
 }
 
-
-TEST_CASE(Service_Code) {
+ISOLATE_UNIT_TEST_CASE(Service_Code) {
   const char* kScript =
       "var port;\n"  // Set to our mock port by C++.
       "\n"
@@ -239,13 +238,18 @@ TEST_CASE(Service_Code) {
 
   Isolate* isolate = thread->isolate();
   isolate->set_is_runnable(true);
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
+  Dart_Handle lib;
   Library& vmlib = Library::Handle();
+  {
+    TransitionVMToNative transition(thread);
+    lib = TestCase::LoadTestScript(kScript, NULL);
+    EXPECT_VALID(lib);
+    EXPECT(!Dart_IsNull(lib));
+    Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
+    EXPECT_VALID(result);
+  }
   vmlib ^= Api::UnwrapHandle(lib);
   EXPECT(!vmlib.IsNull());
-  Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
-  EXPECT_VALID(result);
   const Class& class_a = Class::Handle(GetClass(vmlib, "A"));
   EXPECT(!class_a.IsNull());
   const Function& function_c = Function::Handle(GetFunction(class_a, "c"));
@@ -255,15 +259,18 @@ TEST_CASE(Service_Code) {
   // Use the entry of the code object as it's reference.
   uword entry = code_c.PayloadStart();
   int64_t compile_timestamp = code_c.compile_timestamp();
-  EXPECT_GT(code_c.Size(), 16);
+  EXPECT_GT(code_c.Size(), 16u);
   uword last = entry + code_c.Size();
 
   // Build a mock message handler and wrap it in a dart port.
   ServiceTestMessageHandler handler;
   Dart_Port port_id = PortMap::CreatePort(&handler);
   Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  {
+    TransitionVMToNative transition(thread);
+    EXPECT_VALID(port);
+    EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  }
 
   Array& service_msg = Array::Handle();
 
@@ -287,9 +294,9 @@ TEST_CASE(Service_Code) {
     // Only perform a partial match.
     const intptr_t kBufferSize = 512;
     char buffer[kBufferSize];
-    OS::SNPrint(buffer, kBufferSize - 1,
-                "\"fixedId\":true,\"id\":\"code\\/%" Px64 "-%" Px "\",",
-                compile_timestamp, entry);
+    Utils::SNPrint(buffer, kBufferSize - 1,
+                   "\"fixedId\":true,\"id\":\"code\\/%" Px64 "-%" Px "\",",
+                   compile_timestamp, entry);
     EXPECT_SUBSTRING(buffer, handler.msg());
   }
 
@@ -336,58 +343,7 @@ TEST_CASE(Service_Code) {
   EXPECT_SUBSTRING("\"error\"", handler.msg());
 }
 
-
-TEST_CASE(Service_TokenStream) {
-  const char* kScript =
-      "var port;\n"  // Set to our mock port by C++.
-      "\n"
-      "main() {\n"
-      "}";
-
-  Isolate* isolate = thread->isolate();
-  isolate->set_is_runnable(true);
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
-  Library& vmlib = Library::Handle();
-  vmlib ^= Api::UnwrapHandle(lib);
-  EXPECT(!vmlib.IsNull());
-
-  const String& script_name = String::Handle(String::New("test-lib"));
-  EXPECT(!script_name.IsNull());
-  const Script& script = Script::Handle(vmlib.LookupScript(script_name));
-  EXPECT(!script.IsNull());
-
-  const TokenStream& token_stream = TokenStream::Handle(script.tokens());
-  EXPECT(!token_stream.IsNull());
-  ObjectIdRing* ring = isolate->object_id_ring();
-  intptr_t id = ring->GetIdForObject(token_stream.raw());
-
-  // Build a mock message handler and wrap it in a dart port.
-  ServiceTestMessageHandler handler;
-  Dart_Port port_id = PortMap::CreatePort(&handler);
-  Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
-
-  Array& service_msg = Array::Handle();
-
-  // Fetch object.
-  service_msg = EvalF(lib,
-                      "[0, port, '0', 'getObject', "
-                      "['objectId'], ['objects/%" Pd "']]",
-                      id);
-  HandleIsolateMessage(isolate, service_msg);
-  EXPECT_EQ(MessageHandler::kOK, handler.HandleNextMessage());
-
-  // Check type.
-  EXPECT_SUBSTRING("\"type\":\"Object\"", handler.msg());
-  EXPECT_SUBSTRING("\"_vmType\":\"TokenStream\"", handler.msg());
-  // Check for members array.
-  EXPECT_SUBSTRING("\"members\":[", handler.msg());
-}
-
-
-TEST_CASE(Service_PcDescriptors) {
+ISOLATE_UNIT_TEST_CASE(Service_PcDescriptors) {
   const char* kScript =
       "var port;\n"  // Set to our mock port by C++.
       "\n"
@@ -407,13 +363,18 @@ TEST_CASE(Service_PcDescriptors) {
 
   Isolate* isolate = thread->isolate();
   isolate->set_is_runnable(true);
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
+  Dart_Handle lib;
   Library& vmlib = Library::Handle();
+  {
+    TransitionVMToNative transition(thread);
+    lib = TestCase::LoadTestScript(kScript, NULL);
+    EXPECT_VALID(lib);
+    EXPECT(!Dart_IsNull(lib));
+    Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
+    EXPECT_VALID(result);
+  }
   vmlib ^= Api::UnwrapHandle(lib);
   EXPECT(!vmlib.IsNull());
-  Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
-  EXPECT_VALID(result);
   const Class& class_a = Class::Handle(GetClass(vmlib, "A"));
   EXPECT(!class_a.IsNull());
   const Function& function_c = Function::Handle(GetFunction(class_a, "c"));
@@ -424,15 +385,18 @@ TEST_CASE(Service_PcDescriptors) {
   const PcDescriptors& descriptors =
       PcDescriptors::Handle(code_c.pc_descriptors());
   EXPECT(!descriptors.IsNull());
-  ObjectIdRing* ring = isolate->object_id_ring();
-  intptr_t id = ring->GetIdForObject(descriptors.raw());
+  ObjectIdRing* ring = isolate->EnsureObjectIdRing();
+  intptr_t id = ring->GetIdForObject(descriptors.ptr());
 
   // Build a mock message handler and wrap it in a dart port.
   ServiceTestMessageHandler handler;
   Dart_Port port_id = PortMap::CreatePort(&handler);
   Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  {
+    TransitionVMToNative transition(thread);
+    EXPECT_VALID(port);
+    EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  }
 
   Array& service_msg = Array::Handle();
 
@@ -450,8 +414,7 @@ TEST_CASE(Service_PcDescriptors) {
   EXPECT_SUBSTRING("\"members\":[", handler.msg());
 }
 
-
-TEST_CASE(Service_LocalVarDescriptors) {
+ISOLATE_UNIT_TEST_CASE(Service_LocalVarDescriptors) {
   const char* kScript =
       "var port;\n"  // Set to our mock port by C++.
       "\n"
@@ -471,13 +434,18 @@ TEST_CASE(Service_LocalVarDescriptors) {
 
   Isolate* isolate = thread->isolate();
   isolate->set_is_runnable(true);
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
+  Dart_Handle lib;
   Library& vmlib = Library::Handle();
+  {
+    TransitionVMToNative transition(thread);
+    lib = TestCase::LoadTestScript(kScript, NULL);
+    EXPECT_VALID(lib);
+    EXPECT(!Dart_IsNull(lib));
+    Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
+    EXPECT_VALID(result);
+  }
   vmlib ^= Api::UnwrapHandle(lib);
   EXPECT(!vmlib.IsNull());
-  Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
-  EXPECT_VALID(result);
   const Class& class_a = Class::Handle(GetClass(vmlib, "A"));
   EXPECT(!class_a.IsNull());
   const Function& function_c = Function::Handle(GetFunction(class_a, "c"));
@@ -488,15 +456,18 @@ TEST_CASE(Service_LocalVarDescriptors) {
   const LocalVarDescriptors& descriptors =
       LocalVarDescriptors::Handle(code_c.GetLocalVarDescriptors());
   // Generate an ID for this object.
-  ObjectIdRing* ring = isolate->object_id_ring();
-  intptr_t id = ring->GetIdForObject(descriptors.raw());
+  ObjectIdRing* ring = isolate->EnsureObjectIdRing();
+  intptr_t id = ring->GetIdForObject(descriptors.ptr());
 
   // Build a mock message handler and wrap it in a dart port.
   ServiceTestMessageHandler handler;
   Dart_Port port_id = PortMap::CreatePort(&handler);
   Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  {
+    TransitionVMToNative transition(thread);
+    EXPECT_VALID(port);
+    EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  }
 
   Array& service_msg = Array::Handle();
 
@@ -514,13 +485,9 @@ TEST_CASE(Service_LocalVarDescriptors) {
   EXPECT_SUBSTRING("\"members\":[", handler.msg());
 }
 
+static void WeakHandleFinalizer(void* isolate_callback_data, void* peer) {}
 
-static void WeakHandleFinalizer(void* isolate_callback_data,
-                                Dart_WeakPersistentHandle handle,
-                                void* peer) {}
-
-
-TEST_CASE(Service_PersistentHandles) {
+ISOLATE_UNIT_TEST_CASE(Service_PersistentHandles) {
   const char* kScript =
       "var port;\n"  // Set to our mock port by C++.
       "\n"
@@ -534,28 +501,34 @@ TEST_CASE(Service_PersistentHandles) {
 
   Isolate* isolate = thread->isolate();
   isolate->set_is_runnable(true);
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
-  Library& vmlib = Library::Handle();
-  vmlib ^= Api::UnwrapHandle(lib);
-  EXPECT(!vmlib.IsNull());
-  Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
-  EXPECT_VALID(result);
 
-  // Create a persistent handle to global.
-  Dart_PersistentHandle persistent_handle = Dart_NewPersistentHandle(result);
+  Dart_Handle lib;
+  Dart_PersistentHandle persistent_handle;
+  Dart_WeakPersistentHandle weak_persistent_handle;
+  {
+    TransitionVMToNative transition(thread);
+    lib = TestCase::LoadTestScript(kScript, NULL);
+    EXPECT_VALID(lib);
+    Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
+    EXPECT_VALID(result);
 
-  // Create a weak persistent handle to global.
-  Dart_WeakPersistentHandle weak_persistent_handle =
-      Dart_NewWeakPersistentHandle(result, reinterpret_cast<void*>(0xdeadbeef),
-                                   128, WeakHandleFinalizer);
+    // Create a persistent handle to global.
+    persistent_handle = Dart_NewPersistentHandle(result);
+
+    // Create a weak persistent handle to global.
+    weak_persistent_handle = Dart_NewWeakPersistentHandle(
+        result, reinterpret_cast<void*>(0xdeadbeef), 128, WeakHandleFinalizer);
+  }
 
   // Build a mock message handler and wrap it in a dart port.
   ServiceTestMessageHandler handler;
   Dart_Port port_id = PortMap::CreatePort(&handler);
   Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  {
+    TransitionVMToNative transition(thread);
+    EXPECT_VALID(port);
+    EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  }
 
   Array& service_msg = Array::Handle();
 
@@ -570,9 +543,11 @@ TEST_CASE(Service_PersistentHandles) {
   EXPECT_SUBSTRING("\"externalSize\":\"128\"", handler.msg());
 
   // Delete persistent handles.
-  Dart_DeletePersistentHandle(persistent_handle);
-  Dart_DeleteWeakPersistentHandle(Dart_CurrentIsolate(),
-                                  weak_persistent_handle);
+  {
+    TransitionVMToNative transition(thread);
+    Dart_DeletePersistentHandle(persistent_handle);
+    Dart_DeleteWeakPersistentHandle(weak_persistent_handle);
+  }
 
   // Get persistent handles (again).
   service_msg = Eval(lib, "[0, port, '0', '_getPersistentHandles', [], []]");
@@ -585,73 +560,15 @@ TEST_CASE(Service_PersistentHandles) {
   EXPECT_NOTSUBSTRING("\"externalSize\":\"128\"", handler.msg());
 }
 
-
-TEST_CASE(Service_Address) {
-  const char* kScript =
-      "var port;\n"  // Set to our mock port by C++.
-      "\n"
-      "main() {\n"
-      "}";
-
-  Isolate* isolate = thread->isolate();
-  isolate->set_is_runnable(true);
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
-
-  // Build a mock message handler and wrap it in a dart port.
-  ServiceTestMessageHandler handler;
-  Dart_Port port_id = PortMap::CreatePort(&handler);
-  Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
-
-  const String& str = String::Handle(String::New("foobar", Heap::kOld));
-  Array& service_msg = Array::Handle();
-  // Note: If we ever introduce old space compaction, this test might fail.
-  uword start_addr = RawObject::ToAddr(str.raw());
-  // Expect to find 'str', also from internal addresses.
-  for (int offset = 0; offset < kObjectAlignment; ++offset) {
-    uword addr = start_addr + offset;
-    char buf[1024];
-    bool ref = offset % 2 == 0;
-    OS::SNPrint(buf, sizeof(buf),
-                (ref ? "[0, port, '0', '_getObjectByAddress', "
-                       "['address', 'ref'], ['%" Px "', 'true']]"
-                     : "[0, port, '0', '_getObjectByAddress', "
-                       "['address'], ['%" Px "']]"),
-                addr);
-    service_msg = Eval(lib, buf);
-    HandleIsolateMessage(isolate, service_msg);
-    EXPECT_EQ(MessageHandler::kOK, handler.HandleNextMessage());
-    EXPECT_SUBSTRING(ref ? "\"type\":\"@Instance\"" : "\"type\":\"Instance\"",
-                     handler.msg());
-    EXPECT_SUBSTRING("\"kind\":\"String\"", handler.msg());
-    EXPECT_SUBSTRING("foobar", handler.msg());
-  }
-  // Expect null when no object is found.
-  service_msg = Eval(lib,
-                     "[0, port, '0', '_getObjectByAddress', "
-                     "['address'], ['7']]");
-  HandleIsolateMessage(isolate, service_msg);
-  EXPECT_EQ(MessageHandler::kOK, handler.HandleNextMessage());
-  // TODO(turnidge): Should this be a ServiceException instead?
-  EXPECT_SUBSTRING(
-      "{\"type\":\"Sentinel\",\"kind\":\"Free\","
-      "\"valueAsString\":\"<free>\"",
-      handler.msg());
-}
-
-
 static bool alpha_callback(const char* name,
                            const char** option_keys,
                            const char** option_values,
                            intptr_t num_options,
                            void* user_data,
                            const char** result) {
-  *result = strdup("alpha");
+  *result = Utils::StrDup("alpha");
   return true;
 }
-
 
 static bool beta_callback(const char* name,
                           const char** option_keys,
@@ -659,36 +576,42 @@ static bool beta_callback(const char* name,
                           intptr_t num_options,
                           void* user_data,
                           const char** result) {
-  *result = strdup("beta");
+  *result = Utils::StrDup("beta");
   return false;
 }
 
-
-TEST_CASE(Service_EmbedderRootHandler) {
+ISOLATE_UNIT_TEST_CASE(Service_EmbedderRootHandler) {
   const char* kScript =
       "var port;\n"  // Set to our mock port by C++.
       "\n"
       "var x = 7;\n"
       "main() {\n"
       "  x = x * x;\n"
-      "  x = x / 13;\n"
+      "  x = (x / 13).floor();\n"
       "}";
 
-  Dart_RegisterRootServiceRequestCallback("alpha", alpha_callback, NULL);
-  Dart_RegisterRootServiceRequestCallback("beta", beta_callback, NULL);
+  Dart_Handle lib;
+  {
+    TransitionVMToNative transition(thread);
 
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
-  Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
-  EXPECT_VALID(result);
+    Dart_RegisterRootServiceRequestCallback("alpha", alpha_callback, NULL);
+    Dart_RegisterRootServiceRequestCallback("beta", beta_callback, NULL);
+
+    lib = TestCase::LoadTestScript(kScript, NULL);
+    EXPECT_VALID(lib);
+    Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
+    EXPECT_VALID(result);
+  }
 
   // Build a mock message handler and wrap it in a dart port.
   ServiceTestMessageHandler handler;
   Dart_Port port_id = PortMap::CreatePort(&handler);
   Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
-
+  {
+    TransitionVMToNative transition(thread);
+    EXPECT_VALID(port);
+    EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  }
 
   Array& service_msg = Array::Handle();
   service_msg = Eval(lib, "[0, port, '\"', 'alpha', [], []]");
@@ -702,33 +625,40 @@ TEST_CASE(Service_EmbedderRootHandler) {
   EXPECT_STREQ("{\"jsonrpc\":\"2.0\", \"error\":beta,\"id\":1}", handler.msg());
 }
 
-
-TEST_CASE(Service_EmbedderIsolateHandler) {
+ISOLATE_UNIT_TEST_CASE(Service_EmbedderIsolateHandler) {
   const char* kScript =
       "var port;\n"  // Set to our mock port by C++.
       "\n"
       "var x = 7;\n"
       "main() {\n"
       "  x = x * x;\n"
-      "  x = x / 13;\n"
+      "  x = (x / 13).floor();\n"
       "}";
 
-  Dart_RegisterIsolateServiceRequestCallback("alpha", alpha_callback, NULL);
-  Dart_RegisterIsolateServiceRequestCallback("beta", beta_callback, NULL);
+  Dart_Handle lib;
+  {
+    TransitionVMToNative transition(thread);
 
-  Isolate* isolate = thread->isolate();
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
-  Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
-  EXPECT_VALID(result);
+    Dart_RegisterIsolateServiceRequestCallback("alpha", alpha_callback, NULL);
+    Dart_RegisterIsolateServiceRequestCallback("beta", beta_callback, NULL);
+
+    lib = TestCase::LoadTestScript(kScript, NULL);
+    EXPECT_VALID(lib);
+    Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
+    EXPECT_VALID(result);
+  }
 
   // Build a mock message handler and wrap it in a dart port.
   ServiceTestMessageHandler handler;
   Dart_Port port_id = PortMap::CreatePort(&handler);
   Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  {
+    TransitionVMToNative transition(thread);
+    EXPECT_VALID(port);
+    EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  }
 
+  Isolate* isolate = thread->isolate();
   Array& service_msg = Array::Handle();
   service_msg = Eval(lib, "[0, port, '0', 'alpha', [], []]");
   HandleIsolateMessage(isolate, service_msg);
@@ -745,50 +675,52 @@ TEST_CASE(Service_EmbedderIsolateHandler) {
 // TODO(zra): Remove when tests are ready to enable.
 #if !defined(TARGET_ARCH_ARM64)
 
-TEST_CASE(Service_Profile) {
+static void EnableProfiler() {
+  if (!FLAG_profiler) {
+    FLAG_profiler = true;
+    Profiler::Init();
+  }
+}
+
+ISOLATE_UNIT_TEST_CASE(Service_Profile) {
+  EnableProfiler();
   const char* kScript =
       "var port;\n"  // Set to our mock port by C++.
       "\n"
       "var x = 7;\n"
       "main() {\n"
       "  x = x * x;\n"
-      "  x = x / 13;\n"
+      "  x = (x / 13).floor();\n"
       "}";
 
   Isolate* isolate = thread->isolate();
   isolate->set_is_runnable(true);
-  Dart_Handle lib = TestCase::LoadTestScript(kScript, NULL);
-  EXPECT_VALID(lib);
-  Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
-  EXPECT_VALID(result);
+  Dart_Handle lib;
+  {
+    TransitionVMToNative transition(thread);
+
+    lib = TestCase::LoadTestScript(kScript, NULL);
+    EXPECT_VALID(lib);
+    Dart_Handle result = Dart_Invoke(lib, NewString("main"), 0, NULL);
+    EXPECT_VALID(result);
+  }
 
   // Build a mock message handler and wrap it in a dart port.
   ServiceTestMessageHandler handler;
   Dart_Port port_id = PortMap::CreatePort(&handler);
   Dart_Handle port = Api::NewHandle(thread, SendPort::New(port_id));
-  EXPECT_VALID(port);
-  EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  {
+    TransitionVMToNative transition(thread);
+    EXPECT_VALID(port);
+    EXPECT_VALID(Dart_SetField(lib, NewString("port"), port));
+  }
 
   Array& service_msg = Array::Handle();
-  service_msg = Eval(lib, "[0, port, '0', '_getCpuProfile', [], []]");
-  HandleIsolateMessage(isolate, service_msg);
-  EXPECT_EQ(MessageHandler::kOK, handler.HandleNextMessage());
-  // Expect error (tags required).
-  EXPECT_SUBSTRING("\"error\"", handler.msg());
-
-  service_msg =
-      Eval(lib, "[0, port, '0', '_getCpuProfile', ['tags'], ['None']]");
+  service_msg = Eval(lib, "[0, port, '0', 'getCpuSamples', [], []]");
   HandleIsolateMessage(isolate, service_msg);
   EXPECT_EQ(MessageHandler::kOK, handler.HandleNextMessage());
   // Expect profile
-  EXPECT_SUBSTRING("\"type\":\"_CpuProfile\"", handler.msg());
-
-  service_msg =
-      Eval(lib, "[0, port, '0', '_getCpuProfile', ['tags'], ['Bogus']]");
-  HandleIsolateMessage(isolate, service_msg);
-  EXPECT_EQ(MessageHandler::kOK, handler.HandleNextMessage());
-  // Expect error.
-  EXPECT_SUBSTRING("\"error\"", handler.msg());
+  EXPECT_SUBSTRING("\"type\":\"CpuSamples\"", handler.msg());
 }
 
 #endif  // !defined(TARGET_ARCH_ARM64)

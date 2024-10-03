@@ -1,21 +1,28 @@
 name: analyzer_cli
-version: 1.1.2
-author: Dart Team <misc@dartlang.org>
 description: Command line interface for the Dart Analyzer.
-homepage: https://github.com/dart-lang/analyzer_cli
+
+# This package is not intended for consumption on pub.dev. DO NOT publish.
+publish_to: none
+
 environment:
-  sdk: '>=1.12.0 <2.0.0'
+  sdk: "^2.14.0"
+
 dependencies:
-  analyzer: ^0.27.0
-  args: ^0.13.0
-  bazel_worker: ^0.1.0
-  cli_util: ^0.1.0
-  linter: ^0.1.16
-  package_config: '>=0.1.5 <2.0.0'
-  plugin: '>=0.1.0 <0.3.0'
-  protobuf: ^0.5.0
-  yaml: ^2.1.2
+  analyzer: any
+  args: any
+  linter: ^1.0.0
+  meta: any
+  path: any
+  pub_semver: ^2.0.0
+  yaml: any
+
 dev_dependencies:
-  test_reflective_loader: ^0.1.0
-  typed_mock: '>=0.0.4 <1.0.0'
-  test: ^0.12.0
+  lints: any
+  test_reflective_loader: ^0.2.0
+  test: ^1.0.0
+
+dependency_overrides:
+  analyzer:
+    path: ../analyzer
+  meta:
+    path: ../meta

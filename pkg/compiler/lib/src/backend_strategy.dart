@@ -4,36 +4,83 @@
 
 library dart2js.backend_strategy;
 
-import 'compiler.dart';
-import 'js_emitter/sorter.dart';
+import 'common.dart';
+import 'common/codegen.dart';
+import 'common/tasks.dart';
+import 'deferred_load/output_unit.dart' show OutputUnitData;
+import 'enqueue.dart';
+import 'elements/entities.dart';
+import 'inferrer/types.dart';
+import 'io/source_information.dart';
+import 'js_backend/backend.dart';
+import 'js_backend/enqueuer.dart';
+import 'js_backend/inferred_data.dart';
+import 'js_emitter/code_emitter_task.dart';
+import 'js_model/locals.dart';
+import 'serialization/serialization.dart';
+import 'ssa/ssa.dart';
+import 'universe/codegen_world_builder.dart';
 import 'world.dart';
 
 /// Strategy pattern that defines the element model used in type inference
 /// and code generation.
 abstract class BackendStrategy {
-  /// Create the [ClosedWorldRefiner] for [closedWorld].
-  ClosedWorldRefiner createClosedWorldRefiner(ClosedWorld closedWorld);
+  List<CompilerTask> get tasks;
 
-  /// Create closure classes for local functions.
-  void convertClosures(ClosedWorldRefiner closedWorldRefiner);
+  FunctionCompiler get functionCompiler;
 
-  /// The [Sorter] used for sorting elements in the generated code.
-  Sorter get sorter;
-}
+  CodeEmitterTask get emitterTask;
 
-/// Strategy for using the [Element] model from the resolver as the backend
-/// model.
-class ElementBackendStrategy implements BackendStrategy {
-  final Compiler _compiler;
+  /// Create the [JClosedWorld] from [closedWorld].
+  JClosedWorld createJClosedWorld(
+      KClosedWorld closedWorld, OutputUnitData outputUnitData);
 
-  ElementBackendStrategy(this._compiler);
+  /// Registers [closedWorld] as the current closed world used by this backend
+  /// strategy.
+  ///
+  /// This is used to support serialization after type inference.
+  void registerJClosedWorld(JClosedWorld closedWorld);
 
-  ClosedWorldRefiner createClosedWorldRefiner(ClosedWorldImpl closedWorld) =>
-      closedWorld;
+  /// Called when the compiler starts running the codegen.
+  ///
+  /// Returns the [CodegenInputs] objects with the needed data.
+  CodegenInputs onCodegenStart(
+      GlobalTypeInferenceResults globalTypeInferenceResults);
 
-  Sorter get sorter => const ElementSorter();
+  /// Creates an [Enqueuer] for code generation specific to this backend.
+  CodegenEnqueuer createCodegenEnqueuer(
+      CompilerTask task,
+      JClosedWorld closedWorld,
+      GlobalTypeInferenceResults globalInferenceResults,
+      CodegenInputs codegen,
+      CodegenResults codegenResults);
 
-  void convertClosures(ClosedWorldRefiner closedWorldRefiner) {
-    _compiler.closureToClassMapper.createClosureClasses(closedWorldRefiner);
-  }
+  /// Called when code generation has been completed.
+  void onCodegenEnd(CodegenInputs codegen);
+
+  /// Creates the [SsaBuilder] used for the element model.
+  SsaBuilder createSsaBuilder(
+      CompilerTask task, SourceInformationStrategy sourceInformationStrategy);
+
+  /// Creates a [SourceSpan] from [spannable] in context of [currentElement].
+  SourceSpan spanFromSpannable(Spannable spannable, Entity currentElement);
+
+  /// Creates the [TypesInferrer] used by this strategy.
+  TypesInferrer createTypesInferrer(JClosedWorld closedWorld,
+      GlobalLocalsMap globalLocalsMap, InferredDataBuilder inferredDataBuilder);
+
+  /// Calls [f] for every member that needs to be serialized for modular code
+  /// generation and returns an [EntityWriter] for encoding these members in
+  /// the serialized data.
+  ///
+  /// The needed members include members computed on demand during non-modular
+  /// code generation, such as constructor bodies and and generator bodies.
+  EntityWriter forEachCodegenMember(void Function(MemberEntity member) f);
+
+  /// Prepare [source] to deserialize modular code generation data.
+  void prepareCodegenReader(DataSource source);
+
+  /// Generates the output and returns the total size of the generated code.
+  int assembleProgram(JClosedWorld closedWorld, InferredData inferredData,
+      CodegenInputs codegenInputs, CodegenWorld codegenWorld);
 }

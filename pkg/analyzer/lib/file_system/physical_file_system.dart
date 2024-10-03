@@ -1,97 +1,65 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library analyzer.file_system.physical_file_system;
-
-import 'dart:async';
-import 'dart:core';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
 import 'package:analyzer/file_system/file_system.dart';
-import 'package:analyzer/src/generated/source_io.dart';
+import 'package:analyzer/src/generated/source.dart';
 import 'package:analyzer/src/source/source_resource.dart';
-import 'package:analyzer/src/util/absolute_path.dart';
-import 'package:isolate/isolate_runner.dart';
 import 'package:path/path.dart';
 import 'package:watcher/watcher.dart';
 
-/**
- * Return modification times for every file path in [paths].
- *
- * If a path is `null`, the modification time is also `null`.
- *
- * If any exception happens, the file is considered as a not existing and
- * `-1` is its modification time.
- */
-List<int> _pathsToTimes(List<String> paths) {
-  return paths.map((path) {
-    if (path != null) {
-      try {
-        io.File file = new io.File(path);
-        return file.lastModifiedSync().millisecondsSinceEpoch;
-      } catch (_) {
-        return -1;
-      }
-    } else {
-      return null;
-    }
-  }).toList();
-}
+/// The name of the directory containing plugin specific subfolders used to
+/// store data across sessions.
+const String _SERVER_DIR = ".dartServer";
 
-/**
- * A `dart:io` based implementation of [ResourceProvider].
- */
-class PhysicalResourceProvider implements ResourceProvider {
-  static final FileReadMode NORMALIZE_EOL_ALWAYS =
-      (String string) => string.replaceAll(new RegExp('\r\n?'), '\n');
-
-  static final PhysicalResourceProvider INSTANCE =
-      new PhysicalResourceProvider(null);
-
-  /**
-   * The name of the directory containing plugin specific subfolders used to
-   * store data across sessions.
-   */
-  static final String SERVER_DIR = ".dartServer";
-
-  static _SingleIsolateRunnerProvider pathsToTimesIsolateProvider =
-      new _SingleIsolateRunnerProvider();
-
-  @override
-  final AbsolutePathContext absolutePathContext =
-      new AbsolutePathContext(io.Platform.isWindows);
-
-  PhysicalResourceProvider(FileReadMode fileReadMode) {
-    if (fileReadMode != null) {
-      FileBasedSource.fileReadMode = fileReadMode;
-    }
+/// Returns the path to default state location.
+///
+/// Generally this is ~/.dartServer. It can be overridden via the
+/// ANALYZER_STATE_LOCATION_OVERRIDE environment variable, in which case this
+/// method will return the contents of that environment variable.
+String? _getStandardStateLocation() {
+  final Map<String, String> env = io.Platform.environment;
+  if (env.containsKey('ANALYZER_STATE_LOCATION_OVERRIDE')) {
+    return env['ANALYZER_STATE_LOCATION_OVERRIDE'];
   }
 
+  final home = io.Platform.isWindows ? env['LOCALAPPDATA'] : env['HOME'];
+  return home != null && io.FileSystemEntity.isDirectorySync(home)
+      ? join(home, _SERVER_DIR)
+      : null;
+}
+
+/// A `dart:io` based implementation of [ResourceProvider].
+class PhysicalResourceProvider implements ResourceProvider {
+  static final PhysicalResourceProvider INSTANCE = PhysicalResourceProvider();
+
+  /// The path to the base folder where state is stored.
+  final String? _stateLocation;
+
+  PhysicalResourceProvider({String? stateLocation})
+      : _stateLocation = stateLocation ?? _getStandardStateLocation();
+
   @override
-  Context get pathContext => io.Platform.isWindows ? windows : posix;
+  Context get pathContext => context;
 
   @override
   File getFile(String path) {
-    path = normalize(path);
-    return new _PhysicalFile(new io.File(path));
+    _ensureAbsoluteAndNormalized(path);
+    return _PhysicalFile(io.File(path));
   }
 
   @override
   Folder getFolder(String path) {
-    path = normalize(path);
-    return new _PhysicalFolder(new io.Directory(path));
-  }
-
-  @override
-  Future<List<int>> getModificationTimes(List<Source> sources) async {
-    List<String> paths = sources.map((source) => source.fullName).toList();
-    IsolateRunner runner = await pathsToTimesIsolateProvider.get();
-    return runner.run(_pathsToTimes, paths);
+    _ensureAbsoluteAndNormalized(path);
+    return _PhysicalFolder(io.Directory(path));
   }
 
   @override
   Resource getResource(String path) {
+    _ensureAbsoluteAndNormalized(path);
     if (io.FileSystemEntity.isDirectorySync(path)) {
       return getFolder(path);
     } else {
@@ -100,38 +68,43 @@ class PhysicalResourceProvider implements ResourceProvider {
   }
 
   @override
-  Folder getStateLocation(String pluginId) {
-    String home;
-    if (io.Platform.isWindows) {
-      home = io.Platform.environment['LOCALAPPDATA'];
-    } else {
-      home = io.Platform.environment['HOME'];
-    }
-    if (home != null && io.FileSystemEntity.isDirectorySync(home)) {
-      io.Directory directory =
-          new io.Directory(join(home, SERVER_DIR, pluginId));
+  Folder? getStateLocation(String pluginId) {
+    if (_stateLocation != null) {
+      io.Directory directory = io.Directory(join(_stateLocation!, pluginId));
       directory.createSync(recursive: true);
-      return new _PhysicalFolder(directory);
+      return _PhysicalFolder(directory);
     }
     return null;
   }
+
+  /// The file system abstraction supports only absolute and normalized paths.
+  /// This method is used to validate any input paths to prevent errors later.
+  void _ensureAbsoluteAndNormalized(String path) {
+    assert(() {
+      if (!pathContext.isAbsolute(path)) {
+        throw ArgumentError("Path must be absolute : $path");
+      }
+      if (pathContext.normalize(path) != path) {
+        throw ArgumentError("Path must be normalized : $path");
+      }
+      return true;
+    }());
+  }
 }
 
-/**
- * A `dart:io` based implementation of [File].
- */
+/// A `dart:io` based implementation of [File].
 class _PhysicalFile extends _PhysicalResource implements File {
   _PhysicalFile(io.File file) : super(file);
 
   @override
-  Stream<WatchEvent> get changes => new FileWatcher(_entry.path).events;
+  Stream<WatchEvent> get changes => watch().changes;
 
   @override
   int get lengthSync {
     try {
       return _file.lengthSync();
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
@@ -140,13 +113,11 @@ class _PhysicalFile extends _PhysicalResource implements File {
     try {
       return _file.lastModifiedSync().millisecondsSinceEpoch;
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
-  /**
-   * Return the underlying file being represented by this wrapper.
-   */
+  /// Return the underlying file being represented by this wrapper.
   io.File get _file => _entry as io.File;
 
   @override
@@ -158,8 +129,8 @@ class _PhysicalFile extends _PhysicalResource implements File {
   }
 
   @override
-  Source createSource([Uri uri]) {
-    return new FileSource(this, uri ?? pathContext.toUri(path));
+  Source createSource([Uri? uri]) {
+    return FileSource(this, uri ?? pathContext.toUri(path));
   }
 
   @override
@@ -168,12 +139,12 @@ class _PhysicalFile extends _PhysicalResource implements File {
   }
 
   @override
-  List<int> readAsBytesSync() {
+  Uint8List readAsBytesSync() {
     _throwIfWindowsDeviceDriver();
     try {
       return _file.readAsBytesSync();
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
@@ -181,39 +152,45 @@ class _PhysicalFile extends _PhysicalResource implements File {
   String readAsStringSync() {
     _throwIfWindowsDeviceDriver();
     try {
-      return FileBasedSource.fileReadMode(_file.readAsStringSync());
+      return _file.readAsStringSync();
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
   @override
   File renameSync(String newPath) {
     try {
-      return new _PhysicalFile(_file.renameSync(newPath));
+      return _PhysicalFile(_file.renameSync(newPath));
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
   @override
   File resolveSymbolicLinksSync() {
     try {
-      return new _PhysicalFile(new io.File(_file.resolveSymbolicLinksSync()));
+      return _PhysicalFile(io.File(_file.resolveSymbolicLinksSync()));
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
   @override
-  Uri toUri() => new Uri.file(path);
+  Uri toUri() => Uri.file(path);
+
+  @override
+  ResourceWatcher watch() {
+    final watcher = FileWatcher(_entry.path);
+    return ResourceWatcher(watcher.events, watcher.ready);
+  }
 
   @override
   void writeAsBytesSync(List<int> bytes) {
     try {
       _file.writeAsBytesSync(bytes);
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
@@ -222,25 +199,25 @@ class _PhysicalFile extends _PhysicalResource implements File {
     try {
       _file.writeAsStringSync(content);
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 }
 
-/**
- * A `dart:io` based implementation of [Folder].
- */
+/// A `dart:io` based implementation of [Folder].
 class _PhysicalFolder extends _PhysicalResource implements Folder {
   _PhysicalFolder(io.Directory directory) : super(directory);
 
   @override
-  Stream<WatchEvent> get changes =>
-      new DirectoryWatcher(_entry.path).events.handleError((error) {},
-          test: (error) => error is io.FileSystemException);
+  Stream<WatchEvent> get changes => watch().changes;
 
-  /**
-   * Return the underlying file being represented by this wrapper.
-   */
+  @override
+  bool get isRoot {
+    var parentPath = provider.pathContext.dirname(path);
+    return parentPath == path;
+  }
+
+  /// Return the underlying file being represented by this wrapper.
   io.Directory get _directory => _entry as io.Directory;
 
   @override
@@ -250,7 +227,8 @@ class _PhysicalFolder extends _PhysicalResource implements Folder {
 
   @override
   bool contains(String path) {
-    return absolutePathContext.isWithin(this.path, path);
+    PhysicalResourceProvider.INSTANCE._ensureAbsoluteAndNormalized(path);
+    return pathContext.isWithin(this.path, path);
   }
 
   @override
@@ -277,15 +255,15 @@ class _PhysicalFolder extends _PhysicalResource implements Folder {
   @override
   _PhysicalFile getChildAssumingFile(String relPath) {
     String canonicalPath = canonicalizePath(relPath);
-    io.File file = new io.File(canonicalPath);
-    return new _PhysicalFile(file);
+    io.File file = io.File(canonicalPath);
+    return _PhysicalFile(file);
   }
 
   @override
   _PhysicalFolder getChildAssumingFolder(String relPath) {
     String canonicalPath = canonicalizePath(relPath);
-    io.Directory directory = new io.Directory(canonicalPath);
-    return new _PhysicalFolder(directory);
+    io.Directory directory = io.Directory(canonicalPath);
+    return _PhysicalFolder(directory);
   }
 
   @override
@@ -298,14 +276,14 @@ class _PhysicalFolder extends _PhysicalResource implements Folder {
       for (int i = 0; i < numEntries; i++) {
         io.FileSystemEntity entity = entries[i];
         if (entity is io.Directory) {
-          children.add(new _PhysicalFolder(entity));
+          children.add(_PhysicalFolder(entity));
         } else if (entity is io.File) {
-          children.add(new _PhysicalFile(entity));
+          children.add(_PhysicalFile(entity));
         }
       }
       return children;
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
@@ -320,60 +298,71 @@ class _PhysicalFolder extends _PhysicalResource implements Folder {
   @override
   Folder resolveSymbolicLinksSync() {
     try {
-      return new _PhysicalFolder(
-          new io.Directory(_directory.resolveSymbolicLinksSync()));
+      return _PhysicalFolder(
+          io.Directory(_directory.resolveSymbolicLinksSync()));
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
   @override
-  Uri toUri() => new Uri.directory(path);
+  Uri toUri() => Uri.directory(path);
+
+  @override
+  ResourceWatcher watch() {
+    final watcher = DirectoryWatcher(_entry.path);
+    final events = watcher.events.handleError((Object error) {},
+        test: (error) =>
+            error is io.FileSystemException &&
+            // Don't suppress "Directory watcher closed," so the outer
+            // listener can see the interruption & act on it.
+            !error.message.startsWith("Directory watcher closed unexpectedly"));
+    return ResourceWatcher(events, watcher.ready);
+  }
 }
 
-/**
- * A `dart:io` based implementation of [Resource].
- */
+/// A `dart:io` based implementation of [Resource].
 abstract class _PhysicalResource implements Resource {
   final io.FileSystemEntity _entry;
 
   _PhysicalResource(this._entry);
 
-  AbsolutePathContext get absolutePathContext =>
-      PhysicalResourceProvider.INSTANCE.absolutePathContext;
-
   @override
-  bool get exists => _entry.existsSync();
-
-  @override
-  get hashCode => path.hashCode;
-
-  @override
-  Folder get parent {
-    String parentPath = absolutePathContext.dirname(path);
-    if (parentPath == path) {
-      return null;
+  bool get exists {
+    try {
+      return _entry.existsSync();
+    } on FileSystemException {
+      return false;
     }
-    return new _PhysicalFolder(new io.Directory(parentPath));
   }
 
   @override
-  String get path => _entry.absolute.path;
+  int get hashCode => path.hashCode;
 
-  /**
-   * Return the path context used by this resource provider.
-   */
+  @override
+  Folder get parent2 {
+    String parentPath = pathContext.dirname(path);
+    return _PhysicalFolder(io.Directory(parentPath));
+  }
+
+  @override
+  String get path => _entry.path;
+
+  /// Return the path context used by this resource provider.
   Context get pathContext => io.Platform.isWindows ? windows : posix;
 
   @override
-  String get shortName => absolutePathContext.basename(path);
+  ResourceProvider get provider => PhysicalResourceProvider.INSTANCE;
 
   @override
-  bool operator ==(other) {
+  String get shortName => pathContext.basename(path);
+
+  @override
+  bool operator ==(Object other) {
     if (runtimeType != other.runtimeType) {
       return false;
     }
-    return path == other.path;
+    return path == (other as _PhysicalResource).path;
   }
 
   @override
@@ -381,22 +370,20 @@ abstract class _PhysicalResource implements Resource {
     try {
       _entry.deleteSync(recursive: true);
     } on io.FileSystemException catch (exception) {
-      throw new FileSystemException(exception.path, exception.message);
+      throw _wrapException(exception);
     }
   }
 
   @override
   String toString() => path;
 
-  /**
-   * If the operating system is Windows and the resource references one of the
-   * device drivers, throw a [FileSystemException].
-   *
-   * https://support.microsoft.com/en-us/kb/74496
-   */
+  /// If the operating system is Windows and the resource references one of the
+  /// device drivers, throw a [FileSystemException].
+  ///
+  /// https://support.microsoft.com/en-us/kb/74496
   void _throwIfWindowsDeviceDriver() {
     if (io.Platform.isWindows) {
-      String shortName = this.shortName.toUpperCase();
+      final shortName = this.shortName.toUpperCase();
       if (shortName == r'CON' ||
           shortName == r'PRN' ||
           shortName == r'AUX' ||
@@ -409,39 +396,13 @@ abstract class _PhysicalResource implements Resource {
           shortName == r'COM2' ||
           shortName == r'COM3' ||
           shortName == r'COM4') {
-        throw new FileSystemException(
+        throw FileSystemException(
             path, 'Windows device drivers cannot be read.');
       }
     }
   }
-}
 
-/**
- * This class encapsulates logic for creating a single [IsolateRunner].
- */
-class _SingleIsolateRunnerProvider {
-  bool _isSpawning = false;
-  IsolateRunner _runner;
-
-  /**
-   * Complete with the only [IsolateRunner] instance.
-   */
-  Future<IsolateRunner> get() async {
-    if (_runner != null) {
-      return _runner;
-    }
-    if (_isSpawning) {
-      Completer<IsolateRunner> completer = new Completer<IsolateRunner>();
-      new Timer.periodic(new Duration(milliseconds: 10), (Timer timer) {
-        if (_runner != null) {
-          completer.complete(_runner);
-          timer.cancel();
-        }
-      });
-      return completer.future;
-    }
-    _isSpawning = true;
-    _runner = await IsolateRunner.spawn();
-    return _runner;
+  FileSystemException _wrapException(io.FileSystemException e) {
+    return FileSystemException(e.path ?? path, e.message);
   }
 }

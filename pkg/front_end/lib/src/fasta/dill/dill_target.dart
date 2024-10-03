@@ -2,62 +2,97 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library fasta.dill_target;
+import 'package:_fe_analyzer_shared/src/messages/severity.dart' show Severity;
 
-import 'dart:async' show Future;
+import 'package:kernel/ast.dart' show Source;
 
-import 'package:kernel/ast.dart' show Class;
+import 'package:kernel/target/targets.dart' show Target;
 
-import '../errors.dart' show internalError;
-import '../kernel/kernel_builder.dart' show ClassBuilder;
-import '../target_implementation.dart' show TargetImplementation;
+import '../../base/processed_options.dart' show ProcessedOptions;
+
+import '../compiler_context.dart' show CompilerContext;
+
+import '../kernel/benchmarker.dart' show BenchmarkPhases, Benchmarker;
+
+import '../messages.dart' show FormattedMessage, LocatedMessage, Message;
+
 import '../ticker.dart' show Ticker;
-import '../translate_uri.dart' show TranslateUri;
-import 'dill_library_builder.dart' show DillLibraryBuilder;
+
+import '../uri_translator.dart' show UriTranslator;
+
+import '../target_implementation.dart' show TargetImplementation;
+
 import 'dill_loader.dart' show DillLoader;
 
 class DillTarget extends TargetImplementation {
-  bool isLoaded = false;
-  DillLoader loader;
+  final Ticker ticker;
 
-  DillTarget(Ticker ticker, TranslateUri uriTranslator)
-      : super(ticker, uriTranslator) {
+  bool isLoaded = false;
+
+  late final DillLoader loader;
+
+  final UriTranslator uriTranslator;
+
+  @override
+  final Target backendTarget;
+
+  @override
+  final CompilerContext context = CompilerContext.current;
+
+  /// Shared with [CompilerContext].
+  final Map<Uri, Source> uriToSource = CompilerContext.current.uriToSource;
+
+  final Benchmarker? benchmarker;
+
+  DillTarget(this.ticker, this.uriTranslator, this.backendTarget,
+      {this.benchmarker})
+      // ignore: unnecessary_null_comparison
+      : assert(ticker != null),
+        // ignore: unnecessary_null_comparison
+        assert(uriTranslator != null),
+        // ignore: unnecessary_null_comparison
+        assert(backendTarget != null) {
     loader = new DillLoader(this);
   }
 
-  void addSourceInformation(
-      Uri uri, List<int> lineStarts, List<int> sourceCode) {
-    internalError("Unsupported operation.");
+  void loadExtraRequiredLibraries(DillLoader loader) {
+    for (String uri in backendTarget.extraRequiredLibraries) {
+      loader.read(Uri.parse(uri), 0, accessor: loader.coreLibrary);
+    }
+    if (context.compilingPlatform) {
+      for (String uri in backendTarget.extraRequiredLibrariesPlatform) {
+        loader.read(Uri.parse(uri), 0, accessor: loader.coreLibrary);
+      }
+    }
   }
 
-  void read(Uri uri) {
-    internalError("Unsupported operation.");
+  FormattedMessage createFormattedMessage(
+      Message message,
+      int charOffset,
+      int length,
+      Uri? fileUri,
+      List<LocatedMessage>? messageContext,
+      Severity severity,
+      {List<Uri>? involvedFiles}) {
+    ProcessedOptions processedOptions = context.options;
+    return processedOptions.format(
+        fileUri != null
+            ? message.withLocation(fileUri, charOffset, length)
+            : message.withoutLocation(),
+        severity,
+        messageContext,
+        involvedFiles: involvedFiles);
   }
 
-  @override
-  Future<Null> buildProgram() {
-    return internalError("not implemented.");
-  }
-
-  @override
-  Future<Null> buildOutlines() async {
+  void buildOutlines({bool suppressFinalizationErrors: false}) {
     if (loader.libraries.isNotEmpty) {
-      await loader.buildOutlines();
+      benchmarker?.enterPhase(BenchmarkPhases.dill_buildOutlines);
+      loader.buildOutlines();
+      benchmarker?.enterPhase(BenchmarkPhases.dill_finalizeExports);
+      loader.finalizeExports(
+          suppressFinalizationErrors: suppressFinalizationErrors);
+      benchmarker?.enterPhase(BenchmarkPhases.unknown);
     }
     isLoaded = true;
   }
-
-  DillLibraryBuilder createLibraryBuilder(Uri uri, Uri fileUri) {
-    return new DillLibraryBuilder(uri, loader);
-  }
-
-  void addDirectSupertype(ClassBuilder cls, Set<ClassBuilder> set) {}
-
-  List<ClassBuilder> collectAllClasses() {
-    return null;
-  }
-
-  void breakCycle(ClassBuilder cls) {}
-
-  Class get objectClass => loader.coreLibrary["Object"].target;
 }

@@ -10,6 +10,11 @@ class RegExpAllMatchesTest {
   static testIterator() {
     var matches = new RegExp("foo").allMatches("foo foo");
     Iterator it = matches.iterator;
+    if (hasSoundNullSafety) {
+      Expect.throws(() => it.current);
+    } else {
+      Expect.isNull(it.current);
+    }
     Expect.isTrue(it.moveNext());
     Expect.equals('foo', it.current.group(0));
     Expect.isTrue(it.moveNext());
@@ -67,23 +72,23 @@ class RegExpAllMatchesTest {
   static testEvery() {
     var matches = new RegExp("foo?").allMatches("foo fo foo fo");
     Expect.equals(true, matches.every((Match m) {
-      return m.group(0).startsWith("fo");
+      return m.group(0)!.startsWith("fo");
     }));
     Expect.equals(false, matches.every((Match m) {
-      return m.group(0).startsWith("foo");
+      return m.group(0)!.startsWith("foo");
     }));
   }
 
   static testSome() {
     var matches = new RegExp("foo?").allMatches("foo fo foo fo");
     Expect.equals(true, matches.any((Match m) {
-      return m.group(0).startsWith("fo");
+      return m.group(0)!.startsWith("fo");
     }));
     Expect.equals(true, matches.any((Match m) {
-      return m.group(0).startsWith("foo");
+      return m.group(0)!.startsWith("foo");
     }));
     Expect.equals(false, matches.any((Match m) {
-      return m.group(0).startsWith("fooo");
+      return m.group(0)!.startsWith("fooo");
     }));
   }
 

@@ -14,7 +14,6 @@ static bool IsUnreservedChar(intptr_t value) {
           value == '_' || value == '~');
 }
 
-
 static bool IsDelimiter(intptr_t value) {
   switch (value) {
     case ':':
@@ -41,12 +40,10 @@ static bool IsDelimiter(intptr_t value) {
   }
 }
 
-
 static bool IsHexDigit(char value) {
   return ((value >= '0' && value <= '9') || (value >= 'A' && value <= 'F') ||
           (value >= 'a' && value <= 'f'));
 }
-
 
 static int HexValue(char digit) {
   if ((digit >= '0' && digit <= '9')) {
@@ -61,7 +58,6 @@ static int HexValue(char digit) {
   UNREACHABLE();
   return 0;
 }
-
 
 static int GetEscapedValue(const char* str, intptr_t pos, intptr_t len) {
   if (pos + 2 >= len) {
@@ -82,10 +78,9 @@ static int GetEscapedValue(const char* str, intptr_t pos, intptr_t len) {
   return HexValue(digit1) * 16 + HexValue(digit2);
 }
 
-
 static char* NormalizeEscapes(const char* str, intptr_t len) {
   // Allocate the buffer.
-  Zone* zone = Thread::Current()->zone();
+  Zone* zone = ThreadState::Current()->zone();
   // We multiply len by three because a percent-escape sequence is
   // three characters long (e.g. ' ' -> '%20).  +1 for '\0'.  We could
   // take two passes through the string and avoid the excess
@@ -105,7 +100,7 @@ static char* NormalizeEscapes(const char* str, intptr_t len) {
         buffer[buffer_pos] = escaped_value;
         buffer_pos++;
       } else {
-        OS::SNPrint(buffer + buffer_pos, 4, "%%%02X", escaped_value);
+        Utils::SNPrint(buffer + buffer_pos, 4, "%%%02X", escaped_value);
         buffer_pos += 3;
       }
       pos += 3;
@@ -119,7 +114,7 @@ static char* NormalizeEscapes(const char* str, intptr_t len) {
         buffer_pos++;
       } else {
         // Escape funky characters.
-        OS::SNPrint(buffer + buffer_pos, 4, "%%%02X", c);
+        Utils::SNPrint(buffer + buffer_pos, 4, "%%%02X", c);
         buffer_pos += 3;
       }
       pos++;
@@ -128,7 +123,6 @@ static char* NormalizeEscapes(const char* str, intptr_t len) {
   buffer[buffer_pos] = '\0';
   return buffer;
 }
-
 
 // Lower-case a string in place.
 static void StringLower(char* str) {
@@ -151,7 +145,6 @@ static void StringLower(char* str) {
   }
 }
 
-
 static void ClearParsedUri(ParsedUri* parsed_uri) {
   parsed_uri->scheme = NULL;
   parsed_uri->userinfo = NULL;
@@ -162,9 +155,8 @@ static void ClearParsedUri(ParsedUri* parsed_uri) {
   parsed_uri->fragment = NULL;
 }
 
-
 static intptr_t ParseAuthority(const char* authority, ParsedUri* parsed_uri) {
-  Zone* zone = Thread::Current()->zone();
+  Zone* zone = ThreadState::Current()->zone();
   const char* current = authority;
   intptr_t len = 0;
 
@@ -196,11 +188,10 @@ static intptr_t ParseAuthority(const char* authority, ParsedUri* parsed_uri) {
   return len;
 }
 
-
 // Performs a simple parse of a uri into its components.
 // See RFC 3986 Section 3: Syntax.
 bool ParseUri(const char* uri, ParsedUri* parsed_uri) {
-  Zone* zone = Thread::Current()->zone();
+  Zone* zone = ThreadState::Current()->zone();
 
   // The first ':' separates the scheme from the rest of the uri.  If
   // a ':' occurs after the first '/' it doesn't count.
@@ -259,7 +250,6 @@ bool ParseUri(const char* uri, ParsedUri* parsed_uri) {
   return true;
 }
 
-
 static char* RemoveLastSegment(char* current, char* base) {
   if (current == base) {
     return current;
@@ -275,7 +265,6 @@ static char* RemoveLastSegment(char* current, char* base) {
   return current;
 }
 
-
 static intptr_t SegmentLength(const char* input) {
   const char* cp = input;
 
@@ -289,14 +278,13 @@ static intptr_t SegmentLength(const char* input) {
   return cp - input;
 }
 
-
 // See RFC 3986 Section 5.2.4: Remove Dot Segments.
 static const char* RemoveDotSegments(const char* path) {
   const char* input = path;
 
   // The output path will always be less than or equal to the size of
   // the input path.
-  Zone* zone = Thread::Current()->zone();
+  Zone* zone = ThreadState::Current()->zone();
   char* buffer = zone->Alloc<char>(strlen(path) + 1);  // +1 for '\0'
   char* output = buffer;
 
@@ -352,10 +340,9 @@ static const char* RemoveDotSegments(const char* path) {
   return buffer;
 }
 
-
 // See RFC 3986 Section 5.2.3: Merge Paths.
 static const char* MergePaths(const char* base_path, const char* ref_path) {
-  Zone* zone = Thread::Current()->zone();
+  Zone* zone = ThreadState::Current()->zone();
   if (base_path[0] == '\0') {
     // If the base_path is empty, we prepend '/'.
     return zone->PrintToString("/%s", ref_path);
@@ -382,17 +369,13 @@ static const char* MergePaths(const char* base_path, const char* ref_path) {
   buffer[truncated_base_len] = '/';
 
   // Copy the ref_path.
-  strncpy((buffer + truncated_base_len + 1), ref_path, ref_path_len);
-
-  // Add the trailing '\0'.
-  buffer[len] = '\0';
+  strncpy((buffer + truncated_base_len + 1), ref_path, ref_path_len + 1);
 
   return buffer;
 }
 
-
 static char* BuildUri(const ParsedUri& uri) {
-  Zone* zone = Thread::Current()->zone();
+  Zone* zone = ThreadState::Current()->zone();
   ASSERT(uri.path != NULL);
 
   const char* fragment = uri.fragment == NULL ? "" : uri.fragment;
@@ -436,7 +419,6 @@ static char* BuildUri(const ParsedUri& uri) {
       fragment);
 }
 
-
 // See RFC 3986 Section 5: Reference Resolution
 bool ResolveUri(const char* ref_uri,
                 const char* base_uri,
@@ -451,7 +433,7 @@ bool ResolveUri(const char* ref_uri,
   ParsedUri target;
   if (ref.scheme != NULL) {
     if (strcmp(ref.scheme, "dart") == 0) {
-      Zone* zone = Thread::Current()->zone();
+      Zone* zone = ThreadState::Current()->zone();
       *target_uri = zone->MakeCopyOfString(ref_uri);
       return true;
     }
@@ -476,7 +458,7 @@ bool ResolveUri(const char* ref_uri,
   }
 
   if ((base.scheme != NULL) && strcmp(base.scheme, "dart") == 0) {
-    Zone* zone = Thread::Current()->zone();
+    Zone* zone = ThreadState::Current()->zone();
     *target_uri = zone->MakeCopyOfString(ref_uri);
     return true;
   }

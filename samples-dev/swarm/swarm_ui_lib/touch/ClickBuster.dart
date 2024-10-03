@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of touch;
 
 /**
@@ -12,7 +14,7 @@ part of touch;
  * Buttons implemented with touch events usually have click handlers as well.
  * This is because sometimes touch events stop working, and the click handler
  * serves as a fallback. Here we use a click buster to prevent the native click
- * from firing if the touchend event was succesfully handled.
+ * from firing if the touchend event was successfully handled.
  *
  * When native scrolling behavior is disabled (see Scroller), click events will
  * fire after the touchend event when the drag sequence is complete. The click

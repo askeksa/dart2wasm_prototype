@@ -7,14 +7,16 @@ library front_end.test.memory_file_system_test;
 
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:typed_data';
 
-import 'package:front_end/file_system.dart' show FileSystemException;
-import 'package:front_end/memory_file_system.dart';
+import 'package:front_end/src/api_prototype/file_system.dart'
+    show FileSystemException;
+import 'package:front_end/src/api_prototype/memory_file_system.dart';
 import 'package:path/path.dart' as pathos;
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(MemoryFileSystemTestNative);
     defineReflectiveTests(MemoryFileSystemTestPosix);
@@ -23,139 +25,167 @@ main() {
   });
 }
 
-const Matcher _throwsFileSystemException =
-    const Throws(const isInstanceOf<FileSystemException>());
+final Matcher _throwsFileSystemException =
+    throwsA(const TypeMatcher<FileSystemException>());
 
 @reflectiveTest
 class FileTest extends _BaseTestNative {
-  String path;
-  MemoryFileSystemEntity file;
+  late String path;
+  late MemoryFileSystemEntity file;
 
-  setUp() {
-    super.setUp();
+  void setUp() {
+    _baseSetUp();
     path = join(tempPath, 'file.txt');
     file = entityForPath(path);
   }
 
-  test_equals_differentPaths() {
+  Future<void> test_createDirectory_doesNotExist() async {
+    file.createDirectory();
+    expect(await file.exists(), true);
+  }
+
+  Future<void> test_createDirectory_exists_asDirectory() async {
+    file.createDirectory();
+    file.createDirectory();
+    expect(await file.exists(), true);
+  }
+
+  Future<void> test_createDirectory_exists_asFile() async {
+    file.writeAsStringSync('');
+    await expectLater(file.createDirectory, _throwsFileSystemException);
+  }
+
+  void test_equals_differentPaths() {
     expect(file == entityForPath(join(tempPath, 'file2.txt')), isFalse);
   }
 
-  test_equals_samePath() {
+  void test_equals_samePath() {
     expect(file == entityForPath(join(tempPath, 'file.txt')), isTrue);
   }
 
-  test_exists_doesNotExist() async {
+  Future<void> test_exists_directory_exists() async {
+    file.createDirectory();
+    expect(await file.exists(), true);
+  }
+
+  Future<void> test_exists_doesNotExist() async {
     expect(await file.exists(), false);
   }
 
-  test_exists_exists() async {
+  Future<void> test_exists_file_exists() async {
     file.writeAsStringSync('x');
     expect(await file.exists(), true);
   }
 
-  test_hashCode_samePath() {
+  void test_hashCode_samePath() {
     expect(file.hashCode, entityForPath(join(tempPath, 'file.txt')).hashCode);
   }
 
-  test_lastModified_doesNotExist() async {
-    expect(file.lastModified(), _throwsFileSystemException);
-  }
-
-  test_lastModified_increasesOnEachChange() async {
-    file.writeAsStringSync('x');
-    var mod1 = await file.lastModified();
-    file.writeAsStringSync('y');
-    var mod2 = await file.lastModified();
-    expect(mod2.isAfter(mod1), isTrue);
-
-    var file2 = entityForPath(join(tempPath, 'file2.txt'));
-    file2.writeAsStringSync('z');
-    var mod3 = await file2.lastModified();
-    expect(mod3.isAfter(mod2), isTrue);
-  }
-
-  test_path() {
+  void test_path() {
     expect(file.uri, context.toUri(path));
   }
 
-  test_readAsBytes_badUtf8() async {
+  Future<void> test_readAsBytes_badUtf8() async {
     // A file containing invalid UTF-8 can still be read as raw bytes.
     List<int> bytes = [0xc0, 0x40]; // Invalid UTF-8
     file.writeAsBytesSync(bytes);
     expect(await file.readAsBytes(), bytes);
   }
 
-  test_readAsBytes_doesNotExist() {
-    expect(file.readAsBytes(), _throwsFileSystemException);
+  Future<void> test_readAsBytes_doesNotExist() async {
+    await expectLater(file.readAsBytes, _throwsFileSystemException);
   }
 
-  test_readAsBytes_exists() async {
+  Future<void> test_readAsBytes_exists() async {
     var s = 'contents';
     file.writeAsStringSync(s);
-    expect(await file.readAsBytes(), UTF8.encode(s));
+    expect(await file.readAsBytes(), utf8.encode(s));
   }
 
-  test_readAsString_badUtf8() {
+  Future<void> test_readAsString_badUtf8() async {
     file.writeAsBytesSync([0xc0, 0x40]); // Invalid UTF-8
-    expect(file.readAsString(), _throwsFileSystemException);
+    await expectLater(file.readAsString, _throwsFileSystemException);
   }
 
-  test_readAsString_doesNotExist() {
-    expect(file.readAsString(), _throwsFileSystemException);
+  Future<void> test_readAsString_doesNotExist() async {
+    await expectLater(file.readAsString, _throwsFileSystemException);
   }
 
-  test_readAsString_exists() async {
+  Future<void> test_readAsString_exists() async {
     var s = 'contents';
     file.writeAsStringSync(s);
     expect(await file.readAsString(), s);
   }
 
-  test_readAsString_utf8() async {
+  Future<void> test_readAsString_utf8() async {
     file.writeAsBytesSync([0xe2, 0x82, 0xac]); // Unicode € symbol, in UTF-8
     expect(await file.readAsString(), '\u20ac');
   }
 
-  test_writeAsBytesSync_modifyAfterRead() async {
-    file.writeAsBytesSync([1]);
-    (await file.readAsBytes())[0] = 2;
-    expect(await file.readAsBytes(), [1]);
+  Future<void> test_writeAsBytesSync_directory() async {
+    file.createDirectory();
+    await expectLater(
+        () => file.writeAsBytesSync([0]), _throwsFileSystemException);
   }
 
-  test_writeAsBytesSync_modifyAfterWrite() async {
+  Future<void> test_writeAsBytesSync_modifyAfterRead() async {
+    // For efficiency we do not make defensive copies.
+    file.writeAsBytesSync([1]);
+    (await file.readAsBytes())[0] = 2;
+    expect(await file.readAsBytes(), [2]);
+  }
+
+  Future<void> test_writeAsBytesSync_modifyAfterWrite_Uint8List() async {
+    // For efficiency we do not make defensive copies.
+    var bytes = new Uint8List.fromList([1]);
+    file.writeAsBytesSync(bytes);
+    bytes[0] = 2;
+    expect(await file.readAsBytes(), [2]);
+  }
+
+  Future<void> test_writeAsBytesSync_modifyAfterWrite() async {
+    // For efficiency we generally do not make defensive copies, but on the
+    // other hrand we keep everything as `Uint8List`s internally, so in this
+    // case a copy is actually made.
     var bytes = [1];
     file.writeAsBytesSync(bytes);
     bytes[0] = 2;
     expect(await file.readAsBytes(), [1]);
   }
 
-  test_writeAsBytesSync_overwrite() async {
+  Future<void> test_writeAsBytesSync_overwrite() async {
     file.writeAsBytesSync([1]);
     file.writeAsBytesSync([2]);
     expect(await file.readAsBytes(), [2]);
   }
 
-  test_writeAsStringSync_overwrite() async {
+  Future<void> test_writeAsStringSync_directory() async {
+    file.createDirectory();
+    await expectLater(
+        () => file.writeAsStringSync(''), _throwsFileSystemException);
+  }
+
+  Future<void> test_writeAsStringSync_overwrite() async {
     file.writeAsStringSync('first');
     file.writeAsStringSync('second');
     expect(await file.readAsString(), 'second');
   }
 
-  test_writeAsStringSync_utf8() async {
+  Future<void> test_writeAsStringSync_utf8() async {
     file.writeAsStringSync('\u20ac'); // Unicode € symbol
     expect(await file.readAsBytes(), [0xe2, 0x82, 0xac]);
   }
 }
 
-abstract class MemoryFileSystemTestMixin extends _BaseTest {
-  Uri tempUri;
+abstract class MemoryFileSystemTestMixin implements _BaseTest {
+  late Uri tempUri;
 
-  setUp() {
-    super.setUp();
+  void setUp() {
+    _baseSetUp();
     tempUri = context.toUri(tempPath);
   }
 
-  test_currentDirectory_trailingSlash() {
+  void test_currentDirectory_trailingSlash() {
     // The currentDirectory should already end in a trailing slash.
     expect(fileSystem.currentDirectory.path, endsWith('/'));
     // A trailing slash should automatically be appended when creating a
@@ -171,27 +201,27 @@ abstract class MemoryFileSystemTestMixin extends _BaseTest {
         fileSystem.currentDirectory);
   }
 
-  test_entityForPath_absolutize() {
+  void test_entityForPath_absolutize() {
     expect(entityForPath('file.txt').uri,
         fileSystem.currentDirectory.resolve('file.txt'));
   }
 
-  test_entityForPath_normalize_dot() {
+  void test_entityForPath_normalize_dot() {
     expect(entityForPath(join(tempPath, '.', 'file.txt')).uri,
         Uri.parse('$tempUri/file.txt'));
   }
 
-  test_entityForPath_normalize_dotDot() {
+  void test_entityForPath_normalize_dotDot() {
     expect(entityForPath(join(tempPath, 'foo', '..', 'file.txt')).uri,
         Uri.parse('$tempUri/file.txt'));
   }
 
-  test_entityForUri() {
+  void test_entityForUri() {
     expect(fileSystem.entityForUri(Uri.parse('$tempUri/file.txt')).uri,
         Uri.parse('$tempUri/file.txt'));
   }
 
-  test_entityForUri_fileUri_relative() {
+  Future<void> test_entityForUri_fileUri_relative() async {
     // A weird quirk of the Uri class is that it doesn't seem possible to create
     // a `file:` uri with a relative path, no matter how many slashes you use or
     // if you populate the fields directly.  But just to be certain, try to do
@@ -204,23 +234,23 @@ abstract class MemoryFileSystemTestMixin extends _BaseTest {
       Uri.parse('file:///file.txt')
     ]) {
       if (!uri.path.startsWith('/')) {
-        expect(() => fileSystem.entityForUri(uri),
-            throwsA(new isInstanceOf<Error>()));
+        await expectLater(() => fileSystem.entityForUri(uri),
+            throwsA(const TypeMatcher<Error>()));
       }
     }
   }
 
-  test_entityForUri_nonFileUri() {
+  void test_entityForUri_nonFileUri() {
     var uri = Uri.parse('package:foo/bar.dart');
     expect(fileSystem.entityForUri(uri).uri, uri);
   }
 
-  test_entityForUri_normalize_dot() {
+  void test_entityForUri_normalize_dot() {
     expect(fileSystem.entityForUri(Uri.parse('$tempUri/./file.txt')).uri,
         Uri.parse('$tempUri/file.txt'));
   }
 
-  test_entityForUri_normalize_dotDot() {
+  void test_entityForUri_normalize_dotDot() {
     expect(fileSystem.entityForUri(Uri.parse('$tempUri/foo/../file.txt')).uri,
         Uri.parse('$tempUri/file.txt'));
   }
@@ -249,46 +279,67 @@ abstract class _BaseTest {
 
   String join(String path1, String path2, [String path3, String path4]);
 
-  void setUp();
+  void _baseSetUp();
 }
 
 class _BaseTestNative extends _BaseTest {
+  @override
   final pathos.Context context = pathos.context;
-  MemoryFileSystem fileSystem;
-  String tempPath;
 
-  String join(String path1, String path2, [String path3, String path4]) =>
+  @override
+  late MemoryFileSystem fileSystem;
+
+  @override
+  late String tempPath;
+
+  @override
+  String join(String path1, String path2, [String? path3, String? path4]) =>
       pathos.join(path1, path2, path3, path4);
 
-  setUp() {
+  @override
+  void _baseSetUp() {
     tempPath = pathos.join(io.Directory.systemTemp.path, 'test_file_system');
     fileSystem = new MemoryFileSystem(pathos.toUri(io.Directory.current.path));
   }
 }
 
 class _BaseTestPosix extends _BaseTest {
+  @override
   final pathos.Context context = pathos.posix;
-  MemoryFileSystem fileSystem;
-  String tempPath;
 
-  String join(String path1, String path2, [String path3, String path4]) =>
+  @override
+  late MemoryFileSystem fileSystem;
+
+  @override
+  late String tempPath;
+
+  @override
+  String join(String path1, String path2, [String? path3, String? path4]) =>
       pathos.posix.join(path1, path2, path3, path4);
 
-  void setUp() {
+  @override
+  void _baseSetUp() {
     tempPath = '/test_file_system';
     fileSystem = new MemoryFileSystem(Uri.parse('file:///cwd'));
   }
 }
 
 class _BaseTestWindows extends _BaseTest {
+  @override
   final pathos.Context context = pathos.windows;
-  MemoryFileSystem fileSystem;
-  String tempPath;
 
-  String join(String path1, String path2, [String path3, String path4]) =>
+  @override
+  late MemoryFileSystem fileSystem;
+
+  @override
+  late String tempPath;
+
+  @override
+  String join(String path1, String path2, [String? path3, String? path4]) =>
       pathos.windows.join(path1, path2, path3, path4);
 
-  void setUp() {
+  @override
+  void _baseSetUp() {
     tempPath = r'c:\test_file_system';
     fileSystem = new MemoryFileSystem(Uri.parse('file:///c:/cwd'));
   }

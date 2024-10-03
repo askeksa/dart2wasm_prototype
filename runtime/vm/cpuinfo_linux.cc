@@ -3,16 +3,16 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_LINUX)
+#if defined(DART_HOST_OS_LINUX)
 
-#include "vm/cpuinfo.h"
 #include "vm/cpuid.h"
+#include "vm/cpuinfo.h"
 #include "vm/proccpuinfo.h"
 
 #include "platform/assert.h"
 
 // As with Windows, on IA32 and X64, we use the cpuid instruction.
-// The analogous instruction is privileged on ARM and MIPS, so we resort to
+// The analogous instruction is privileged on ARM, so we resort to
 // reading from /proc/cpuinfo.
 
 namespace dart {
@@ -20,7 +20,7 @@ namespace dart {
 CpuInfoMethod CpuInfo::method_ = kCpuInfoDefault;
 const char* CpuInfo::fields_[kCpuInfoMax] = {0};
 
-void CpuInfo::InitOnce() {
+void CpuInfo::Init() {
 #if defined(HOST_ARCH_IA32) || defined(HOST_ARCH_X64)
   fields_[kCpuInfoProcessor] = "vendor_id";
   fields_[kCpuInfoModel] = "model name";
@@ -28,7 +28,7 @@ void CpuInfo::InitOnce() {
   fields_[kCpuInfoFeatures] = "flags";
   fields_[kCpuInfoArchitecture] = "CPU architecture";
   method_ = kCpuInfoCpuId;
-  CpuId::InitOnce();
+  CpuId::Init();
 #elif defined(HOST_ARCH_ARM)
   fields_[kCpuInfoProcessor] = "Processor";
   fields_[kCpuInfoModel] = "model name";
@@ -36,7 +36,7 @@ void CpuInfo::InitOnce() {
   fields_[kCpuInfoFeatures] = "Features";
   fields_[kCpuInfoArchitecture] = "CPU architecture";
   method_ = kCpuInfoSystem;
-  ProcCpuInfo::InitOnce();
+  ProcCpuInfo::Init();
 #elif defined(HOST_ARCH_ARM64)
   fields_[kCpuInfoProcessor] = "Processor";
   fields_[kCpuInfoModel] = "CPU implementer";
@@ -44,30 +44,25 @@ void CpuInfo::InitOnce() {
   fields_[kCpuInfoFeatures] = "Features";
   fields_[kCpuInfoArchitecture] = "CPU architecture";
   method_ = kCpuInfoSystem;
-  ProcCpuInfo::InitOnce();
-#elif defined(HOST_ARCH_MIPS)
-  fields_[kCpuInfoProcessor] = "system type";
-  fields_[kCpuInfoModel] = "cpu model";
-  fields_[kCpuInfoHardware] = "cpu model";
-  fields_[kCpuInfoFeatures] = "ASEs implemented";
-  fields_[kCpuInfoArchitecture] = "CPU architecture";
-  method_ = kCpuInfoSystem;
-  ProcCpuInfo::InitOnce();
+  ProcCpuInfo::Init();
+#elif defined(HOST_ARCH_RISCV32) || defined(HOST_ARCH_RISCV64)
+  // We only rely on the base Linux configuration of IMAFDC, so don't need
+  // dynamic feature detection.
+  method_ = kCpuInfoNone;
 #else
 #error Unrecognized target architecture
 #endif
 }
 
-
 void CpuInfo::Cleanup() {
   if (method_ == kCpuInfoCpuId) {
     CpuId::Cleanup();
-  } else {
-    ASSERT(method_ == kCpuInfoSystem);
+  } else if (method_ == kCpuInfoSystem) {
     ProcCpuInfo::Cleanup();
+  } else {
+    ASSERT(method_ == kCpuInfoNone);
   }
 }
-
 
 bool CpuInfo::FieldContains(CpuInfoIndices idx, const char* search_string) {
   if (method_ == kCpuInfoCpuId) {
@@ -75,22 +70,22 @@ bool CpuInfo::FieldContains(CpuInfoIndices idx, const char* search_string) {
     bool contains = (strstr(field, search_string) != NULL);
     free(const_cast<char*>(field));
     return contains;
-  } else {
-    ASSERT(method_ == kCpuInfoSystem);
+  } else if (method_ == kCpuInfoSystem) {
     return ProcCpuInfo::FieldContains(FieldName(idx), search_string);
+  } else {
+    UNREACHABLE();
   }
 }
-
 
 const char* CpuInfo::ExtractField(CpuInfoIndices idx) {
   if (method_ == kCpuInfoCpuId) {
     return CpuId::field(idx);
-  } else {
-    ASSERT(method_ == kCpuInfoSystem);
+  } else if (method_ == kCpuInfoSystem) {
     return ProcCpuInfo::ExtractField(FieldName(idx));
+  } else {
+    UNREACHABLE();
   }
 }
-
 
 bool CpuInfo::HasField(const char* field) {
   if (method_ == kCpuInfoCpuId) {
@@ -98,12 +93,15 @@ bool CpuInfo::HasField(const char* field) {
            (strcmp(field, fields_[kCpuInfoModel]) == 0) ||
            (strcmp(field, fields_[kCpuInfoHardware]) == 0) ||
            (strcmp(field, fields_[kCpuInfoFeatures]) == 0);
-  } else {
-    ASSERT(method_ == kCpuInfoSystem);
+  } else if (method_ == kCpuInfoSystem) {
     return ProcCpuInfo::HasField(field);
+  } else if (method_ == kCpuInfoNone) {
+    return false;
+  } else {
+    UNREACHABLE();
   }
 }
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_LINUX)
+#endif  // defined(DART_HOST_OS_LINUX)

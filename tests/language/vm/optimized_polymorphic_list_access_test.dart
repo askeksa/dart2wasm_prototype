@@ -10,13 +10,13 @@ import "package:expect/expect.dart";
 test(arr) {
   var r = 0;
   for (var i = 0; i < 1; ++i) {
-    r += arr[0];
+    r += arr[0] as int;
   }
   return r;
 }
 
 main() {
-  var a = new List<int>(1);
+  var a = new List<int?>.filled(1, null);
   a[0] = 0;
   var b = <int>[0];
   Expect.equals(0, test(a));

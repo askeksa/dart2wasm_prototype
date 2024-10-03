@@ -28,7 +28,8 @@ class _ContentCssRect extends CssRect {
    */
   set height(dynamic newHeight) {
     if (newHeight is Dimension) {
-      if (newHeight.value < 0) newHeight = new Dimension.px(0);
+      Dimension newHeightAsDimension = newHeight;
+      if (newHeightAsDimension.value < 0) newHeight = new Dimension.px(0);
       _element.style.height = newHeight.toString();
     } else if (newHeight is num) {
       if (newHeight < 0) newHeight = 0;
@@ -48,7 +49,8 @@ class _ContentCssRect extends CssRect {
    */
   set width(dynamic newWidth) {
     if (newWidth is Dimension) {
-      if (newWidth.value < 0) newWidth = new Dimension.px(0);
+      Dimension newWidthAsDimension = newWidth;
+      if (newWidthAsDimension.value < 0) newWidth = new Dimension.px(0);
       _element.style.width = newWidth.toString();
     } else if (newWidth is num) {
       if (newWidth < 0) newWidth = 0;
@@ -73,9 +75,9 @@ class _ContentCssRect extends CssRect {
 class _ContentCssListRect extends _ContentCssRect {
   List<Element> _elementList;
 
-  _ContentCssListRect(List<Element> elementList) : super(elementList.first) {
-    _elementList = elementList;
-  }
+  _ContentCssListRect(List<Element> elementList)
+      : _elementList = elementList,
+        super(elementList.first);
 
   /**
    * Set the height to `newHeight`.
@@ -180,8 +182,8 @@ abstract class CssRect implements Rectangle<num> {
    *
    * This is equivalent to the `height` function in jQuery and the calculated
    * `height` CSS value, converted to a dimensionless num in pixels. Unlike
-   * [getBoundingClientRect], `height` will return the same numerical width if
-   * the element is hidden or not.
+   * [Element.getBoundingClientRect], `height` will return the same numerical
+   * height if the element is hidden or not.
    */
   num get height;
 
@@ -190,8 +192,8 @@ abstract class CssRect implements Rectangle<num> {
    *
    * This is equivalent to the `width` function in jQuery and the calculated
    * `width` CSS value, converted to a dimensionless num in pixels. Unlike
-   * [getBoundingClientRect], `width` will return the same numerical width if
-   * the element is hidden or not.
+   * [Element.getBoundingClientRect], `width` will return the same numerical
+   * width if the element is hidden or not.
    */
   num get width;
 
@@ -236,7 +238,7 @@ abstract class CssRect implements Rectangle<num> {
     // always dealing with pixels in this method.
     var styles = _element.getComputedStyle();
 
-    var val = 0;
+    num val = 0;
 
     for (String measurement in dimensions) {
       // The border-box and default box model both exclude margin in the regular
@@ -267,8 +269,8 @@ abstract class CssRect implements Rectangle<num> {
   }
 
   // TODO(jacobr): these methods are duplicated from _RectangleBase in dart:math
-  // Ideally we would provide a RectangleMixin class that provides this implementation.
-  // In an ideal world we would exp
+  // Ideally we would provide a RectangleMixin class that provides this
+  // implementation. In an ideal world we would exp
   /** The x-coordinate of the right edge. */
   num get right => left + width;
   /** The y-coordinate of the bottom edge. */
@@ -278,16 +280,14 @@ abstract class CssRect implements Rectangle<num> {
     return 'Rectangle ($left, $top) $width x $height';
   }
 
-  bool operator ==(other) {
-    if (other is! Rectangle) return false;
-    return left == other.left &&
-        top == other.top &&
-        right == other.right &&
-        bottom == other.bottom;
-  }
+  bool operator ==(other) =>
+      other is Rectangle &&
+      left == other.left &&
+      top == other.top &&
+      right == other.right &&
+      bottom == other.bottom;
 
-  int get hashCode => _JenkinsSmiHash.hash4(
-      left.hashCode, top.hashCode, right.hashCode, bottom.hashCode);
+  int get hashCode => Object.hash(left, top, right, bottom);
 
   /**
    * Computes the intersection of `this` and [other].
@@ -298,7 +298,7 @@ abstract class CssRect implements Rectangle<num> {
    * Returns the intersection of this and `other`, or `null` if they don't
    * intersect.
    */
-  Rectangle<num> intersection(Rectangle<num> other) {
+  Rectangle<num>? intersection(Rectangle<num> other) {
     var x0 = max(left, other.left);
     var x1 = min(left + width, other.left + other.width);
 

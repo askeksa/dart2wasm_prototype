@@ -12,9 +12,9 @@
 
 namespace dart {
 
-static const char kDoubleToStringCommonExponentChar = 'e';
-static const char* kDoubleToStringCommonInfinitySymbol = "Infinity";
-static const char* kDoubleToStringCommonNaNSymbol = "NaN";
+char const DoubleToStringConstants::kExponentChar = 'e';
+const char* const DoubleToStringConstants::kInfinitySymbol = "Infinity";
+const char* const DoubleToStringConstants::kNaNSymbol = "NaN";
 
 void DoubleToCString(double d, char* buffer, int buffer_size) {
   static const int kDecimalLow = -6;
@@ -38,9 +38,9 @@ void DoubleToCString(double d, char* buffer, int buffer_size) {
           EMIT_TRAILING_ZERO_AFTER_POINT;
 
   const double_conversion::DoubleToStringConverter converter(
-      kConversionFlags, kDoubleToStringCommonInfinitySymbol,
-      kDoubleToStringCommonNaNSymbol, kDoubleToStringCommonExponentChar,
-      kDecimalLow, kDecimalHigh, 0,
+      kConversionFlags, DoubleToStringConstants::kInfinitySymbol,
+      DoubleToStringConstants::kNaNSymbol,
+      DoubleToStringConstants::kExponentChar, kDecimalLow, kDecimalHigh, 0,
       0);  // Last two values are ignored in shortest mode.
 
   double_conversion::StringBuilder builder(buffer, buffer_size);
@@ -50,7 +50,7 @@ void DoubleToCString(double d, char* buffer, int buffer_size) {
   ASSERT(result == buffer);
 }
 
-RawString* DoubleToStringAsFixed(double d, int fraction_digits) {
+StringPtr DoubleToStringAsFixed(double d, int fraction_digits) {
   static const int kMinFractionDigits = 0;
   static const int kMaxFractionDigits = 20;
   static const int kMaxDigitsBeforePoint = 20;
@@ -78,9 +78,10 @@ RawString* DoubleToStringAsFixed(double d, int fraction_digits) {
          fraction_digits <= kMaxFractionDigits);
 
   const double_conversion::DoubleToStringConverter converter(
-      kConversionFlags, kDoubleToStringCommonInfinitySymbol,
-      kDoubleToStringCommonNaNSymbol, kDoubleToStringCommonExponentChar, 0, 0,
-      0, 0);  // Last four values are ignored in fixed mode.
+      kConversionFlags, DoubleToStringConstants::kInfinitySymbol,
+      DoubleToStringConstants::kNaNSymbol,
+      DoubleToStringConstants::kExponentChar, 0, 0, 0,
+      0);  // Last four values are ignored in fixed mode.
 
   char* buffer = Thread::Current()->zone()->Alloc<char>(kBufferSize);
   buffer[kBufferSize - 1] = '\0';
@@ -90,8 +91,7 @@ RawString* DoubleToStringAsFixed(double d, int fraction_digits) {
   return String::New(builder.Finalize());
 }
 
-
-RawString* DoubleToStringAsExponential(double d, int fraction_digits) {
+StringPtr DoubleToStringAsExponential(double d, int fraction_digits) {
   static const int kMinFractionDigits = -1;  // -1 represents shortest mode.
   static const int kMaxFractionDigits = 20;
   static const int kConversionFlags =
@@ -109,9 +109,10 @@ RawString* DoubleToStringAsExponential(double d, int fraction_digits) {
          fraction_digits <= kMaxFractionDigits);
 
   const double_conversion::DoubleToStringConverter converter(
-      kConversionFlags, kDoubleToStringCommonInfinitySymbol,
-      kDoubleToStringCommonNaNSymbol, kDoubleToStringCommonExponentChar, 0, 0,
-      0, 0);  // Last four values are ignored in exponential mode.
+      kConversionFlags, DoubleToStringConstants::kInfinitySymbol,
+      DoubleToStringConstants::kNaNSymbol,
+      DoubleToStringConstants::kExponentChar, 0, 0, 0,
+      0);  // Last four values are ignored in exponential mode.
 
   char* buffer = Thread::Current()->zone()->Alloc<char>(kBufferSize);
   buffer[kBufferSize - 1] = '\0';
@@ -121,8 +122,7 @@ RawString* DoubleToStringAsExponential(double d, int fraction_digits) {
   return String::New(builder.Finalize());
 }
 
-
-RawString* DoubleToStringAsPrecision(double d, int precision) {
+StringPtr DoubleToStringAsPrecision(double d, int precision) {
   static const int kMinPrecisionDigits = 1;
   static const int kMaxPrecisionDigits = 21;
   static const int kMaxLeadingPaddingZeroes = 6;
@@ -145,8 +145,9 @@ RawString* DoubleToStringAsPrecision(double d, int precision) {
   ASSERT(kMinPrecisionDigits <= precision && precision <= kMaxPrecisionDigits);
 
   const double_conversion::DoubleToStringConverter converter(
-      kConversionFlags, kDoubleToStringCommonInfinitySymbol,
-      kDoubleToStringCommonNaNSymbol, kDoubleToStringCommonExponentChar, 0,
+      kConversionFlags, DoubleToStringConstants::kInfinitySymbol,
+      DoubleToStringConstants::kNaNSymbol,
+      DoubleToStringConstants::kExponentChar, 0,
       0,  // Ignored in precision mode.
       kMaxLeadingPaddingZeroes, kMaxTrailingPaddingZeroes);
 
@@ -158,7 +159,6 @@ RawString* DoubleToStringAsPrecision(double d, int precision) {
   return String::New(builder.Finalize());
 }
 
-
 bool CStringToDouble(const char* str, intptr_t length, double* result) {
   if (length == 0) {
     return false;
@@ -166,7 +166,8 @@ bool CStringToDouble(const char* str, intptr_t length, double* result) {
 
   double_conversion::StringToDoubleConverter converter(
       double_conversion::StringToDoubleConverter::NO_FLAGS, 0.0, 0.0,
-      kDoubleToStringCommonInfinitySymbol, kDoubleToStringCommonNaNSymbol);
+      DoubleToStringConstants::kInfinitySymbol,
+      DoubleToStringConstants::kNaNSymbol);
 
   int parsed_count = 0;
   *result =
@@ -174,5 +175,21 @@ bool CStringToDouble(const char* str, intptr_t length, double* result) {
   return (parsed_count == length);
 }
 
+IntegerPtr DoubleToInteger(Zone* zone, double val) {
+  if (isinf(val) || isnan(val)) {
+    const Array& args = Array::Handle(zone, Array::New(1));
+    args.SetAt(0, String::Handle(zone, String::New("Infinity or NaN toInt")));
+    Exceptions::ThrowByType(Exceptions::kUnsupported, args);
+  }
+  int64_t ival = 0;
+  if (val <= static_cast<double>(kMinInt64)) {
+    ival = kMinInt64;
+  } else if (val >= static_cast<double>(kMaxInt64)) {
+    ival = kMaxInt64;
+  } else {  // Representable in int64_t.
+    ival = static_cast<int64_t>(val);
+  }
+  return Integer::New(ival);
+}
 
 }  // namespace dart

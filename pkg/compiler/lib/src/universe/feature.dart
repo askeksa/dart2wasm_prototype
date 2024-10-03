@@ -8,14 +8,14 @@
 /// compilation pipeline, for example during resolution.
 library compiler.universe.feature;
 
-import '../elements/types.dart' show InterfaceType;
+import '../elements/types.dart';
+import '../ir/runtime_type_analysis.dart';
+import '../serialization/serialization.dart';
+import '../util/util.dart';
 
 /// A language feature that may be seen in the program.
 // TODO(johnniwinther): Should mirror usage be part of this?
 enum Feature {
-  /// Invocation of a generative construction on an abstract class.
-  ABSTRACT_CLASS_INSTANTIATION,
-
   /// An assert statement with no message.
   ASSERT,
 
@@ -34,20 +34,20 @@ enum Feature {
   /// A catch statement.
   CATCH_STATEMENT,
 
-  /// A compile time error.
-  COMPILE_TIME_ERROR,
-
   /// A fall through in a switch case.
   FALL_THROUGH_ERROR,
 
   /// A field without an initializer.
   FIELD_WITHOUT_INITIALIZER,
 
+  /// A field whose initialization is not a constant.
+  LAZY_FIELD,
+
   /// A local variable without an initializer.
   LOCAL_WITHOUT_INITIALIZER,
 
-  /// A field whose initialization is not a constant.
-  LAZY_FIELD,
+  /// Access to `loadLibrary` on a deferred import.
+  LOAD_LIBRARY,
 
   /// A catch clause with a variable for the stack trace.
   STACK_TRACE_IN_CATCH,
@@ -62,9 +62,6 @@ enum Feature {
   /// super method.
   SUPER_NO_SUCH_METHOD,
 
-  /// A redirection to the `Symbol` constructor.
-  SYMBOL_CONSTRUCTOR,
-
   /// An synchronous for in statement, like `for (var e in i) {}`.
   SYNC_FOR_IN,
 
@@ -78,8 +75,12 @@ enum Feature {
   /// static method.
   THROW_NO_SUCH_METHOD,
 
-  /// An implicit throw of a runtime error, like
+  /// An implicit throw of a runtime error, like in a runtime type check.
   THROW_RUNTIME_ERROR,
+
+  /// An implicit throw of a `UnsupportedError`, like calling `new
+  /// bool.fromEnvironment`.
+  THROW_UNSUPPORTED_ERROR,
 
   /// The need for a type variable bound check, like instantiation of a generic
   /// type whose type variable have non-trivial bounds.
@@ -92,14 +93,16 @@ class MapLiteralUse {
   final bool isConstant;
   final bool isEmpty;
 
-  MapLiteralUse(this.type, {this.isConstant: false, this.isEmpty: false});
+  MapLiteralUse(this.type, {this.isConstant = false, this.isEmpty = false});
 
+  @override
   int get hashCode {
     return type.hashCode * 13 +
         isConstant.hashCode * 17 +
         isEmpty.hashCode * 19;
   }
 
+  @override
   bool operator ==(other) {
     if (identical(this, other)) return true;
     if (other is! MapLiteralUse) return false;
@@ -108,9 +111,36 @@ class MapLiteralUse {
         isEmpty == other.isEmpty;
   }
 
+  @override
   String toString() {
     return 'MapLiteralUse($type,isConstant:$isConstant,isEmpty:$isEmpty)';
   }
+}
+
+/// Describes a use of a set literal in the program.
+class SetLiteralUse {
+  final InterfaceType type;
+  final bool isConstant;
+  final bool isEmpty;
+
+  SetLiteralUse(this.type, {this.isConstant = false, this.isEmpty = false});
+
+  @override
+  int get hashCode =>
+      type.hashCode * 13 + isConstant.hashCode * 17 + isEmpty.hashCode * 19;
+
+  @override
+  bool operator ==(other) {
+    if (identical(this, other)) return true;
+    if (other is! SetLiteralUse) return false;
+    return type == other.type &&
+        isConstant == other.isConstant &&
+        isEmpty == other.isEmpty;
+  }
+
+  @override
+  String toString() =>
+      'SetLiteralUse($type,isConstant:$isConstant,isEmpty:$isEmpty)';
 }
 
 /// Describes the use of a list literal in the program.
@@ -119,14 +149,16 @@ class ListLiteralUse {
   final bool isConstant;
   final bool isEmpty;
 
-  ListLiteralUse(this.type, {this.isConstant: false, this.isEmpty: false});
+  ListLiteralUse(this.type, {this.isConstant = false, this.isEmpty = false});
 
+  @override
   int get hashCode {
     return type.hashCode * 13 +
         isConstant.hashCode * 17 +
         isEmpty.hashCode * 19;
   }
 
+  @override
   bool operator ==(other) {
     if (identical(this, other)) return true;
     if (other is! ListLiteralUse) return false;
@@ -135,7 +167,123 @@ class ListLiteralUse {
         isEmpty == other.isEmpty;
   }
 
+  @override
   String toString() {
     return 'ListLiteralUse($type,isConstant:$isConstant,isEmpty:$isEmpty)';
+  }
+}
+
+/// A use of `Object.runtimeType`.
+class RuntimeTypeUse {
+  /// The use kind of `Object.runtimeType`.
+  final RuntimeTypeUseKind kind;
+
+  /// The static type of the receiver.
+  final DartType receiverType;
+
+  /// The static type of the argument if [kind] is `RuntimeTypeUseKind.equals`.
+  final DartType argumentType;
+
+  RuntimeTypeUse(this.kind, this.receiverType, this.argumentType);
+
+  @override
+  int get hashCode =>
+      kind.hashCode * 13 +
+      receiverType.hashCode * 17 +
+      argumentType.hashCode * 19;
+
+  @override
+  bool operator ==(other) {
+    if (identical(this, other)) return true;
+    if (other is! RuntimeTypeUse) return false;
+    return kind == other.kind &&
+        receiverType == other.receiverType &&
+        argumentType == other.argumentType;
+  }
+
+  /// Short textual representation use for testing.
+  String get shortText {
+    StringBuffer sb = StringBuffer();
+    switch (kind) {
+      case RuntimeTypeUseKind.string:
+        sb.write('string:');
+        sb.write(receiverType);
+        break;
+      case RuntimeTypeUseKind.equals:
+        sb.write('equals:');
+        sb.write(receiverType);
+        sb.write('==');
+        sb.write(argumentType);
+        break;
+      case RuntimeTypeUseKind.unknown:
+        sb.write('unknown:');
+        sb.write(receiverType);
+        break;
+    }
+    return sb.toString();
+  }
+
+  @override
+  String toString() => 'RuntimeTypeUse(kind=$kind,receiver=$receiverType'
+      ',argument=$argumentType)';
+}
+
+/// A generic instantiation of an expression of type [functionType] with the
+/// given [typeArguments].
+class GenericInstantiation {
+  static const String tag = 'generic-instantiation';
+
+  /// The static type of the instantiated expression.
+  final FunctionType functionType;
+
+  /// The type arguments of the instantiation.
+  final List<DartType> typeArguments;
+
+  GenericInstantiation(this.functionType, this.typeArguments);
+
+  factory GenericInstantiation.readFromDataSource(DataSource source) {
+    source.begin(tag);
+    DartType functionType = source.readDartType();
+    List<DartType> typeArguments = source.readDartTypes();
+    source.end(tag);
+    return GenericInstantiation(functionType, typeArguments);
+  }
+
+  void writeToDataSink(DataSink sink) {
+    sink.begin(tag);
+    sink.writeDartType(functionType);
+    sink.writeDartTypes(typeArguments);
+    sink.end(tag);
+  }
+
+  /// Short textual representation use for testing.
+  String get shortText => '<${typeArguments.join(',')}>';
+
+  @override
+  int get hashCode =>
+      Hashing.listHash(typeArguments, Hashing.objectHash(functionType));
+
+  @override
+  bool operator ==(other) {
+    if (identical(this, other)) return true;
+    if (other is! GenericInstantiation) return false;
+    if (functionType == other.functionType &&
+        equalElements(typeArguments, other.typeArguments)) {
+      assert(
+          this.hashCode == other.hashCode,
+          '\nthis:  ${this.hashCode}  $this'
+          '\nthis:  ${other.hashCode}  $other');
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  @override
+  String toString() {
+    return 'GenericInstantiation('
+        'functionType:$functionType,'
+        'typeArguments:$typeArguments'
+        ')';
   }
 }

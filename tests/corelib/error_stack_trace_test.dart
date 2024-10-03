@@ -8,35 +8,21 @@ void argument() {
   throw new ArgumentError(499);
 }
 
+// Verify that
 void noSuchMethod() {
-  (499).doesNotExist();
+  (499 as dynamic).doesNotExist();
 }
 
 void nullThrown() {
-  throw null;
+  throw null as dynamic;
 }
 
 void range() {
   throw new RangeError.range(0, 1, 2);
 }
 
-void fallThrough() {
-  nested() {}
-
-  switch (5) {
-    case 5:
-      nested();
-    default:
-      Expect.fail("Should not reach");
-  }
-}
-
 abstract class A {
   foo();
-}
-
-void abstractClassInstantiation() {
-  new A();
 }
 
 void unsupported() {
@@ -48,32 +34,31 @@ void unimplemented() {
 }
 
 void state() {
-  return [1, 2].single;
+  [1, 2].single;
 }
 
-void type() {
-  return 1 + "string";
+void cast() {
+  dynamic d = 1;
+  d as String;
 }
 
 main() {
   List<Function> errorFunctions = [
     argument,
     noSuchMethod,
-    nullThrown,
+    nullThrown, //# nullThrown: ok
     range,
-    fallThrough,
-    abstractClassInstantiation,
     unsupported,
     unimplemented,
     state,
-    type
+    cast,
   ];
 
   for (var f in errorFunctions) {
     bool hasThrown = false;
     try {
       f();
-    } catch (e) {
+    } on Error catch (e) {
       hasThrown = true;
       Expect.isTrue(
           e.stackTrace is StackTrace, "$e doesn't have a non-null stack trace");

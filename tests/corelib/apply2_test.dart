@@ -2,15 +2,18 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// VMOptions=
+// VMOptions=--dwarf_stack_traces --no-retain_function_objects --no-retain_code_objects
+
 import "package:expect/expect.dart";
 
-apply(Function function, List positional, Map<Symbol, dynamic> named) {
+apply(Function function, List? positional, Map<Symbol, dynamic>? named) {
   return Function.apply(function, positional, named);
 }
 
-void throwsNSME(function, positional, named) {
-  Expect.throws(
-      () => apply(function, positional, named), (e) => e is NoSuchMethodError);
+void throwsNSME(
+    Function function, List? positional, Map<Symbol, dynamic>? named) {
+  Expect.throwsNoSuchMethodError(() => apply(function, positional, named));
 }
 
 main() {

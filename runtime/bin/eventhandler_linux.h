@@ -17,7 +17,6 @@
 #include "platform/hashmap.h"
 #include "platform/signal_blocker.h"
 
-
 namespace dart {
 namespace bin {
 
@@ -30,14 +29,13 @@ class DescriptorInfo : public DescriptorInfoBase {
   intptr_t GetPollEvents();
 
   virtual void Close() {
-    VOID_TEMP_FAILURE_RETRY(close(fd_));
+    close(fd_);
     fd_ = -1;
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DescriptorInfo);
 };
-
 
 class DescriptorInfoSingle : public DescriptorInfoSingleMixin<DescriptorInfo> {
  public:
@@ -49,7 +47,6 @@ class DescriptorInfoSingle : public DescriptorInfoSingleMixin<DescriptorInfo> {
   DISALLOW_COPY_AND_ASSIGN(DescriptorInfoSingle);
 };
 
-
 class DescriptorInfoMultiple
     : public DescriptorInfoMultipleMixin<DescriptorInfo> {
  public:
@@ -60,7 +57,6 @@ class DescriptorInfoMultiple
  private:
   DISALLOW_COPY_AND_ASSIGN(DescriptorInfoMultiple);
 };
-
 
 class EventHandlerImplementation {
  public:
@@ -81,12 +77,13 @@ class EventHandlerImplementation {
   static void Poll(uword args);
   void WakeupHandler(intptr_t id, Dart_Port dart_port, int64_t data);
   void HandleInterruptFd();
+  void UpdateTimerFd();
   void SetPort(intptr_t fd, Dart_Port dart_port, intptr_t mask);
   intptr_t GetPollEvents(intptr_t events, DescriptorInfo* di);
   static void* GetHashmapKeyFromFd(intptr_t fd);
   static uint32_t GetHashmapHashFromFd(intptr_t fd);
 
-  HashMap socket_map_;
+  SimpleHashMap socket_map_;
   TimeoutQueue timeout_queue_;
   bool shutdown_;
   int interrupt_fds_[2];

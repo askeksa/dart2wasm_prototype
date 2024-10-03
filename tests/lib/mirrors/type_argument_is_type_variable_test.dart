@@ -4,7 +4,6 @@
 
 library test.type_argument_is_type_variable;
 
-@MirrorsUsed(targets: "test.type_argument_is_type_variable")
 import 'dart:mirrors';
 
 import 'package:expect/expect.dart';
@@ -20,21 +19,13 @@ class Generic<G> extends Super<G> {}
 main() {
   // Declarations.
   ClassMirror generic = reflectClass(Generic);
-  ClassMirror superOfGeneric = generic.superclass;
-  ClassMirror superOfSuperOfGeneric = superOfGeneric.superclass;
+  ClassMirror superOfGeneric = generic.superclass!;
+  ClassMirror superOfSuperOfGeneric = superOfGeneric.superclass!;
 
   TypeVariableMirror gFromGeneric = generic.typeVariables.single;
   TypeVariableMirror sFromSuper = superOfGeneric.typeVariables.single;
   TypeVariableMirror ssFromSuperSuper =
       superOfSuperOfGeneric.typeVariables.single;
-
-  Expect.equals(#G, gFromGeneric.simpleName);
-  Expect.equals(#S, sFromSuper.simpleName);
-  Expect.equals(#SS, ssFromSuperSuper.simpleName);
-
-  typeParameters(generic, [#G]);
-  typeParameters(superOfGeneric, [#S]);
-  typeParameters(superOfSuperOfGeneric, [#SS]);
 
   typeArguments(generic, []);
   typeArguments(superOfGeneric, [gFromGeneric]);
@@ -42,12 +33,8 @@ main() {
 
   // Instantiations.
   ClassMirror genericWithInt = reflect(new Generic<int>()).type;
-  ClassMirror superOfGenericWithInt = genericWithInt.superclass;
-  ClassMirror superOfSuperOfGenericWithInt = superOfGenericWithInt.superclass;
-
-  typeParameters(genericWithInt, [#G]);
-  typeParameters(superOfGenericWithInt, [#S]);
-  typeParameters(superOfSuperOfGenericWithInt, [#SS]);
+  ClassMirror superOfGenericWithInt = genericWithInt.superclass!;
+  ClassMirror superOfSuperOfGenericWithInt = superOfGenericWithInt.superclass!;
 
   typeArguments(genericWithInt, [reflectClass(int)]);
   typeArguments(superOfGenericWithInt, [reflectClass(int)]);

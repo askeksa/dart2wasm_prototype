@@ -2,10 +2,10 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-// PackageRoot=none
+// Packages=none
 
 library empty_packages_file_discovery_test;
 
-import 'package:foo/foo.dart';
+import 'package:foo/foo.dart'; //# 01: compile-time error
 
 main() {}

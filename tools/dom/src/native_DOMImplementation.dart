@@ -137,7 +137,7 @@ class _LibraryManager {
     return matches.toList();
   }
 
-  static setLibrary([String name]) {
+  static setLibrary([String? name]) {
     // Bust cache in case library list has changed. Ideally we would listen for
     // when libraries are loaded and invalidate based on that.
     _validCache = false;
@@ -147,7 +147,9 @@ class _LibraryManager {
         ..group("Current library: $_currentLibrary")
         ..groupCollapsed("All libraries:");
       _listLibraries();
-      window.console..groupEnd()..groupEnd();
+      window.console
+        ..groupEnd()
+        ..groupEnd();
       return;
     }
     var matches = findMatches(name);
@@ -169,9 +171,9 @@ class _LibraryManager {
   static List<Uri> _sortUris(Iterable<Uri> uris) {
     return (uris.toList())
       ..sort((Uri a, Uri b) {
-        if (a.scheme != b.scheme) {
-          if (a.scheme == 'dart') return -1;
-          if (b.scheme == 'dart') return 1;
+        if (!a.isScheme(b.scheme)) {
+          if (a.isScheme('dart')) return -1;
+          if (b.isScheme('dart')) return 1;
           return a.scheme.compareTo(b.scheme);
         }
         return a.toString().compareTo(b.toString());
@@ -213,14 +215,18 @@ class _LibraryManager {
       if (index != -1) {
         // %c enables styling console log messages with css
         // specified at the end of the console.
-        sb..write(txt.substring(0, index))..write('%c');
+        sb
+          ..write(txt.substring(0, index))
+          ..write('%c');
         var matchEnd = index + key.length;
         sb
           ..write(txt.substring(index, matchEnd))
           ..write('%c')
           ..write(txt.substring(matchEnd))
           ..write('\n');
-        boldPairs..add('font-weight: bold')..add('font-weight: normal');
+        boldPairs
+          ..add('font-weight: bold')
+          ..add('font-weight: normal');
       }
     }
     _log([sb.toString()]..addAll(boldPairs));
@@ -520,7 +526,7 @@ class _Utils {
     // Inject all the already defined console variables.
     _consoleTempVariables._data.forEach(addArg);
 
-    // TODO(jacobr): remove the parentheses around the expresson once
+    // TODO(jacobr): remove the parentheses around the expression once
     // dartbug.com/13723 is fixed. Currently we wrap expression in parentheses
     // to ensure only valid Dart expressions are allowed. Otherwise the DartVM
     // quietly ignores trailing Dart statements resulting in user confusion
@@ -738,7 +744,7 @@ class _Utils {
     // This matches JavaScript behavior. We should consider displaying
     // getters for all dart platform libraries rather than just the DOM
     // libraries.
-    return libraryMirror.uri.scheme == 'dart' &&
+    return libraryMirror.uri.isScheme('dart') &&
         SIDE_EFFECT_FREE_LIBRARIES.contains(libraryMirror.uri.toString());
   }
 
@@ -1084,16 +1090,16 @@ class _DOMWindowCrossFrame extends DartHtmlDomObject implements WindowBase {
     var history = _blink.BlinkWindow.instance.history_Getter_(this);
     return history is _HistoryCrossFrame
         ? history
-        : _blink.Blink_Utils
-            .setInstanceInterceptor(history, _HistoryCrossFrame);
+        : _blink.Blink_Utils.setInstanceInterceptor(
+            history, _HistoryCrossFrame);
   }
 
   LocationBase get location {
     var location = _blink.BlinkWindow.instance.location_Getter_(this);
     return location is _LocationCrossFrame
         ? location
-        : _blink.Blink_Utils
-            .setInstanceInterceptor(location, _LocationCrossFrame);
+        : _blink.Blink_Utils.setInstanceInterceptor(
+            location, _LocationCrossFrame);
   }
 
   bool get closed => _blink.BlinkWindow.instance.closed_Getter_(this);
@@ -1107,7 +1113,7 @@ class _DOMWindowCrossFrame extends DartHtmlDomObject implements WindowBase {
   // Methods.
   void close() => _blink.BlinkWindow.instance.close_Callback_0_(this);
   void postMessage(Object message, String targetOrigin,
-          [List<MessagePort> transfer]) =>
+          [List<MessagePort>? transfer]) =>
       _blink.BlinkWindow.instance.postMessage_Callback_3_(
           this,
           convertDartToNative_SerializedScriptValue(message),
@@ -1122,12 +1128,12 @@ class _DOMWindowCrossFrame extends DartHtmlDomObject implements WindowBase {
       'You can only attach EventListeners to your own window.');
   // TODO(efortuna): Remove this method. dartbug.com/16814
   void _addEventListener(
-          [String type, EventListener listener, bool useCapture]) =>
+          [String? type, EventListener? listener, bool? useCapture]) =>
       throw new UnsupportedError(
           'You can only attach EventListeners to your own window.');
   // TODO(efortuna): Remove this method. dartbug.com/16814
-  void addEventListener(String type, EventListener listener,
-          [bool useCapture]) =>
+  void addEventListener(String type, EventListener? listener,
+          [bool? useCapture]) =>
       throw new UnsupportedError(
           'You can only attach EventListeners to your own window.');
   // TODO(efortuna): Remove this method. dartbug.com/16814
@@ -1135,12 +1141,12 @@ class _DOMWindowCrossFrame extends DartHtmlDomObject implements WindowBase {
       'You can only attach EventListeners to your own window.');
   // TODO(efortuna): Remove this method. dartbug.com/16814
   void _removeEventListener(
-          [String type, EventListener listener, bool useCapture]) =>
+          [String? type, EventListener? listener, bool? useCapture]) =>
       throw new UnsupportedError(
           'You can only attach EventListeners to your own window.');
   // TODO(efortuna): Remove this method. dartbug.com/16814
-  void removeEventListener(String type, EventListener listener,
-          [bool useCapture]) =>
+  void removeEventListener(String type, EventListener? listener,
+          [bool? useCapture]) =>
       throw new UnsupportedError(
           'You can only attach EventListeners to your own window.');
 }
@@ -1151,7 +1157,7 @@ class _HistoryCrossFrame extends DartHtmlDomObject implements HistoryBase {
   // Methods.
   void back() => _blink.BlinkHistory.instance.back_Callback_0_(this);
   void forward() => _blink.BlinkHistory.instance.forward_Callback_0_(this);
-  void go([int delta]) {
+  void go([int? delta]) {
     if (delta != null) {
       _blink.BlinkHistory.instance.go_Callback_1_(this, delta);
       return;
@@ -1359,7 +1365,7 @@ class _ScheduleImmediateHelper {
   _ScheduleImmediateHelper() {
     // Run in the root-zone as the DOM callback would otherwise execute in the
     // current zone.
-    Zone.ROOT.run(() {
+    Zone.root.run(() {
       // Mutation events get fired as soon as the current event stack is unwound
       // so we just make a dummy event and listen for that.
       _observer = new MutationObserver(_handleMutation);

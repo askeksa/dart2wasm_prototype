@@ -21,7 +21,7 @@ import "dart:io";
 import "package:async_helper/async_helper.dart";
 import "package:expect/expect.dart";
 
-InternetAddress HOST;
+late InternetAddress HOST;
 
 String localFile(path) => Platform.script.resolve(path).toFilePath();
 
@@ -55,7 +55,10 @@ SecurityContext clientNoCertContext(String certType, String password) =>
           password: password);
 
 Future testClientCertificate(
-    {bool required, bool sendCert, String certType, String password}) async {
+    {required bool required,
+    required bool sendCert,
+    required String certType,
+    required String password}) async {
   var server = await SecureServerSocket.bind(
       HOST, 0, serverContext(certType, password),
       requestClientCertificate: true, requireClientCertificate: required);
@@ -65,30 +68,40 @@ Future testClientCertificate(
   var clientEndFuture =
       SecureSocket.connect(HOST, server.port, context: clientContext);
   if (required && !sendCert) {
-    try {
-      await server.first;
-    } catch (e) {
-      try {
-        await clientEndFuture;
-      } catch (e) {
-        return;
-      }
-    }
-    Expect.fail("Connection succeeded with no required client certificate");
+    final serverErrorCompleter = Completer<Exception>();
+    server.listen((request) {
+      Expect.fail('Should not get a request through');
+    }, onError: (e) => serverErrorCompleter.complete(e));
+
+    final clientDisconnected = Completer();
+    final clientEnd = await clientEndFuture;
+    clientEnd.write(<int>[5, 6, 7, 8]);
+    clientEnd.close();
+    clientEnd.listen((data) {
+      Expect.fail('Should not get data through');
+    }, onError: (e) {
+      Expect.isTrue(e is SocketException);
+    }, onDone: () {
+      clientDisconnected.complete();
+    });
+    Expect.isTrue(await serverErrorCompleter.future is HandshakeException);
+    // Client might not report an error, might get just disconnected.
+    await clientDisconnected.future;
+    server.close();
+    return;
   }
   var serverEnd = await server.first;
   var clientEnd = await clientEndFuture;
 
-  X509Certificate clientCertificate = serverEnd.peerCertificate;
+  X509Certificate? clientCertificate = serverEnd.peerCertificate;
   if (sendCert) {
     Expect.isNotNull(clientCertificate);
-    Expect.isTrue(clientCertificate.subject.contains("user1"));
+    Expect.isTrue(clientCertificate!.subject.contains("user1"));
     Expect.isTrue(clientCertificate.issuer.contains("clientauthority"));
   } else {
     Expect.isNull(clientCertificate);
   }
-  X509Certificate serverCertificate = clientEnd.peerCertificate;
-  Expect.isNotNull(serverCertificate);
+  X509Certificate serverCertificate = clientEnd.peerCertificate!;
   Expect.isTrue(serverCertificate.subject.contains("localhost"));
   Expect.isTrue(serverCertificate.issuer.contains("intermediateauthority"));
   clientEnd.close();

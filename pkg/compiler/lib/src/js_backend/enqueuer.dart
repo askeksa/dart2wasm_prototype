@@ -6,19 +6,16 @@ library dart2js.js.enqueue;
 
 import 'dart:collection' show Queue;
 
-import '../common/codegen.dart' show CodegenWorkItem;
+import '../common.dart';
+import '../common/elements.dart' show ElementEnvironment;
 import '../common/tasks.dart' show CompilerTask;
 import '../common/work.dart' show WorkItem;
-import '../common.dart';
-import '../common_elements.dart' show ElementEnvironment;
-import '../elements/resolution_types.dart'
-    show ResolutionDartType, ResolutionInterfaceType;
-import '../elements/elements.dart' show MemberElement;
 import '../elements/entities.dart';
+import '../elements/types.dart';
 import '../enqueue.dart';
-import '../js_backend/backend.dart' show JavaScriptBackend;
-import '../options.dart';
-import '../universe/world_builder.dart';
+import '../js_backend/annotations.dart';
+import '../universe/codegen_world_builder.dart';
+import '../universe/member_usage.dart';
 import '../universe/use.dart'
     show
         ConstantUse,
@@ -27,56 +24,59 @@ import '../universe/use.dart'
         StaticUseKind,
         TypeUse,
         TypeUseKind;
-import '../universe/world_impact.dart'
-    show ImpactUseCase, WorldImpact, WorldImpactVisitor;
+import '../universe/world_impact.dart' show WorldImpactVisitor;
 import '../util/enumset.dart';
 import '../util/util.dart' show Setlet;
-import '../world.dart' show ClosedWorld;
 
 /// [Enqueuer] which is specific to code generation.
-class CodegenEnqueuer extends EnqueuerImpl {
+class CodegenEnqueuer extends Enqueuer {
   final String name;
-  final EnqueuerStrategy strategy;
-
-  Set<ClassEntity> _recentClasses = new Setlet<ClassEntity>();
+  final Set<ClassEntity> _recentClasses = Setlet();
   bool _recentConstants = false;
   final CodegenWorldBuilderImpl _worldBuilder;
   final WorkItemBuilder _workItemBuilder;
 
+  @override
   bool queueIsClosed = false;
+  @override
   final CompilerTask task;
+  @override
   final EnqueuerListener listener;
-  final CompilerOptions _options;
+  final AnnotationsData _annotationsData;
 
-  WorldImpactVisitor _impactVisitor;
+  @override
+  WorldImpactVisitor impactVisitor;
 
-  final Queue<WorkItem> _queue = new Queue<WorkItem>();
+  final Queue<WorkItem> _queue = Queue<WorkItem>();
 
   /// All declaration elements that have been processed by codegen.
-  final Set<MemberEntity> _processedEntities = new Set<MemberEntity>();
+  final Set<MemberEntity> _processedEntities = {};
 
-  static const ImpactUseCase IMPACT_USE =
-      const ImpactUseCase('CodegenEnqueuer');
+  // If not `null` this is called when the queue has been emptied. It allows for
+  // applying additional impacts before re-emptying the queue.
+  void Function() onEmptyForTesting;
 
-  CodegenEnqueuer(this.task, this._options, this.strategy, this._worldBuilder,
-      this._workItemBuilder, this.listener)
+  CodegenEnqueuer(this.task, this._worldBuilder, this._workItemBuilder,
+      this.listener, this._annotationsData)
       : this.name = 'codegen enqueuer' {
-    _impactVisitor = new EnqueuerImplImpactVisitor(this);
+    impactVisitor = EnqueuerImpactVisitor(this);
   }
 
+  @override
   CodegenWorldBuilder get worldBuilder => _worldBuilder;
 
+  @override
   bool get queueIsEmpty => _queue.isEmpty;
 
   @override
   void checkQueueIsEmpty() {
     if (_queue.isNotEmpty) {
-      throw new SpannableAssertionFailure(
-          _queue.first.element, "$name queue is not empty.");
+      failedAt(_queue.first.element, "$name queue is not empty.");
     }
   }
 
   /// Returns [:true:] if this enqueuer is the resolution enqueuer.
+  @override
   bool get isResolutionQueue => false;
 
   /// Create a [WorkItem] for [entity] and add it to the work list if it has not
@@ -88,41 +88,36 @@ class CodegenEnqueuer extends EnqueuerImpl {
     if (workItem == null) return;
 
     if (queueIsClosed) {
-      throw new SpannableAssertionFailure(
-          entity, "Codegen work list is closed. Trying to add $entity");
+      failedAt(entity, "Codegen work list is closed. Trying to add $entity");
     }
 
     applyImpact(listener.registerUsedElement(entity));
     _queue.add(workItem);
   }
 
-  void applyImpact(WorldImpact worldImpact, {var impactSource}) {
-    if (worldImpact.isEmpty) return;
-    impactStrategy.visitImpact(
-        impactSource, worldImpact, _impactVisitor, impactUse);
-  }
-
-  void _registerInstantiatedType(ResolutionInterfaceType type,
-      {bool mirrorUsage: false, bool nativeUsage: false}) {
-    task.measure(() {
-      _worldBuilder.registerTypeInstantiation(type, _applyClassUse,
-          byMirrors: mirrorUsage);
+  void _registerInstantiatedType(InterfaceType type,
+      {bool nativeUsage = false}) {
+    task.measureSubtask('codegen.typeUse', () {
+      _worldBuilder.registerTypeInstantiation(type, _applyClassUse);
       listener.registerInstantiatedType(type, nativeUsage: nativeUsage);
     });
   }
 
+  @override
   bool checkNoEnqueuedInvokedInstanceMethods(
       ElementEnvironment elementEnvironment) {
-    return strategy.checkEnqueuerConsistency(this, elementEnvironment);
+    return checkEnqueuerConsistency(elementEnvironment);
   }
 
+  @override
   void checkClass(ClassEntity cls) {
-    _worldBuilder.processClassMembers(cls, (MemberEntity member, useSet) {
+    _worldBuilder.processClassMembers(cls,
+        (MemberEntity member, EnumSet<MemberUse> useSet) {
       if (useSet.isNotEmpty) {
-        throw new SpannableAssertionFailure(member,
+        failedAt(member,
             'Unenqueued use of $member: ${useSet.iterable(MemberUse.values)}');
       }
-    });
+    }, checkEnqueuerConsistency: true);
   }
 
   /// Callback for applying the use of a [cls].
@@ -153,58 +148,88 @@ class CodegenEnqueuer extends EnqueuerImpl {
     }
   }
 
+  @override
   void processDynamicUse(DynamicUse dynamicUse) {
-    task.measure(() {
+    task.measureSubtask('codegen.dynamicUse', () {
       _worldBuilder.registerDynamicUse(dynamicUse, _applyMemberUse);
     });
   }
 
-  void processStaticUse(StaticUse staticUse) {
-    _worldBuilder.registerStaticUse(staticUse, _applyMemberUse);
-    switch (staticUse.kind) {
-      case StaticUseKind.CONSTRUCTOR_INVOKE:
-      case StaticUseKind.CONST_CONSTRUCTOR_INVOKE:
-      case StaticUseKind.REDIRECTION:
-        processTypeUse(new TypeUse.instantiation(staticUse.type));
-        break;
-      case StaticUseKind.INLINING:
-        // TODO(johnniwinther): Should this be tracked with _MemberUsage ?
-        listener.registerUsedElement(staticUse.element);
-        break;
-      default:
-        break;
-    }
+  @override
+  void processStaticUse(MemberEntity member, StaticUse staticUse) {
+    task.measureSubtask('codegen.staticUse', () {
+      _worldBuilder.registerStaticUse(staticUse, _applyMemberUse);
+      switch (staticUse.kind) {
+        case StaticUseKind.CONSTRUCTOR_INVOKE:
+        case StaticUseKind.CONST_CONSTRUCTOR_INVOKE:
+          processTypeUse(member, TypeUse.instantiation(staticUse.type));
+          break;
+        case StaticUseKind.INLINING:
+          // TODO(johnniwinther): Should this be tracked with _MemberUsage ?
+          listener.registerUsedElement(staticUse.element);
+          break;
+        default:
+          break;
+      }
+    });
   }
 
-  void processTypeUse(TypeUse typeUse) {
-    ResolutionDartType type = typeUse.type;
+  @override
+  void processTypeUse(MemberEntity member, TypeUse typeUse) {
+    DartType type = typeUse.type;
     switch (typeUse.kind) {
       case TypeUseKind.INSTANTIATION:
         _registerInstantiatedType(type);
-        break;
-      case TypeUseKind.MIRROR_INSTANTIATION:
-        _registerInstantiatedType(type, mirrorUsage: true);
         break;
       case TypeUseKind.NATIVE_INSTANTIATION:
         _registerInstantiatedType(type, nativeUsage: true);
         break;
       case TypeUseKind.IS_CHECK:
-      case TypeUseKind.AS_CAST:
       case TypeUseKind.CATCH_TYPE:
         _registerIsCheck(type);
         break;
-      case TypeUseKind.CHECKED_MODE_CHECK:
-        if (_options.enableTypeAssertions) {
+      case TypeUseKind.AS_CAST:
+        if (_annotationsData.getExplicitCastCheckPolicy(member).isEmitted) {
+          _registerIsCheck(type);
+        }
+        break;
+      case TypeUseKind.IMPLICIT_CAST:
+        if (_annotationsData.getImplicitDowncastCheckPolicy(member).isEmitted) {
+          _registerIsCheck(type);
+        }
+        break;
+      case TypeUseKind.PARAMETER_CHECK:
+      case TypeUseKind.TYPE_VARIABLE_BOUND_CHECK:
+        if (_annotationsData.getParameterCheckPolicy(member).isEmitted) {
           _registerIsCheck(type);
         }
         break;
       case TypeUseKind.TYPE_LITERAL:
+        if (type is TypeVariableType) {
+          _worldBuilder.registerTypeVariableTypeLiteral(type);
+        }
         break;
+      case TypeUseKind.RTI_VALUE:
+        _worldBuilder.registerConstTypeLiteral(type);
+        break;
+      case TypeUseKind.TYPE_ARGUMENT:
+        _worldBuilder.registerTypeArgument(type);
+        break;
+      case TypeUseKind.CONSTRUCTOR_REFERENCE:
+        _worldBuilder.registerConstructorReference(type);
+        break;
+      case TypeUseKind.CONST_INSTANTIATION:
+        failedAt(CURRENT_ELEMENT_SPANNABLE, "Unexpected type use: $typeUse.");
+        break;
+      case TypeUseKind.NAMED_TYPE_VARIABLE_NEW_RTI:
+        assert(type is TypeVariableType);
+        _registerNamedTypeVariableNewRti(type);
     }
   }
 
+  @override
   void processConstantUse(ConstantUse constantUse) {
-    task.measure(() {
+    task.measureSubtask('codegen.constantUse', () {
       if (_worldBuilder.registerConstantUse(constantUse)) {
         applyImpact(listener.registerUsedConstant(constantUse.value));
         _recentConstants = true;
@@ -212,34 +237,46 @@ class CodegenEnqueuer extends EnqueuerImpl {
     });
   }
 
-  void _registerIsCheck(ResolutionDartType type) {
+  void _registerIsCheck(DartType type) {
     _worldBuilder.registerIsCheck(type);
+  }
+
+  void _registerNamedTypeVariableNewRti(TypeVariableType type) {
+    _worldBuilder.registerNamedTypeVariableNewRti(type);
   }
 
   void _registerClosurizedMember(FunctionEntity element) {
     assert(element.isInstanceMember);
     applyImpact(listener.registerClosurizedMember(element));
-    _worldBuilder.registerClosurizedMember(element);
   }
 
-  void forEach(void f(WorkItem work)) {
+  void _forEach(void f(WorkItem work)) {
     do {
       while (_queue.isNotEmpty) {
         // TODO(johnniwinther): Find an optimal process order.
         WorkItem work = _queue.removeLast();
         if (!_processedEntities.contains(work.element)) {
-          strategy.processWorkItem(f, work);
+          f(work);
           // TODO(johnniwinther): Register the processed element here. This
           // is currently a side-effect of calling `work.run`.
           _processedEntities.add(work.element);
         }
       }
-      List recents = _recentClasses.toList(growable: false);
+      List<ClassEntity> recents = _recentClasses.toList(growable: false);
       _recentClasses.clear();
       _recentConstants = false;
       if (!_onQueueEmpty(recents)) _recentClasses.addAll(recents);
     } while (
         _queue.isNotEmpty || _recentClasses.isNotEmpty || _recentConstants);
+  }
+
+  @override
+  void forEach(void f(WorkItem work)) {
+    _forEach(f);
+    if (onEmptyForTesting != null) {
+      onEmptyForTesting();
+      _forEach(f);
+    }
   }
 
   /// [_onQueueEmpty] is called whenever the queue is drained. [recentClasses]
@@ -258,41 +295,13 @@ class CodegenEnqueuer extends EnqueuerImpl {
     listener.logSummary(log);
   }
 
+  @override
   String toString() => 'Enqueuer($name)';
-
-  ImpactUseCase get impactUse => IMPACT_USE;
 
   @override
   Iterable<MemberEntity> get processedEntities => _processedEntities;
 
   @override
-  Iterable<ClassEntity> get processedClasses => _worldBuilder.processedClasses;
-}
-
-/// Builder that creates the work item necessary for the code generation of a
-/// [MemberElement].
-class CodegenWorkItemBuilder extends WorkItemBuilder {
-  final JavaScriptBackend _backend;
-  final ClosedWorld _closedWorld;
-  final CompilerOptions _options;
-
-  CodegenWorkItemBuilder(this._backend, this._closedWorld, this._options);
-
-  @override
-  WorkItem createWorkItem(MemberElement element) {
-    assert(invariant(element, element.isDeclaration));
-    // Don't generate code for foreign elements.
-    if (_backend.isForeign(element)) return null;
-    if (element.isAbstract) return null;
-
-    // Codegen inlines field initializers. It only needs to generate
-    // code for checked setters.
-    if (element.isField && element.isInstanceMember) {
-      if (!_options.enableTypeAssertions ||
-          element.enclosingElement.isClosure) {
-        return null;
-      }
-    }
-    return new CodegenWorkItem(_backend, _closedWorld, element);
-  }
+  Iterable<ClassEntity> get processedClasses =>
+      _worldBuilder.instantiatedClasses;
 }

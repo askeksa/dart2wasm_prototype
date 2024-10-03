@@ -2,76 +2,72 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library dart.io;
+library dart._http;
 
-import "package:expect/expect.dart";
 import "dart:async";
 import "dart:collection";
 import "dart:convert";
 import "dart:developer";
+import "dart:io";
+import "dart:isolate";
 import "dart:math";
 import "dart:typed_data";
-import "dart:isolate";
 
-part "../../../sdk/lib/io/bytes_builder.dart";
-part "../../../sdk/lib/io/common.dart";
-part "../../../sdk/lib/io/crypto.dart";
-part "../../../sdk/lib/io/data_transformer.dart";
-part "../../../sdk/lib/io/directory.dart";
-part "../../../sdk/lib/io/directory_impl.dart";
-part "../../../sdk/lib/io/file.dart";
-part "../../../sdk/lib/io/file_impl.dart";
-part "../../../sdk/lib/io/file_system_entity.dart";
-part "../../../sdk/lib/io/link.dart";
-part "../../../sdk/lib/io/http.dart";
-part "../../../sdk/lib/io/http_impl.dart";
-part "../../../sdk/lib/io/http_date.dart";
-part "../../../sdk/lib/io/http_parser.dart";
-part "../../../sdk/lib/io/http_headers.dart";
-part "../../../sdk/lib/io/http_session.dart";
-part "../../../sdk/lib/io/io_resource_info.dart";
-part "../../../sdk/lib/io/io_service.dart";
-part "../../../sdk/lib/io/io_sink.dart";
-part "../../../sdk/lib/io/platform.dart";
-part "../../../sdk/lib/io/platform_impl.dart";
-part "../../../sdk/lib/io/service_object.dart";
-part "../../../sdk/lib/io/secure_socket.dart";
-part "../../../sdk/lib/io/secure_server_socket.dart";
-part "../../../sdk/lib/io/security_context.dart";
-part "../../../sdk/lib/io/socket.dart";
+import "package:expect/expect.dart";
+
+import "../../../sdk/lib/internal/internal.dart"
+    show Since, valueOfNonNullableParamWithDefault, HttpStatus;
+
+part "../../../sdk/lib/_http/crypto.dart";
+part "../../../sdk/lib/_http/embedder_config.dart";
+part "../../../sdk/lib/_http/http_impl.dart";
+part "../../../sdk/lib/_http/http_date.dart";
+part "../../../sdk/lib/_http/http_parser.dart";
+part "../../../sdk/lib/_http/http_headers.dart";
+part "../../../sdk/lib/_http/http_session.dart";
 
 class HttpParserTest {
+  final String Function(String) transform;
+  HttpParserTest(this.transform);
+
   static void runAllTests() {
-    testParseRequest();
-    testParseResponse();
-    testParseInvalidRequest();
-    testParseInvalidResponse();
+    final testCRLF = HttpParserTest((String s) => s);
+    testCRLF.testParseRequest();
+    testCRLF.testParseResponse();
+    testCRLF.testParseInvalidRequest();
+    testCRLF.testParseInvalidResponse();
+
+    // Ensure http parser is CR?LF tolerant.
+    final testLF = HttpParserTest((String s) => s.replaceAll('\r', ''));
+    testLF.testParseRequest();
+    testLF.testParseResponse();
+    testLF.testParseInvalidRequest();
+    testLF.testParseInvalidResponse();
   }
 
-  static void _testParseRequest(
+  void _testParseRequest(
       String request, String expectedMethod, String expectedUri,
       {int expectedTransferLength: 0,
       int expectedBytesReceived: 0,
-      Map expectedHeaders: null,
+      Map<String, String>? expectedHeaders: null,
       bool chunked: false,
       bool upgrade: false,
       int unparsedLength: 0,
       bool connectionClose: false,
       String expectedVersion: "1.1"}) {
-    StreamController controller;
+    late StreamController<Uint8List> controller;
     void reset() {
       _HttpParser httpParser = new _HttpParser.requestParser();
       controller = new StreamController(sync: true);
       var port1 = new ReceivePort();
       var port2 = new ReceivePort();
 
-      String method;
-      Uri uri;
-      _HttpHeaders headers;
-      int contentLength;
-      int bytesReceived;
-      int unparsedBytesReceived;
-      bool upgraded;
+      String? method = null;
+      Uri? uri = null;
+      _HttpHeaders? headers = null;
+      int bytesReceived = 0;
+      int unparsedBytesReceived = 0;
+      bool upgraded = false;
 
       httpParser.listenToStream(controller.stream);
       var subscription = httpParser.listen((incoming) {
@@ -88,7 +84,7 @@ class HttpParserTest {
         }
         if (expectedHeaders != null) {
           expectedHeaders.forEach((String name, String value) =>
-              Expect.equals(value, headers[name][0]));
+              Expect.equals(value, headers![name]![0]));
         }
         incoming.listen((List<int> data) {
           Expect.isFalse(upgraded);
@@ -97,7 +93,7 @@ class HttpParserTest {
           port2.close();
           Expect.equals(expectedMethod, method);
           Expect.stringEquals(expectedUri, uri.toString());
-          Expect.equals(expectedVersion, headers.protocolVersion);
+          Expect.equals(expectedVersion, headers!.protocolVersion);
           if (upgrade) {
             Expect.equals(0, bytesReceived);
             // port1 is closed by the listener on the detached data.
@@ -120,13 +116,6 @@ class HttpParserTest {
           port1.close();
         });
       });
-
-      method = null;
-      uri = null;
-      headers = null;
-      bytesReceived = 0;
-      unparsedBytesReceived = 0;
-      upgraded = false;
     }
 
     void testWrite(List<int> requestData, [int chunkSize = -1]) {
@@ -134,24 +123,25 @@ class HttpParserTest {
       reset();
       for (int pos = 0; pos < requestData.length; pos += chunkSize) {
         int end = min(requestData.length, pos + chunkSize);
-        controller.add(requestData.sublist(pos, end));
+        controller.add(requestData.sublist(pos, end) as Uint8List);
       }
       controller.close();
     }
 
     // Test parsing the request three times delivering the data in
     // different chunks.
-    List<int> requestData = new Uint8List.fromList(request.codeUnits);
+    List<int> requestData =
+        new Uint8List.fromList(transform(request).codeUnits);
     testWrite(requestData);
     testWrite(requestData, 10);
     testWrite(requestData, 1);
   }
 
-  static void _testParseRequestLean(
+  void _testParseRequestLean(
       String request, String expectedMethod, String expectedUri,
       {int expectedTransferLength: 0,
       int expectedBytesReceived: 0,
-      Map expectedHeaders: null,
+      Map<String, String>? expectedHeaders: null,
       bool chunked: false,
       bool upgrade: false,
       int unparsedLength: 0,
@@ -178,10 +168,10 @@ class HttpParserTest {
         expectedVersion: expectedVersion);
   }
 
-  static void _testParseInvalidRequest(String request) {
+  void _testParseInvalidRequest(String request) {
     _HttpParser httpParser;
-    bool errorCalled;
-    StreamController controller;
+    bool errorCalled = false;
+    late StreamController<Uint8List> controller;
 
     void reset() {
       httpParser = new _HttpParser.requestParser();
@@ -208,44 +198,45 @@ class HttpParserTest {
           pos < requestData.length && !errorCalled;
           pos += chunkSize) {
         int end = min(requestData.length, pos + chunkSize);
-        controller.add(requestData.sublist(pos, end));
+        controller.add(requestData.sublist(pos, end) as Uint8List);
       }
       controller.close();
     }
 
     // Test parsing the request three times delivering the data in
     // different chunks.
-    List<int> requestData = new Uint8List.fromList(request.codeUnits);
+    List<int> requestData =
+        new Uint8List.fromList(transform(request).codeUnits);
     testWrite(requestData);
     testWrite(requestData, 10);
     testWrite(requestData, 1);
   }
 
-  static void _testParseResponse(
+  void _testParseResponse(
       String response, int expectedStatusCode, String expectedReasonPhrase,
       {int expectedTransferLength: 0,
       int expectedBytesReceived: 0,
-      Map expectedHeaders: null,
+      Map<String, String>? expectedHeaders: null,
       bool chunked: false,
       bool close: false,
-      String responseToMethod: null,
+      String? responseToMethod: null,
       bool connectionClose: false,
       bool upgrade: false,
       int unparsedLength: 0,
       String expectedVersion: "1.1"}) {
-    StreamController controller;
+    late StreamController<Uint8List> controller;
     bool upgraded;
 
     void reset() {
       _HttpParser httpParser;
-      bool headersCompleteCalled;
-      bool dataEndCalled;
-      bool dataEndClose;
-      int statusCode;
-      String reasonPhrase;
-      _HttpHeaders headers;
-      int contentLength;
-      int bytesReceived;
+      bool headersCompleteCalled = false;
+      bool dataEndCalled = false;
+      bool? dataEndClose = null;
+      int statusCode = -1;
+      String? reasonPhrase = null;
+      _HttpHeaders? headers = null;
+      int bytesReceived = 0;
+
       httpParser = new _HttpParser.responseParser();
       controller = new StreamController(sync: true);
       var port = new ReceivePort();
@@ -256,7 +247,7 @@ class HttpParserTest {
       void whenDone() {
         doneCallCount++;
         if (doneCallCount < 2) return;
-        Expect.equals(expectedVersion, headers.protocolVersion);
+        Expect.equals(expectedVersion, headers!.protocolVersion);
         Expect.equals(expectedStatusCode, statusCode);
         Expect.equals(expectedReasonPhrase, reasonPhrase);
         Expect.isTrue(headersCompleteCalled);
@@ -268,11 +259,9 @@ class HttpParserTest {
         }
       }
 
-      ;
-
       var subscription = httpParser.listen((incoming) {
         port.close();
-        statusCode = incoming.statusCode;
+        statusCode = incoming.statusCode!;
         reasonPhrase = incoming.reasonPhrase;
         headers = incoming.headers;
         Expect.isFalse(headersCompleteCalled);
@@ -283,7 +272,7 @@ class HttpParserTest {
         }
         if (expectedHeaders != null) {
           expectedHeaders.forEach((String name, String value) {
-            Expect.equals(value, headers[name][0]);
+            Expect.equals(value, headers![name]![0]);
           });
         }
         Expect.equals(upgrade, httpParser.upgrade);
@@ -297,14 +286,6 @@ class HttpParserTest {
           whenDone();
         });
       }, onDone: whenDone);
-
-      headersCompleteCalled = false;
-      dataEndCalled = false;
-      dataEndClose = null;
-      statusCode = -1;
-      reasonPhrase = null;
-      headers = null;
-      bytesReceived = 0;
     }
 
     void testWrite(List<int> requestData, [int chunkSize = -1]) {
@@ -312,25 +293,25 @@ class HttpParserTest {
       reset();
       for (int pos = 0; pos < requestData.length; pos += chunkSize) {
         int end = min(requestData.length, pos + chunkSize);
-        controller.add(requestData.sublist(pos, end));
+        controller.add(requestData.sublist(pos, end) as Uint8List);
       }
       if (close) controller.close();
     }
 
     // Test parsing the request three times delivering the data in
     // different chunks.
-    List<int> responseData = new Uint8List.fromList(response.codeUnits);
+    List<int> responseData =
+        new Uint8List.fromList(transform(response).codeUnits);
     testWrite(responseData);
     testWrite(responseData, 10);
     testWrite(responseData, 1);
   }
 
-  static void _testParseInvalidResponse(String response, [bool close = false]) {
+  void _testParseInvalidResponse(String response, [bool close = false]) {
     void testWrite(List<int> requestData, [int chunkSize = -1]) {
       _HttpParser httpParser = new _HttpParser.responseParser();
-      StreamController controller = new StreamController(sync: true);
+      StreamController<Uint8List> controller = new StreamController(sync: true);
       bool errorCalled = false;
-      ;
 
       if (chunkSize == -1) chunkSize = requestData.length;
 
@@ -356,22 +337,23 @@ class HttpParserTest {
           pos < requestData.length && !errorCalled;
           pos += chunkSize) {
         int end = min(requestData.length, pos + chunkSize);
-        controller.add(requestData.sublist(pos, end));
+        controller.add(requestData.sublist(pos, end) as Uint8List);
       }
       controller.close();
     }
 
     // Test parsing the request three times delivering the data in
     // different chunks.
-    List<int> responseData = new Uint8List.fromList(response.codeUnits);
+    List<int> responseData =
+        new Uint8List.fromList(transform(response).codeUnits);
     testWrite(responseData);
     testWrite(responseData, 10);
     testWrite(responseData, 1);
   }
 
-  static void testParseRequest() {
+  void testParseRequest() {
     String request;
-    Map headers;
+    Map<String, String> headers;
     var methods = [
       // RFC 2616 methods.
       "OPTIONS", "GET", "HEAD", "POST", "PUT", "DELETE", "TRACE", "CONNECT",
@@ -458,6 +440,18 @@ X-Header-B:           b\r
     headers["x-header-b"] = "bbb";
     _testParseRequestLean(request, "POST", "/test", expectedHeaders: headers);
 
+    // _testParseRequestLean encodes the request as ISO-8859-1. Test that the
+    // HTTP parser decodes header values as ISO-8859-1.
+    request = """
+POST /test HTTP/1.1\r
+latin1:   blåbærgrød\r
+\r
+""";
+
+    headers = new Map();
+    headers["latin1"] = "blåbærgrød";
+    _testParseRequestLean(request, "POST", "/test", expectedHeaders: headers);
+
     request = """
 POST /test HTTP/1.1\r
 Content-Length: 10\r
@@ -474,36 +468,6 @@ Content-Length: 10\r
     request = """
 POST /test HTTP/1.1\r
 Transfer-Encoding: chunked\r
-\r
-5\r
-01234\r
-5\r
-56789\r
-0\r\n\r\n""";
-    _testParseRequest(request, "POST", "/test",
-        expectedTransferLength: -1, expectedBytesReceived: 10, chunked: true);
-
-    // Test mixing chunked encoding and content length (content length
-    // is ignored).
-    request = """
-POST /test HTTP/1.1\r
-Content-Length: 7\r
-Transfer-Encoding: chunked\r
-\r
-5\r
-01234\r
-5\r
-56789\r
-0\r\n\r\n""";
-    _testParseRequest(request, "POST", "/test",
-        expectedTransferLength: -1, expectedBytesReceived: 10, chunked: true);
-
-    // Test mixing chunked encoding and content length (content length
-    // is ignored).
-    request = """
-POST /test HTTP/1.1\r
-Transfer-Encoding: chunked\r
-Content-Length: 3\r
 \r
 5\r
 01234\r
@@ -604,9 +568,9 @@ Sec-WebSocket-Version: 13\r
         expectedHeaders: headers, upgrade: true, unparsedLength: 7);
   }
 
-  static void testParseResponse() {
+  void testParseResponse() {
     String response;
-    Map headers;
+    Map<String, String> headers;
     response = "HTTP/1.1 100 Continue\r\nContent-Length: 0\r\n\r\n";
     _testParseResponse(response, 100, "Continue");
 
@@ -660,6 +624,18 @@ Content-Type: text/html\r
         expectedTransferLength: 20,
         expectedBytesReceived: 0,
         expectedHeaders: headers);
+
+    // _testParseRequestLean encodes the request as ISO-8859-1. Test that the
+    // HTTP parser decodes header values as ISO-8859-1.
+    response = """
+HTTP/1.1 200 OK\r
+Content-Length: 0\r
+test-latin1: blåbærgrød\r
+\r\n""";
+    headers = new Map();
+    headers["content-length"] = "0";
+    headers["test-latin1"] = "blåbærgrød";
+    _testParseResponse(response, 200, "OK", expectedHeaders: headers);
 
     // Test content.
     response = """
@@ -754,7 +730,7 @@ Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r
         expectedHeaders: headers, upgrade: true, unparsedLength: 4);
   }
 
-  static void testParseInvalidRequest() {
+  void testParseInvalidRequest() {
     String request;
     request = "GET /\r\n\r\n";
     _testParseInvalidRequest(request);
@@ -782,9 +758,35 @@ Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r
 
     request = "GET / HTTP/1.1\r\nKeep-Alive: False\r\nbadheader\r\n\r\n";
     _testParseInvalidRequest(request);
+
+    // Content-Length and "Transfer-Encoding: chunked" are specified (error
+    // per RFC-7320).
+    request = """
+POST /test HTTP/1.1\r
+Content-Length: 7\r
+Transfer-Encoding: chunked\r
+\r
+5\r
+01234\r
+5\r
+56789\r
+0\r\n\r\n""";
+    _testParseInvalidRequest(request);
+
+    request = """
+POST /test HTTP/1.1\r
+Transfer-Encoding: chunked\r
+Content-Length: 7\r
+\r
+5\r
+01234\r
+5\r
+56789\r
+0\r\n\r\n""";
+    _testParseInvalidRequest(request);
   }
 
-  static void testParseInvalidResponse() {
+  void testParseInvalidResponse() {
     String response;
 
     response = "HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
@@ -800,6 +802,9 @@ Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r
     _testParseInvalidResponse(response);
 
     response = "HTTP/1.1 OK\r\nContent-Length: 0\r\n\r\n";
+    _testParseInvalidResponse(response);
+
+    response = "HTTP/1.1 20A OK\r\nContent-Length: 0\r\n\r\n";
     _testParseInvalidResponse(response);
 
     response = "200 OK\r\nContent-Length: 0\r\n\r\n";

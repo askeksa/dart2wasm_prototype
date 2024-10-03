@@ -18,7 +18,7 @@ abstract class LocationProvider {
 /// [CodeOutputListener] that collects line information.
 class LocationCollector extends CodeOutputListener implements LocationProvider {
   int length = 0;
-  List<int> lineStarts = <int>[0];
+  List<int> lineStarts = [0];
 
   void _collect(String text) {
     int index = 0;
@@ -40,7 +40,8 @@ class LocationCollector extends CodeOutputListener implements LocationProvider {
   @override
   Location getLocation(int offset) {
     RangeError.checkValueInInterval(offset, 0, length, 'offset');
-    return new Source(lineStarts, null).getLocation(null, offset);
+    return Source(lineStarts, const <int>[], null, null)
+        .getLocation(null, offset);
   }
 
   @override
@@ -49,6 +50,7 @@ class LocationCollector extends CodeOutputListener implements LocationProvider {
     this.length = length;
   }
 
+  @override
   String toString() {
     return 'lineStarts=$lineStarts,length=$length';
   }

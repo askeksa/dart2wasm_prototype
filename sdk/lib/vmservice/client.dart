@@ -4,13 +4,40 @@
 
 part of dart._vmservice;
 
+typedef void ClientServiceHandle(Message? response);
+
 // A service client.
 abstract class Client {
   final VMService service;
   final bool sendEvents;
-  final Set<String> streams = new Set<String>();
 
-  Client(this.service, {bool sendEvents: true}) : this.sendEvents = sendEvents {
+  static int _idCounter = 0;
+  final int _id = ++_idCounter;
+
+  String get defaultClientName => 'client$_id';
+
+  String get name => _name;
+  set name(String? n) => _name = (n ?? defaultClientName);
+  late String _name;
+
+  /// The set of streams the client is subscribed to.
+  final streams = <String>{};
+
+  /// The set of user tags that the client wants to receive CPU samples for.
+  final profilerUserTagFilters = <String>{};
+
+  /// Services registered and their aliases
+  /// key: service
+  /// value: alias
+  final services = <String, String>{};
+
+  /// Callbacks registered for service invocations set to the client
+  /// key: RPC id used for the request
+  /// value: callback that should be invoked
+  final serviceHandles = <String, ClientServiceHandle>{};
+
+  Client(this.service, {this.sendEvents = true}) {
+    _name = defaultClientName;
     service._addClient(this);
   }
 
@@ -18,28 +45,28 @@ abstract class Client {
   disconnect();
 
   /// When implementing, call [close] when the network connection closes.
-  void close() {
-    service._removeClient(this);
-  }
+  void close() => service._removeClient(this);
 
-  /// Call to process a message. Response will be posted with 'seq'.
-  void onMessage(var seq, Message message) {
-    try {
-      // Send message to service.
-      service.route(message).then((response) {
-        // Call post when the response arrives.
-        post(response);
-      });
-    } catch (e, st) {
-      message.setErrorResponse(kInternalError, 'Unexpected exception:$e\n$st');
-      post(message.response);
-    }
-  }
+  /// Call to process a request. Response will be posted with 'seq'.
+  void onRequest(Message message) =>
+      // In JSON-RPC 2.0 messages with and id are Request and must be answered
+      // http://www.jsonrpc.org/specification#notification
+      service.routeRequest(service, message).then(post);
 
-  // Sends a result to the client.  Implemented in subclasses.
-  void post(dynamic result);
+  void onResponse(Message message) => service.routeResponse(message);
 
-  dynamic toJson() {
-    return {};
-  }
+  /// Call to process a notification. Response will not be posted.
+  void onNotification(Message message) =>
+      // In JSON-RPC 2.0 messages without an id are Notification
+      // and should not be answered
+      // http://www.jsonrpc.org/specification#notification
+      service.routeRequest(service, message);
+
+  // Sends a result to the client. Implemented in subclasses.
+  //
+  // Null can be passed as response to a JSON-RPC notification to close the
+  // connection.
+  void post(Response? result);
+
+  Map<String, dynamic> toJson() => {};
 }

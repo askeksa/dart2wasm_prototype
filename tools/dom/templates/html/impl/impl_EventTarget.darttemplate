@@ -46,7 +46,7 @@ class Events {
 
   Events(this._ptr);
 
-  Stream operator [](String type) {
+  Stream<Event> operator [](String type) {
     return new _EventStream(_ptr, type, false);
   }
 }
@@ -71,7 +71,7 @@ class ElementEvents extends Events {
 
   ElementEvents(Element ptr) : super(ptr);
 
-  Stream operator [](String type) {
+  Stream<Event> operator [](String type) {
     if (webkitEvents.keys.contains(type.toLowerCase())) {
       if (Device.isWebKit) {
         return new _ElementEventStreamImpl(
@@ -90,12 +90,6 @@ class ElementEvents extends Events {
  */
 $(ANNOTATIONS)$(NATIVESPEC)$(CLASS_MODIFIERS)class $CLASSNAME$EXTENDS$IMPLEMENTS {
 
-$if DARTIUM
-  // Default constructor to allow other classes e.g. GlobalEventHandlers to be
-  // constructed using _internalWrap when mapping Blink object to Dart class.
-  EventTarget();
-
-$endif
   // Custom element created callback.
   EventTarget._created();
 
@@ -105,7 +99,8 @@ $endif
    */
   Events get on => new Events(this);
 
-  void addEventListener(String type, EventListener listener, [bool useCapture]) {
+  void addEventListener(String type, EventListener$NULLABLE listener,
+      [bool$NULLABLE useCapture]) {
     // TODO(leafp): This check is avoid a bug in our dispatch code when
     // listener is null.  The browser treats this call as a no-op in this
     // case, so it's fine to short-circuit it, but we should not have to.
@@ -114,7 +109,8 @@ $endif
     }
   }
 
-  void removeEventListener(String type, EventListener listener, [bool useCapture]) {
+  void removeEventListener(String type, EventListener$NULLABLE listener,
+      [bool$NULLABLE useCapture]) {
     // TODO(leafp): This check is avoid a bug in our dispatch code when
     // listener is null.  The browser treats this call as a no-op in this
     // case, so it's fine to short-circuit it, but we should not have to.

@@ -2,9 +2,6 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library lib;
-
-@MirrorsUsed(targets: "lib")
 import 'dart:mirrors';
 import 'package:expect/expect.dart';
 
@@ -84,14 +81,4 @@ main() {
           .where((dm) => dm is MethodMirror && dm.isConstructor)
           .map(stringify),
       'constructors');
-
-  Expect.setEquals(
-      [
-        'TypeVariable(s(T) in s(A), upperBound = Class(s(Object) in '
-            's(dart.core), top-level))'
-      ],
-      cm.declarations.values
-          .where((dm) => dm is TypeVariableMirror)
-          .map(stringify),
-      'type variables');
 }

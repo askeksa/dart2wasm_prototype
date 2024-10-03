@@ -2,9 +2,12 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+#include <setjmp.h>
+
 #include "vm/exceptions.h"
 
 #include "platform/address_sanitizer.h"
+#include "platform/thread_sanitizer.h"
 
 #include "lib/stacktrace.h"
 
@@ -21,8 +24,6 @@
 #include "vm/stack_frame.h"
 #include "vm/stub_code.h"
 #include "vm/symbols.h"
-#include "vm/tags.h"
-
 
 namespace dart {
 
@@ -32,40 +33,13 @@ DEFINE_FLAG(bool,
             false,
             "Prints a stack trace everytime a throw occurs.");
 
-
 class StackTraceBuilder : public ValueObject {
  public:
   StackTraceBuilder() {}
   virtual ~StackTraceBuilder() {}
 
-  virtual void AddFrame(const Code& code, const Smi& offset) = 0;
+  virtual void AddFrame(const Object& code, uword pc_offset) = 0;
 };
-
-
-class RegularStackTraceBuilder : public StackTraceBuilder {
- public:
-  explicit RegularStackTraceBuilder(Zone* zone)
-      : code_list_(
-            GrowableObjectArray::Handle(zone, GrowableObjectArray::New())),
-        pc_offset_list_(
-            GrowableObjectArray::Handle(zone, GrowableObjectArray::New())) {}
-  ~RegularStackTraceBuilder() {}
-
-  const GrowableObjectArray& code_list() const { return code_list_; }
-  const GrowableObjectArray& pc_offset_list() const { return pc_offset_list_; }
-
-  virtual void AddFrame(const Code& code, const Smi& offset) {
-    code_list_.Add(code);
-    pc_offset_list_.Add(offset);
-  }
-
- private:
-  const GrowableObjectArray& code_list_;
-  const GrowableObjectArray& pc_offset_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(RegularStackTraceBuilder);
-};
-
 
 class PreallocatedStackTraceBuilder : public StackTraceBuilder {
  public:
@@ -73,12 +47,13 @@ class PreallocatedStackTraceBuilder : public StackTraceBuilder {
       : stacktrace_(StackTrace::Cast(stacktrace)),
         cur_index_(0),
         dropped_frames_(0) {
-    ASSERT(stacktrace_.raw() ==
-           Isolate::Current()->object_store()->preallocated_stack_trace());
+    ASSERT(
+        stacktrace_.ptr() ==
+        Isolate::Current()->isolate_object_store()->preallocated_stack_trace());
   }
   ~PreallocatedStackTraceBuilder() {}
 
-  virtual void AddFrame(const Code& code, const Smi& offset);
+  void AddFrame(const Object& code, uword pc_offset) override;
 
  private:
   static const int kNumTopframes = StackTrace::kPreallocatedStackdepth / 2;
@@ -90,13 +65,11 @@ class PreallocatedStackTraceBuilder : public StackTraceBuilder {
   DISALLOW_COPY_AND_ASSIGN(PreallocatedStackTraceBuilder);
 };
 
-
-void PreallocatedStackTraceBuilder::AddFrame(const Code& code,
-                                             const Smi& offset) {
+void PreallocatedStackTraceBuilder::AddFrame(const Object& code,
+                                             uword pc_offset) {
   if (cur_index_ >= StackTrace::kPreallocatedStackdepth) {
     // The number of frames is overflowing the preallocated stack trace object.
-    Code& frame_code = Code::Handle();
-    Smi& frame_offset = Smi::Handle();
+    Object& frame_code = Object::Handle();
     intptr_t start = StackTrace::kPreallocatedStackdepth - (kNumTopframes - 1);
     intptr_t null_slot = start - 2;
     // We are going to drop one frame.
@@ -109,69 +82,51 @@ void PreallocatedStackTraceBuilder::AddFrame(const Code& code,
       dropped_frames_++;
     }
     // Encode the number of dropped frames into the pc offset.
-    frame_offset ^= Smi::New(dropped_frames_);
-    stacktrace_.SetPcOffsetAtFrame(null_slot, frame_offset);
+    stacktrace_.SetPcOffsetAtFrame(null_slot, dropped_frames_);
     // Move frames one slot down so that we can accommodate the new frame.
     for (intptr_t i = start; i < StackTrace::kPreallocatedStackdepth; i++) {
       intptr_t prev = (i - 1);
       frame_code = stacktrace_.CodeAtFrame(i);
-      frame_offset = stacktrace_.PcOffsetAtFrame(i);
+      const uword frame_offset = stacktrace_.PcOffsetAtFrame(i);
       stacktrace_.SetCodeAtFrame(prev, frame_code);
       stacktrace_.SetPcOffsetAtFrame(prev, frame_offset);
     }
     cur_index_ = (StackTrace::kPreallocatedStackdepth - 1);
   }
   stacktrace_.SetCodeAtFrame(cur_index_, code);
-  stacktrace_.SetPcOffsetAtFrame(cur_index_, offset);
+  stacktrace_.SetPcOffsetAtFrame(cur_index_, pc_offset);
   cur_index_ += 1;
 }
 
-
 static void BuildStackTrace(StackTraceBuilder* builder) {
-  StackFrameIterator frames(StackFrameIterator::kDontValidateFrames,
+  StackFrameIterator frames(ValidationPolicy::kDontValidateFrames,
                             Thread::Current(),
                             StackFrameIterator::kNoCrossThreadIteration);
   StackFrame* frame = frames.NextFrame();
   ASSERT(frame != NULL);  // We expect to find a dart invocation frame.
   Code& code = Code::Handle();
-  Smi& offset = Smi::Handle();
-  while (frame != NULL) {
-    if (frame->IsDartFrame()) {
-      code = frame->LookupDartCode();
-      ASSERT(code.ContainsInstructionAt(frame->pc()));
-      offset = Smi::New(frame->pc() - code.PayloadStart());
-      builder->AddFrame(code, offset);
+  for (; frame != NULL; frame = frames.NextFrame()) {
+    if (!frame->IsDartFrame()) {
+      continue;
     }
-    frame = frames.NextFrame();
+    code = frame->LookupDartCode();
+    ASSERT(code.ContainsInstructionAt(frame->pc()));
+    const uword pc_offset = frame->pc() - code.PayloadStart();
+    builder->AddFrame(code, pc_offset);
   }
 }
-
-
-static RawObject** VariableAt(uword fp, int stack_slot) {
-#if defined(TARGET_ARCH_DBC)
-  return reinterpret_cast<RawObject**>(fp + stack_slot * kWordSize);
-#else
-  if (stack_slot < 0) {
-    return reinterpret_cast<RawObject**>(ParamAddress(fp, -stack_slot));
-  } else {
-    return reinterpret_cast<RawObject**>(
-        LocalVarAddress(fp, kFirstLocalSlotFromFp - stack_slot));
-  }
-#endif
-}
-
 
 class ExceptionHandlerFinder : public StackResource {
  public:
   explicit ExceptionHandlerFinder(Thread* thread)
-      : StackResource(thread), thread_(thread), cache_(NULL), metadata_(NULL) {}
+      : StackResource(thread), thread_(thread) {}
 
   // Iterate through the stack frames and try to find a frame with an
   // exception handler. Once found, set the pc, sp and fp so that execution
   // can continue in that frame. Sets 'needs_stacktrace' if there is no
-  // cath-all handler or if a stack-trace is specified in the catch.
+  // catch-all handler or if a stack-trace is specified in the catch.
   bool Find() {
-    StackFrameIterator frames(StackFrameIterator::kDontValidateFrames,
+    StackFrameIterator frames(ValidationPolicy::kDontValidateFrames,
                               Thread::Current(),
                               StackFrameIterator::kNoCrossThreadIteration);
     StackFrame* frame = frames.NextFrame();
@@ -182,7 +137,7 @@ class ExceptionHandlerFinder : public StackResource {
     uword temp_handler_pc = kUwordMax;
     bool is_optimized = false;
     code_ = NULL;
-    cache_ = thread_->isolate()->catch_entry_state_cache();
+    catch_entry_moves_cache_ = thread_->isolate()->catch_entry_moves_cache();
 
     while (!frame->IsEntryFrame()) {
       if (frame->IsDartFrame()) {
@@ -197,14 +152,28 @@ class ExceptionHandlerFinder : public StackResource {
             if (is_optimized) {
               pc_ = frame->pc();
               code_ = &Code::Handle(frame->LookupDartCode());
-              CatchEntryState* state = cache_->Lookup(pc_);
-              if (state != NULL) cached_ = *state;
-#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_PRECOMPILER)
-              intptr_t num_vars = Smi::Value(code_->variables());
-              if (cached_.Empty()) GetMetaDataFromDeopt(num_vars, frame);
+              CatchEntryMovesRefPtr* cached_catch_entry_moves =
+                  catch_entry_moves_cache_->Lookup(pc_);
+              if (cached_catch_entry_moves != NULL) {
+                cached_catch_entry_moves_ = *cached_catch_entry_moves;
+              }
+              if (cached_catch_entry_moves_.IsEmpty()) {
+#if defined(DART_PRECOMPILED_RUNTIME)
+                // Only AOT mode is supported.
+                ReadCompressedCatchEntryMoves();
+#elif defined(DART_PRECOMPILER)
+                // Both AOT and JIT modes are supported.
+                if (FLAG_precompiled_mode) {
+                  ReadCompressedCatchEntryMoves();
+                } else {
+                  GetCatchEntryMovesFromDeopt(code_->num_variables(), frame);
+                }
 #else
-              if (cached_.Empty()) ReadCompressedMetaData();
-#endif  // !defined(DART_PRECOMPILED_RUNTIME) && !defined(DART_PRECOMPILER)
+                // Only JIT mode is supported.
+                ASSERT(!FLAG_precompiled_mode);
+                GetCatchEntryMovesFromDeopt(code_->num_variables(), frame);
+#endif
+              }
             }
           }
           if (needs_stacktrace || is_catch_all) {
@@ -226,110 +195,121 @@ class ExceptionHandlerFinder : public StackResource {
     return handler_pc_set_;
   }
 
-  void TrySync() {
-    if (code_ == NULL || !code_->is_optimized()) {
+  // When entering catch block in the optimized code we need to execute
+  // catch entry moves that would morph the state of the frame into
+  // what catch entry expects.
+  void PrepareFrameForCatchEntry() {
+    if (code_ == nullptr || !code_->is_optimized()) {
       return;
     }
-    if (!cached_.Empty()) {
-      // Cache hit.
-      TrySyncCached(&cached_);
+
+    if (cached_catch_entry_moves_.IsEmpty()) {
+      catch_entry_moves_cache_->Insert(
+          pc_, CatchEntryMovesRefPtr(catch_entry_moves_));
     } else {
-      // New cache entry.
-      CatchEntryState m(metadata_);
-      TrySyncCached(&m);
-      cache_->Insert(pc_, m);
+      catch_entry_moves_ = &cached_catch_entry_moves_.moves();
     }
+
+    ExecuteCatchEntryMoves(*catch_entry_moves_);
   }
 
-  void TrySyncCached(CatchEntryState* md) {
+  void ExecuteCatchEntryMoves(const CatchEntryMoves& moves) {
+    Zone* zone = Thread::Current()->zone();
+    auto& value = Object::Handle(zone);
+    GrowableArray<Object*> dst_values;
+
     uword fp = handler_fp;
-    ObjectPool* pool = NULL;
-    intptr_t pairs = md->Pairs();
-    for (int j = 0; j < pairs; j++) {
-      intptr_t src = md->Src(j);
-      intptr_t dest = md->Dest(j);
-      if (md->isMove(j)) {
-        *VariableAt(fp, dest) = *VariableAt(fp, src);
-      } else {
-        if (pool == NULL) {
-          pool = &ObjectPool::Handle(code_->object_pool());
-        }
-        RawObject* obj = pool->ObjectAt(src);
-        *VariableAt(fp, dest) = obj;
+    ObjectPool* pool = nullptr;
+    for (int j = 0; j < moves.count(); j++) {
+      const CatchEntryMove& move = moves.At(j);
+
+      switch (move.source_kind()) {
+        case CatchEntryMove::SourceKind::kConstant:
+          if (pool == nullptr) {
+            pool = &ObjectPool::Handle(code_->GetObjectPool());
+          }
+          value = pool->ObjectAt(move.src_slot());
+          break;
+
+        case CatchEntryMove::SourceKind::kTaggedSlot:
+          value = *TaggedSlotAt(fp, move.src_slot());
+          break;
+
+        case CatchEntryMove::SourceKind::kDoubleSlot:
+          value = Double::New(*SlotAt<double>(fp, move.src_slot()));
+          break;
+
+        case CatchEntryMove::SourceKind::kFloat32x4Slot:
+          value = Float32x4::New(*SlotAt<simd128_value_t>(fp, move.src_slot()));
+          break;
+
+        case CatchEntryMove::SourceKind::kFloat64x2Slot:
+          value = Float64x2::New(*SlotAt<simd128_value_t>(fp, move.src_slot()));
+          break;
+
+        case CatchEntryMove::SourceKind::kInt32x4Slot:
+          value = Int32x4::New(*SlotAt<simd128_value_t>(fp, move.src_slot()));
+          break;
+
+        case CatchEntryMove::SourceKind::kInt64PairSlot:
+          value = Integer::New(
+              Utils::LowHighTo64Bits(*SlotAt<uint32_t>(fp, move.src_lo_slot()),
+                                     *SlotAt<int32_t>(fp, move.src_hi_slot())));
+          break;
+
+        case CatchEntryMove::SourceKind::kInt64Slot:
+          value = Integer::New(*SlotAt<int64_t>(fp, move.src_slot()));
+          break;
+
+        case CatchEntryMove::SourceKind::kInt32Slot:
+          value = Integer::New(*SlotAt<int32_t>(fp, move.src_slot()));
+          break;
+
+        case CatchEntryMove::SourceKind::kUint32Slot:
+          value = Integer::New(*SlotAt<uint32_t>(fp, move.src_slot()));
+          break;
+
+        default:
+          UNREACHABLE();
+      }
+
+      dst_values.Add(&Object::Handle(zone, value.ptr()));
+    }
+
+    {
+      NoSafepointScope no_safepoint_scope;
+
+      for (int j = 0; j < moves.count(); j++) {
+        const CatchEntryMove& move = moves.At(j);
+        *TaggedSlotAt(fp, move.dest_slot()) = dst_values[j]->ptr();
       }
     }
   }
 
 #if defined(DART_PRECOMPILED_RUNTIME) || defined(DART_PRECOMPILER)
-  void ReadCompressedMetaData() {
-    intptr_t pc_offset = pc_ - code_->PayloadStart();
-    const TypedData& td = TypedData::Handle(code_->catch_entry_state_maps());
-    NoSafepointScope no_safepoint;
-    ReadStream stream(static_cast<uint8_t*>(td.DataAddr(0)), td.Length());
+  void ReadCompressedCatchEntryMoves() {
+    const intptr_t pc_offset = pc_ - code_->PayloadStart();
+    const auto& td = TypedData::Handle(code_->catch_entry_moves_maps());
 
-    bool found_metadata = false;
-    while (stream.PendingBytes() > 0) {
-      intptr_t target_pc_offset = Reader::Read(&stream);
-      intptr_t variables = Reader::Read(&stream);
-      intptr_t suffix_length = Reader::Read(&stream);
-      intptr_t suffix_offset = Reader::Read(&stream);
-      if (pc_offset == target_pc_offset) {
-        metadata_ = new intptr_t[2 * (variables + suffix_length) + 1];
-        metadata_[0] = variables + suffix_length;
-        for (int j = 0; j < variables; j++) {
-          intptr_t src = Reader::Read(&stream);
-          intptr_t dest = Reader::Read(&stream);
-          metadata_[1 + 2 * j] = src;
-          metadata_[2 + 2 * j] = dest;
-        }
-        ReadCompressedSuffix(&stream, suffix_offset, suffix_length, metadata_,
-                             2 * variables + 1);
-        found_metadata = true;
-        break;
-      } else {
-        for (intptr_t j = 0; j < 2 * variables; j++) {
-          Reader::Read(&stream);
-        }
-      }
-    }
-    ASSERT(found_metadata);
+    CatchEntryMovesMapReader reader(td);
+    catch_entry_moves_ = reader.ReadMovesForPcOffset(pc_offset);
   }
+#endif  // defined(DART_PRECOMPILED_RUNTIME) || defined(DART_PRECOMPILER)
 
-  void ReadCompressedSuffix(ReadStream* stream,
-                            intptr_t offset,
-                            intptr_t length,
-                            intptr_t* target,
-                            intptr_t target_offset) {
-    stream->SetPosition(offset);
-    Reader::Read(stream);  // skip pc_offset
-    Reader::Read(stream);  // skip variables
-    intptr_t suffix_length = Reader::Read(stream);
-    intptr_t suffix_offset = Reader::Read(stream);
-    intptr_t to_read = length - suffix_length;
-    for (int j = 0; j < to_read; j++) {
-      target[target_offset + 2 * j] = Reader::Read(stream);
-      target[target_offset + 2 * j + 1] = Reader::Read(stream);
-    }
-    if (suffix_length > 0) {
-      ReadCompressedSuffix(stream, suffix_offset, suffix_length, target,
-                           target_offset + to_read * 2);
-    }
-  }
-
-#else
-  void GetMetaDataFromDeopt(intptr_t num_vars, StackFrame* frame) {
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  void GetCatchEntryMovesFromDeopt(intptr_t num_vars, StackFrame* frame) {
     Isolate* isolate = thread_->isolate();
     DeoptContext* deopt_context =
         new DeoptContext(frame, *code_, DeoptContext::kDestIsAllocated, NULL,
                          NULL, true, false /* deoptimizing_code */);
     isolate->set_deopt_context(deopt_context);
 
-    metadata_ = deopt_context->CatchEntryState(num_vars);
+    catch_entry_moves_ = deopt_context->ToCatchEntryMoves(num_vars);
 
     isolate->set_deopt_context(NULL);
     delete deopt_context;
   }
-#endif  // defined(DART_PRECOMPILED_RUNTIME) || defined(DART_PRECOMPILER)
+#endif  // !defined(DART_PRECOMPILED_RUNTIME)
 
   bool needs_stacktrace;
   uword handler_pc;
@@ -337,21 +317,215 @@ class ExceptionHandlerFinder : public StackResource {
   uword handler_fp;
 
  private:
+  template <typename T>
+  static T* SlotAt(uword fp, int stack_slot) {
+    const intptr_t frame_slot =
+        runtime_frame_layout.FrameSlotForVariableIndex(-stack_slot);
+    return reinterpret_cast<T*>(fp + frame_slot * kWordSize);
+  }
+
+  static ObjectPtr* TaggedSlotAt(uword fp, int stack_slot) {
+    return SlotAt<ObjectPtr>(fp, stack_slot);
+  }
+
   typedef ReadStream::Raw<sizeof(intptr_t), intptr_t> Reader;
   Thread* thread_;
-  CatchEntryStateCache* cache_;
   Code* code_;
   bool handler_pc_set_;
-  intptr_t* metadata_;      // MetaData generated from deopt.
-  CatchEntryState cached_;  // Value of per PC MetaData cache.
   intptr_t pc_;             // Current pc in the handler frame.
+
+  const CatchEntryMoves* catch_entry_moves_ = nullptr;
+  CatchEntryMovesCache* catch_entry_moves_cache_ = nullptr;
+  CatchEntryMovesRefPtr cached_catch_entry_moves_;
 };
 
+CatchEntryMove CatchEntryMove::ReadFrom(ReadStream* stream) {
+  using Reader = ReadStream::Raw<sizeof(int32_t), int32_t>;
+  const int32_t src = Reader::Read(stream);
+  const int32_t dest_and_kind = Reader::Read(stream);
+  return CatchEntryMove(src, dest_and_kind);
+}
+
+#if !defined(DART_PRECOMPILED_RUNTIME)
+void CatchEntryMove::WriteTo(BaseWriteStream* stream) {
+  using Writer = BaseWriteStream::Raw<sizeof(int32_t), int32_t>;
+  Writer::Write(stream, src_);
+  Writer::Write(stream, dest_and_kind_);
+}
+#endif
+
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
+const char* CatchEntryMove::ToCString() const {
+  char from[256];
+
+  switch (source_kind()) {
+    case SourceKind::kConstant:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "pp[%" Pd "]", src_slot());
+      break;
+
+    case SourceKind::kTaggedSlot:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "fp[%" Pd "]", src_slot());
+      break;
+
+    case SourceKind::kDoubleSlot:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "f64 [fp + %" Pd "]",
+                     src_slot() * compiler::target::kWordSize);
+      break;
+
+    case SourceKind::kFloat32x4Slot:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "f32x4 [fp + %" Pd "]",
+                     src_slot() * compiler::target::kWordSize);
+      break;
+
+    case SourceKind::kFloat64x2Slot:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "f64x2 [fp + %" Pd "]",
+                     src_slot() * compiler::target::kWordSize);
+      break;
+
+    case SourceKind::kInt32x4Slot:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "i32x4 [fp + %" Pd "]",
+                     src_slot() * compiler::target::kWordSize);
+      break;
+
+    case SourceKind::kInt64PairSlot:
+      Utils::SNPrint(from, ARRAY_SIZE(from),
+                     "i64 ([fp + %" Pd "], [fp + %" Pd "])",
+                     src_lo_slot() * compiler::target::kWordSize,
+                     src_hi_slot() * compiler::target::kWordSize);
+      break;
+
+    case SourceKind::kInt64Slot:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "i64 [fp + %" Pd "]",
+                     src_slot() * compiler::target::kWordSize);
+      break;
+
+    case SourceKind::kInt32Slot:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "i32 [fp + %" Pd "]",
+                     src_slot() * compiler::target::kWordSize);
+      break;
+
+    case SourceKind::kUint32Slot:
+      Utils::SNPrint(from, ARRAY_SIZE(from), "u32 [fp + %" Pd "]",
+                     src_slot() * compiler::target::kWordSize);
+      break;
+
+    default:
+      UNREACHABLE();
+  }
+
+  return Thread::Current()->zone()->PrintToString("fp[%" Pd "] <- %s",
+                                                  dest_slot(), from);
+}
+
+void CatchEntryMovesMapReader::PrintEntries() {
+  NoSafepointScope no_safepoint;
+
+  using Reader = ReadStream::Raw<sizeof(intptr_t), intptr_t>;
+
+  ReadStream stream(static_cast<uint8_t*>(bytes_.DataAddr(0)), bytes_.Length());
+
+  while (stream.PendingBytes() > 0) {
+    const intptr_t stream_position = stream.Position();
+    const intptr_t target_pc_offset = Reader::Read(&stream);
+    const intptr_t prefix_length = Reader::Read(&stream);
+    const intptr_t suffix_length = Reader::Read(&stream);
+    const intptr_t length = prefix_length + suffix_length;
+    Reader::Read(&stream);  // Skip suffix_offset
+    for (intptr_t j = 0; j < prefix_length; j++) {
+      CatchEntryMove::ReadFrom(&stream);
+    }
+
+    ReadStream inner_stream(static_cast<uint8_t*>(bytes_.DataAddr(0)),
+                            bytes_.Length());
+    CatchEntryMoves* moves = ReadCompressedCatchEntryMovesSuffix(
+        &inner_stream, stream_position, length);
+    THR_Print("  [code+0x%08" Px "]: (% " Pd " moves)\n", target_pc_offset,
+              moves->count());
+    for (intptr_t i = 0; i < moves->count(); i++) {
+      THR_Print("    %s\n", moves->At(i).ToCString());
+    }
+    CatchEntryMoves::Free(moves);
+  }
+}
+#endif  // !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
+
+CatchEntryMoves* CatchEntryMovesMapReader::ReadMovesForPcOffset(
+    intptr_t pc_offset) {
+  NoSafepointScope no_safepoint;
+
+  ReadStream stream(static_cast<uint8_t*>(bytes_.DataAddr(0)), bytes_.Length());
+
+  intptr_t position = 0;
+  intptr_t length = 0;
+  FindEntryForPc(&stream, pc_offset, &position, &length);
+
+  return ReadCompressedCatchEntryMovesSuffix(&stream, position, length);
+}
+
+void CatchEntryMovesMapReader::FindEntryForPc(ReadStream* stream,
+                                              intptr_t pc_offset,
+                                              intptr_t* position,
+                                              intptr_t* length) {
+  using Reader = ReadStream::Raw<sizeof(intptr_t), intptr_t>;
+
+  while (stream->PendingBytes() > 0) {
+    const intptr_t stream_position = stream->Position();
+    const intptr_t target_pc_offset = Reader::Read(stream);
+    const intptr_t prefix_length = Reader::Read(stream);
+    const intptr_t suffix_length = Reader::Read(stream);
+    Reader::Read(stream);  // Skip suffix_offset
+    if (pc_offset == target_pc_offset) {
+      *position = stream_position;
+      *length = prefix_length + suffix_length;
+      return;
+    }
+
+    // Skip the prefix moves.
+    for (intptr_t j = 0; j < prefix_length; j++) {
+      CatchEntryMove::ReadFrom(stream);
+    }
+  }
+
+  UNREACHABLE();
+}
+
+CatchEntryMoves* CatchEntryMovesMapReader::ReadCompressedCatchEntryMovesSuffix(
+    ReadStream* stream,
+    intptr_t offset,
+    intptr_t length) {
+  using Reader = ReadStream::Raw<sizeof(intptr_t), intptr_t>;
+
+  CatchEntryMoves* moves = CatchEntryMoves::Allocate(length);
+
+  intptr_t remaining_length = length;
+
+  intptr_t moves_offset = 0;
+  while (remaining_length > 0) {
+    stream->SetPosition(offset);
+    Reader::Read(stream);  // skip pc_offset
+    Reader::Read(stream);  // skip prefix length
+    const intptr_t suffix_length = Reader::Read(stream);
+    const intptr_t suffix_offset = Reader::Read(stream);
+    const intptr_t to_read = remaining_length - suffix_length;
+    if (to_read > 0) {
+      for (int j = 0; j < to_read; j++) {
+        // The prefix is written from the back.
+        moves->At(moves_offset + to_read - j - 1) =
+            CatchEntryMove::ReadFrom(stream);
+      }
+      remaining_length -= to_read;
+      moves_offset += to_read;
+    }
+    offset = suffix_offset;
+  }
+
+  return moves;
+}
 
 static void FindErrorHandler(uword* handler_pc,
                              uword* handler_sp,
                              uword* handler_fp) {
-  StackFrameIterator frames(StackFrameIterator::kDontValidateFrames,
+  StackFrameIterator frames(ValidationPolicy::kDontValidateFrames,
                             Thread::Current(),
                             StackFrameIterator::kNoCrossThreadIteration);
   StackFrame* frame = frames.NextFrame();
@@ -366,54 +540,22 @@ static void FindErrorHandler(uword* handler_pc,
   *handler_fp = frame->fp();
 }
 
-
-static uword RemapExceptionPCForDeopt(Thread* thread,
-                                      uword program_counter,
-                                      uword frame_pointer) {
-#if !defined(TARGET_ARCH_DBC)
-  MallocGrowableArray<PendingLazyDeopt>* pending_deopts =
-      thread->isolate()->pending_deopts();
-  if (pending_deopts->length() > 0) {
-    // Check if the target frame is scheduled for lazy deopt.
-    for (intptr_t i = 0; i < pending_deopts->length(); i++) {
-      if ((*pending_deopts)[i].fp() == frame_pointer) {
-        // Deopt should now resume in the catch handler instead of after the
-        // call.
-        (*pending_deopts)[i].set_pc(program_counter);
-
-        // Jump to the deopt stub instead of the catch handler.
-        program_counter =
-            StubCode::DeoptimizeLazyFromThrow_entry()->EntryPoint();
-        if (FLAG_trace_deoptimization) {
-          THR_Print("Throwing to frame scheduled for lazy deopt fp=%" Pp "\n",
-                    frame_pointer);
-        }
-        break;
-      }
-    }
-  }
-#endif  // !DBC
-  return program_counter;
-}
-
-
 static void ClearLazyDeopts(Thread* thread, uword frame_pointer) {
-#if !defined(TARGET_ARCH_DBC)
-  MallocGrowableArray<PendingLazyDeopt>* pending_deopts =
-      thread->isolate()->pending_deopts();
-  if (pending_deopts->length() > 0) {
+  if (thread->pending_deopts().HasPendingDeopts()) {
     // We may be jumping over frames scheduled for lazy deopt. Remove these
     // frames from the pending deopt table, but only after unmarking them so
     // any stack walk that happens before the stack is unwound will still work.
     {
       DartFrameIterator frames(thread,
                                StackFrameIterator::kNoCrossThreadIteration);
-      StackFrame* frame = frames.NextFrame();
-      while ((frame != NULL) && (frame->fp() < frame_pointer)) {
+      for (StackFrame* frame = frames.NextFrame(); frame != nullptr;
+           frame = frames.NextFrame()) {
+        if (frame->fp() >= frame_pointer) {
+          break;
+        }
         if (frame->IsMarkedForLazyDeopt()) {
           frame->UnmarkForLazyDeopt();
         }
-        frame = frames.NextFrame();
       }
     }
 
@@ -421,25 +563,14 @@ static void ClearLazyDeopts(Thread* thread, uword frame_pointer) {
     ValidateFrames();
 #endif
 
-    for (intptr_t i = 0; i < pending_deopts->length(); i++) {
-      if ((*pending_deopts)[i].fp() < frame_pointer) {
-        if (FLAG_trace_deoptimization) {
-          THR_Print(
-              "Lazy deopt skipped due to throw for "
-              "fp=%" Pp ", pc=%" Pp "\n",
-              (*pending_deopts)[i].fp(), (*pending_deopts)[i].pc());
-        }
-        pending_deopts->RemoveAt(i);
-      }
-    }
+    thread->pending_deopts().ClearPendingDeoptsBelow(
+        frame_pointer, PendingDeopts::kClearDueToThrow);
 
 #if defined(DEBUG)
     ValidateFrames();
 #endif
   }
-#endif  // !DBC
 }
-
 
 static void JumpToExceptionHandler(Thread* thread,
                                    uword program_counter,
@@ -447,25 +578,26 @@ static void JumpToExceptionHandler(Thread* thread,
                                    uword frame_pointer,
                                    const Object& exception_object,
                                    const Object& stacktrace_object) {
-  uword remapped_pc =
-      RemapExceptionPCForDeopt(thread, program_counter, frame_pointer);
+  uword remapped_pc = thread->pending_deopts().RemapExceptionPCForDeopt(
+      program_counter, frame_pointer);
   thread->set_active_exception(exception_object);
   thread->set_active_stacktrace(stacktrace_object);
   thread->set_resume_pc(remapped_pc);
-  uword run_exception_pc = StubCode::RunExceptionHandler_entry()->EntryPoint();
+  uword run_exception_pc = StubCode::RunExceptionHandler().EntryPoint();
   Exceptions::JumpToFrame(thread, run_exception_pc, stack_pointer,
                           frame_pointer, false /* do not clear deopt */);
 }
 
-
+NO_SANITIZE_SAFE_STACK  // This function manipulates the safestack pointer.
 void Exceptions::JumpToFrame(Thread* thread,
                              uword program_counter,
                              uword stack_pointer,
                              uword frame_pointer,
                              bool clear_deopt_at_target) {
-  uword fp_for_clearing =
+  const uword fp_for_clearing =
       (clear_deopt_at_target ? frame_pointer + 1 : frame_pointer);
   ClearLazyDeopts(thread, fp_for_clearing);
+
 #if defined(USING_SIMULATOR)
   // Unwinding of the C++ frames and destroying of their stack resources is done
   // by the simulator, because the target stack_pointer is a simulated stack
@@ -478,49 +610,68 @@ void Exceptions::JumpToFrame(Thread* thread,
   Simulator::Current()->JumpToFrame(program_counter, stack_pointer,
                                     frame_pointer, thread);
 #else
+
   // Prepare for unwinding frames by destroying all the stack resources
   // in the previous frames.
   StackResource::Unwind(thread);
+
+  // Unpoison the stack before we tear it down in the generated stub code.
+  uword current_sp = OSThread::GetCurrentStackPointer() - 1024;
+  ASAN_UNPOISON(reinterpret_cast<void*>(current_sp),
+                stack_pointer - current_sp);
+
+  // We are jumping over C++ frames, so we have to set the safestack pointer
+  // back to what it was when we entered the runtime from Dart code.
+#if defined(USING_SAFE_STACK)
+  const uword saved_ssp = thread->saved_safestack_limit();
+  OSThread::SetCurrentSafestackPointer(saved_ssp);
+#endif
+
+#if defined(USING_SHADOW_CALL_STACK)
+  // The shadow call stack register will be restored by the JumpToFrame stub.
+#endif
+
+#if defined(USING_THREAD_SANITIZER)
+  if (thread->exit_through_ffi() == Thread::kExitThroughRuntimeCall) {
+    auto tsan_utils = thread->tsan_utils();
+    tsan_utils->exception_pc = program_counter;
+    tsan_utils->exception_sp = stack_pointer;
+    tsan_utils->exception_fp = frame_pointer;
+    longjmp(*(tsan_utils->setjmp_buffer), 1);
+  }
+#endif  // defined(USING_THREAD_SANITIZER)
 
   // Call a stub to set up the exception object in kExceptionObjectReg,
   // to set up the stacktrace object in kStackTraceObjectReg, and to
   // continue execution at the given pc in the given frame.
   typedef void (*ExcpHandler)(uword, uword, uword, Thread*);
-  ExcpHandler func = reinterpret_cast<ExcpHandler>(
-      StubCode::JumpToFrame_entry()->EntryPoint());
+  ExcpHandler func =
+      reinterpret_cast<ExcpHandler>(StubCode::JumpToFrame().EntryPoint());
 
-  // Unpoison the stack before we tear it down in the generated stub code.
-  uword current_sp = Thread::GetCurrentStackPointer() - 1024;
-  ASAN_UNPOISON(reinterpret_cast<void*>(current_sp),
-                stack_pointer - current_sp);
-
+  if (thread->is_unwind_in_progress()) {
+    thread->SetUnwindErrorInProgress(true);
+  }
   func(program_counter, stack_pointer, frame_pointer, thread);
+
 #endif
   UNREACHABLE();
 }
 
-
-static RawField* LookupStackTraceField(const Instance& instance) {
+static FieldPtr LookupStackTraceField(const Instance& instance) {
   if (instance.GetClassId() < kNumPredefinedCids) {
     // 'class Error' is not a predefined class.
     return Field::null();
   }
   Thread* thread = Thread::Current();
   Zone* zone = thread->zone();
-  Isolate* isolate = thread->isolate();
-  Class& error_class =
-      Class::Handle(zone, isolate->object_store()->error_class());
-  if (error_class.IsNull()) {
-    const Library& core_lib = Library::Handle(zone, Library::CoreLibrary());
-    error_class = core_lib.LookupClass(Symbols::Error());
-    ASSERT(!error_class.IsNull());
-    isolate->object_store()->set_error_class(error_class);
-  }
+  auto isolate_group = thread->isolate_group();
+  const auto& error_class =
+      Class::Handle(zone, isolate_group->object_store()->error_class());
   // If instance class extends 'class Error' return '_stackTrace' field.
   Class& test_class = Class::Handle(zone, instance.clazz());
   AbstractType& type = AbstractType::Handle(zone, AbstractType::null());
   while (true) {
-    if (test_class.raw() == error_class.raw()) {
+    if (test_class.ptr() == error_class.ptr()) {
       return error_class.LookupInstanceFieldAllowPrivate(
           Symbols::_stackTrace());
     }
@@ -532,25 +683,39 @@ static RawField* LookupStackTraceField(const Instance& instance) {
   return Field::null();
 }
 
-
-RawStackTrace* Exceptions::CurrentStackTrace() {
+StackTracePtr Exceptions::CurrentStackTrace() {
   return GetStackTraceForException();
 }
 
-
+DART_NORETURN
 static void ThrowExceptionHelper(Thread* thread,
                                  const Instance& incoming_exception,
                                  const Instance& existing_stacktrace,
                                  const bool is_rethrow) {
+  // SuspendLongJumpScope during Dart entry ensures that if a longjmp base is
+  // available, it is the innermost error handler. If one is available, so
+  // should jump there instead.
+  RELEASE_ASSERT(thread->long_jump_base() == nullptr);
   Zone* zone = thread->zone();
+  auto object_store = thread->isolate_group()->object_store();
   Isolate* isolate = thread->isolate();
+#if !defined(PRODUCT)
+  // Do not notify debugger on stack overflow and out of memory exceptions.
+  // The VM would crash when the debugger calls back into the VM to
+  // get values of variables.
+  if (incoming_exception.ptr() != object_store->out_of_memory() &&
+      incoming_exception.ptr() != object_store->stack_overflow()) {
+    isolate->debugger()->PauseException(incoming_exception);
+  }
+#endif
   bool use_preallocated_stacktrace = false;
-  Instance& exception = Instance::Handle(zone, incoming_exception.raw());
+  Instance& exception = Instance::Handle(zone, incoming_exception.ptr());
   if (exception.IsNull()) {
     exception ^=
         Exceptions::Create(Exceptions::kNullThrown, Object::empty_array());
-  } else if (exception.raw() == isolate->object_store()->out_of_memory() ||
-             exception.raw() == isolate->object_store()->stack_overflow()) {
+  } else if (existing_stacktrace.IsNull() &&
+             (exception.ptr() == object_store->out_of_memory() ||
+              exception.ptr() == object_store->stack_overflow())) {
     use_preallocated_stacktrace = true;
   }
   // Find the exception handler and determine if the handler needs a
@@ -565,28 +730,34 @@ static void ThrowExceptionHelper(Thread* thread,
   if (use_preallocated_stacktrace) {
     if (handler_pc == 0) {
       // No Dart frame.
-      ASSERT(incoming_exception.raw() ==
-             isolate->object_store()->out_of_memory());
+      ASSERT(incoming_exception.ptr() == object_store->out_of_memory());
       const UnhandledException& error = UnhandledException::Handle(
-          zone, isolate->object_store()->preallocated_unhandled_exception());
+          zone,
+          isolate->isolate_object_store()->preallocated_unhandled_exception());
       thread->long_jump_base()->Jump(1, error);
       UNREACHABLE();
     }
-    stacktrace ^= isolate->object_store()->preallocated_stack_trace();
+    stacktrace = isolate->isolate_object_store()->preallocated_stack_trace();
     PreallocatedStackTraceBuilder frame_builder(stacktrace);
     ASSERT(existing_stacktrace.IsNull() ||
-           (existing_stacktrace.raw() == stacktrace.raw()));
+           (existing_stacktrace.ptr() == stacktrace.ptr()));
     ASSERT(existing_stacktrace.IsNull() || is_rethrow);
     if (handler_needs_stacktrace && existing_stacktrace.IsNull()) {
       BuildStackTrace(&frame_builder);
     }
   } else {
     if (!existing_stacktrace.IsNull()) {
-      // If we have an existing stack trace then this better be a rethrow. The
-      // reverse is not necessarily true (e.g. Dart_PropagateError can cause
-      // a rethrow being called without an existing stacktrace.)
-      ASSERT(is_rethrow);
-      stacktrace = existing_stacktrace.raw();
+      stacktrace = existing_stacktrace.ptr();
+      // If this is not a rethrow, it's a "throw with stacktrace".
+      // Set an Error object's stackTrace field if needed.
+      if (!is_rethrow) {
+        const Field& stacktrace_field =
+            Field::Handle(zone, LookupStackTraceField(exception));
+        if (!stacktrace_field.IsNull() &&
+            (exception.GetField(stacktrace_field) == Object::null())) {
+          exception.SetField(stacktrace_field, stacktrace);
+        }
+      }
     } else {
       // Get stacktrace field of class Error to determine whether we have a
       // subclass of Error which carries around its stack trace.
@@ -616,7 +787,7 @@ static void ThrowExceptionHelper(Thread* thread,
     THR_Print("%s\n", stacktrace.ToCString());
   }
   if (handler_exists) {
-    finder.TrySync();
+    finder.PrepareFrameForCatchEntry();
     // Found a dart handler for the exception, jump to it.
     JumpToExceptionHandler(thread, handler_pc, handler_sp, handler_fp,
                            exception, stacktrace);
@@ -627,9 +798,13 @@ static void ThrowExceptionHelper(Thread* thread,
     // object. The C++ code which invoked this dart sequence can check
     // and do the appropriate thing (rethrow the exception to the
     // dart invocation sequence above it, print diagnostics and terminate
-    // the isolate etc.).
+    // the isolate etc.). This can happen in the compiler, which is not
+    // allowed to allocate in new space, so we pass the kOld argument.
     const UnhandledException& unhandled_exception = UnhandledException::Handle(
-        zone, UnhandledException::New(exception, stacktrace));
+        zone, exception.ptr() == object_store->out_of_memory()
+                  ? isolate->isolate_object_store()
+                        ->preallocated_unhandled_exception()
+                  : UnhandledException::New(exception, stacktrace, Heap::kOld));
     stacktrace = StackTrace::null();
     JumpToExceptionHandler(thread, handler_pc, handler_sp, handler_fp,
                            unhandled_exception, stacktrace);
@@ -637,24 +812,26 @@ static void ThrowExceptionHelper(Thread* thread,
   UNREACHABLE();
 }
 
-
 // Static helpers for allocating, initializing, and throwing an error instance.
 
 // Return the script of the Dart function that called the native entry or the
 // runtime entry. The frame iterator points to the callee.
-RawScript* Exceptions::GetCallerScript(DartFrameIterator* iterator) {
+ScriptPtr Exceptions::GetCallerScript(DartFrameIterator* iterator) {
   StackFrame* caller_frame = iterator->NextFrame();
   ASSERT(caller_frame != NULL && caller_frame->IsDartFrame());
   const Function& caller = Function::Handle(caller_frame->LookupDartFunction());
+#if defined(DART_PRECOMPILED_RUNTIME)
+  if (caller.IsNull()) return Script::null();
+#else
   ASSERT(!caller.IsNull());
+#endif
   return caller.script();
 }
-
 
 // Allocate a new instance of the given class name.
 // TODO(hausner): Rename this NewCoreInstance to call out the fact that
 // the class name is resolved in the core library implicitly?
-RawInstance* Exceptions::NewInstance(const char* class_name) {
+InstancePtr Exceptions::NewInstance(const char* class_name) {
   Thread* thread = Thread::Current();
   Zone* zone = thread->zone();
   const String& cls_name =
@@ -667,40 +844,32 @@ RawInstance* Exceptions::NewInstance(const char* class_name) {
   return Instance::New(cls);
 }
 
-
 // Allocate, initialize, and throw a TypeError or CastError.
 // If error_msg is not null, throw a TypeError, even for a type cast.
 void Exceptions::CreateAndThrowTypeError(TokenPosition location,
                                          const AbstractType& src_type,
                                          const AbstractType& dst_type,
-                                         const String& dst_name,
-                                         const String& bound_error_msg) {
+                                         const String& dst_name) {
   ASSERT(!dst_name.IsNull());  // Pass Symbols::Empty() instead.
   Thread* thread = Thread::Current();
   Zone* zone = thread->zone();
   const Array& args = Array::Handle(zone, Array::New(4));
 
   ExceptionType exception_type =
-      (bound_error_msg.IsNull() &&
-       (dst_name.raw() == Symbols::InTypeCast().raw()))
-          ? kCast
-          : kType;
+      (dst_name.ptr() == Symbols::InTypeCast().ptr()) ? kCast : kType;
 
   DartFrameIterator iterator(thread,
                              StackFrameIterator::kNoCrossThreadIteration);
   const Script& script = Script::Handle(zone, GetCallerScript(&iterator));
+  const String& url = String::Handle(
+      zone, script.IsNull() ? Symbols::OptimizedOut().ptr() : script.url());
   intptr_t line = -1;
   intptr_t column = -1;
-  ASSERT(!script.IsNull());
-  if (location.IsReal()) {
-    if (script.HasSource() || script.kind() == RawScript::kKernelTag) {
-      script.GetTokenLocation(location, &line, &column);
-    } else {
-      script.GetTokenLocation(location, &line, NULL);
-    }
+  if (!script.IsNull()) {
+    script.GetTokenLocation(location, &line, &column);
   }
   // Initialize '_url', '_line', and '_column' arguments.
-  args.SetAt(0, String::Handle(zone, script.url()));
+  args.SetAt(0, url);
   args.SetAt(1, Smi::Handle(zone, Smi::New(line)));
   args.SetAt(2, Smi::Handle(zone, Smi::New(column)));
 
@@ -708,60 +877,41 @@ void Exceptions::CreateAndThrowTypeError(TokenPosition location,
   const GrowableObjectArray& pieces =
       GrowableObjectArray::Handle(zone, GrowableObjectArray::New(20));
 
-  // Print bound error first, if any.
-  if (!bound_error_msg.IsNull() && (bound_error_msg.Length() > 0)) {
-    pieces.Add(bound_error_msg);
-    pieces.Add(Symbols::NewLine());
-  }
-
-  // If dst_type is malformed or malbounded, only print the embedded error.
   if (!dst_type.IsNull()) {
-    const LanguageError& error = LanguageError::Handle(zone, dst_type.error());
-    if (!error.IsNull()) {
-      // Print the embedded error only.
-      pieces.Add(String::Handle(zone, String::New(error.ToErrorCString())));
-      pieces.Add(Symbols::NewLine());
-    } else {
-      // Describe the type error.
-      if (!src_type.IsNull()) {
-        pieces.Add(Symbols::TypeQuote());
-        pieces.Add(String::Handle(zone, src_type.UserVisibleName()));
-        pieces.Add(Symbols::QuoteIsNotASubtypeOf());
-      }
+    // Describe the type error.
+    if (!src_type.IsNull()) {
       pieces.Add(Symbols::TypeQuote());
-      pieces.Add(String::Handle(zone, dst_type.UserVisibleName()));
+      pieces.Add(String::Handle(zone, src_type.UserVisibleName()));
+      pieces.Add(Symbols::QuoteIsNotASubtypeOf());
+    }
+    pieces.Add(Symbols::TypeQuote());
+    pieces.Add(String::Handle(zone, dst_type.UserVisibleName()));
+    pieces.Add(Symbols::SingleQuote());
+    if (exception_type == kCast) {
+      pieces.Add(dst_name);
+    } else if (dst_name.Length() > 0) {
+      pieces.Add(Symbols::SpaceOfSpace());
       pieces.Add(Symbols::SingleQuote());
-      if (exception_type == kCast) {
-        pieces.Add(dst_name);
-      } else if (dst_name.Length() > 0) {
-        pieces.Add(Symbols::SpaceOfSpace());
-        pieces.Add(Symbols::SingleQuote());
-        pieces.Add(dst_name);
-        pieces.Add(Symbols::SingleQuote());
-      }
-      // Print URIs of src and dst types.
-      // Do not print "where" when no URIs get printed.
-      bool printed_where = false;
-      if (!src_type.IsNull()) {
-        const String& uris = String::Handle(zone, src_type.EnumerateURIs());
-        if (uris.Length() > Symbols::SpaceIsFromSpace().Length()) {
-          printed_where = true;
-          pieces.Add(Symbols::SpaceWhereNewLine());
-          pieces.Add(uris);
-        }
-      }
-      if (!dst_type.IsDynamicType() && !dst_type.IsVoidType()) {
-        const String& uris = String::Handle(zone, dst_type.EnumerateURIs());
-        if (uris.Length() > Symbols::SpaceIsFromSpace().Length()) {
-          if (!printed_where) {
-            pieces.Add(Symbols::SpaceWhereNewLine());
-          }
-          pieces.Add(uris);
-        }
-      }
+      pieces.Add(dst_name);
+      pieces.Add(Symbols::SingleQuote());
+    }
+    // Print ambiguous URIs of src and dst types.
+    URIs uris(zone, 12);
+    if (!src_type.IsNull()) {
+      src_type.EnumerateURIs(&uris);
+    }
+    if (!dst_type.IsDynamicType() && !dst_type.IsVoidType() &&
+        !dst_type.IsNeverType()) {
+      dst_type.EnumerateURIs(&uris);
+    }
+    const String& formatted_uris =
+        String::Handle(zone, AbstractType::PrintURIs(&uris));
+    if (formatted_uris.Length() > 0) {
+      pieces.Add(Symbols::SpaceWhereNewLine());
+      pieces.Add(formatted_uris);
     }
   }
-  const Array& arr = Array::Handle(zone, Array::MakeArray(pieces));
+  const Array& arr = Array::Handle(zone, Array::MakeFixedLength(pieces));
   const String& error_msg = String::Handle(zone, String::ConcatAll(arr));
   args.SetAt(3, error_msg);
 
@@ -778,23 +928,11 @@ void Exceptions::CreateAndThrowTypeError(TokenPosition location,
   UNREACHABLE();
 }
 
-
 void Exceptions::Throw(Thread* thread, const Instance& exception) {
-  // Do not notify debugger on stack overflow and out of memory exceptions.
-  // The VM would crash when the debugger calls back into the VM to
-  // get values of variables.
-  if (FLAG_support_debugger) {
-    Isolate* isolate = thread->isolate();
-    if (exception.raw() != isolate->object_store()->out_of_memory() &&
-        exception.raw() != isolate->object_store()->stack_overflow()) {
-      isolate->debugger()->PauseException(exception);
-    }
-  }
   // Null object is a valid exception object.
   ThrowExceptionHelper(thread, exception, StackTrace::Handle(thread->zone()),
                        false);
 }
-
 
 void Exceptions::ReThrow(Thread* thread,
                          const Instance& exception,
@@ -803,11 +941,21 @@ void Exceptions::ReThrow(Thread* thread,
   ThrowExceptionHelper(thread, exception, stacktrace, true);
 }
 
+void Exceptions::ThrowWithStackTrace(Thread* thread,
+                                     const Instance& exception,
+                                     const Instance& stacktrace) {
+  // Null object is a valid exception object.
+  ThrowExceptionHelper(thread, exception, stacktrace, false);
+}
 
 void Exceptions::PropagateError(const Error& error) {
+  ASSERT(!error.IsNull());
   Thread* thread = Thread::Current();
+  // SuspendLongJumpScope during Dart entry ensures that if a longjmp base is
+  // available, it is the innermost error handler. If one is available, so
+  // should jump there instead.
+  RELEASE_ASSERT(thread->long_jump_base() == nullptr);
   Zone* zone = thread->zone();
-  ASSERT(thread->top_exit_frame_info() != 0);
   if (error.IsUnhandledException()) {
     // If the error object represents an unhandled exception, then
     // rethrow the exception in the normal fashion.
@@ -829,6 +977,25 @@ void Exceptions::PropagateError(const Error& error) {
   UNREACHABLE();
 }
 
+void Exceptions::PropagateToEntry(const Error& error) {
+  Thread* thread = Thread::Current();
+  Zone* zone = thread->zone();
+  ASSERT(thread->top_exit_frame_info() != 0);
+  Instance& stacktrace = Instance::Handle(zone);
+  if (error.IsUnhandledException()) {
+    const UnhandledException& uhe = UnhandledException::Cast(error);
+    stacktrace = uhe.stacktrace();
+  } else {
+    stacktrace = Exceptions::CurrentStackTrace();
+  }
+  uword handler_pc = 0;
+  uword handler_sp = 0;
+  uword handler_fp = 0;
+  FindErrorHandler(&handler_pc, &handler_sp, &handler_fp);
+  JumpToExceptionHandler(thread, handler_pc, handler_sp, handler_fp, error,
+                         stacktrace);
+  UNREACHABLE();
+}
 
 void Exceptions::ThrowByType(ExceptionType type, const Array& arguments) {
   Thread* thread = Thread::Current();
@@ -844,31 +1011,27 @@ void Exceptions::ThrowByType(ExceptionType type, const Array& arguments) {
   }
 }
 
-
 void Exceptions::ThrowOOM() {
-  Thread* thread = Thread::Current();
-  Isolate* isolate = thread->isolate();
+  auto thread = Thread::Current();
+  auto isolate_group = thread->isolate_group();
   const Instance& oom = Instance::Handle(
-      thread->zone(), isolate->object_store()->out_of_memory());
+      thread->zone(), isolate_group->object_store()->out_of_memory());
   Throw(thread, oom);
 }
 
-
 void Exceptions::ThrowStackOverflow() {
-  Thread* thread = Thread::Current();
-  Isolate* isolate = thread->isolate();
+  auto thread = Thread::Current();
+  auto isolate_group = thread->isolate_group();
   const Instance& stack_overflow = Instance::Handle(
-      thread->zone(), isolate->object_store()->stack_overflow());
+      thread->zone(), isolate_group->object_store()->stack_overflow());
   Throw(thread, stack_overflow);
 }
-
 
 void Exceptions::ThrowArgumentError(const Instance& arg) {
   const Array& args = Array::Handle(Array::New(1));
   args.SetAt(0, arg);
   Exceptions::ThrowByType(Exceptions::kArgument, args);
 }
-
 
 void Exceptions::ThrowRangeError(const char* argument_name,
                                  const Integer& argument_value,
@@ -882,13 +1045,11 @@ void Exceptions::ThrowRangeError(const char* argument_name,
   Exceptions::ThrowByType(Exceptions::kRange, args);
 }
 
-
-void Exceptions::ThrowRangeErrorMsg(const char* msg) {
+void Exceptions::ThrowUnsupportedError(const char* msg) {
   const Array& args = Array::Handle(Array::New(1));
   args.SetAt(0, String::Handle(String::New(msg)));
-  Exceptions::ThrowByType(Exceptions::kRangeMsg, args);
+  Exceptions::ThrowByType(Exceptions::kUnsupported, args);
 }
-
 
 void Exceptions::ThrowCompileTimeError(const LanguageError& error) {
   const Array& args = Array::Handle(Array::New(1));
@@ -896,8 +1057,21 @@ void Exceptions::ThrowCompileTimeError(const LanguageError& error) {
   Exceptions::ThrowByType(Exceptions::kCompileTimeError, args);
 }
 
+void Exceptions::ThrowLateFieldNotInitialized(const String& name) {
+  const Array& args = Array::Handle(Array::New(1));
+  args.SetAt(0, name);
+  Exceptions::ThrowByType(Exceptions::kLateFieldNotInitialized, args);
+}
 
-RawObject* Exceptions::Create(ExceptionType type, const Array& arguments) {
+void Exceptions::ThrowLateFieldAssignedDuringInitialization(
+    const String& name) {
+  const Array& args = Array::Handle(Array::New(1));
+  args.SetAt(0, name);
+  Exceptions::ThrowByType(Exceptions::kLateFieldAssignedDuringInitialization,
+                          args);
+}
+
+ObjectPtr Exceptions::Create(ExceptionType type, const Array& arguments) {
   Library& library = Library::Handle();
   const String* class_name = NULL;
   const String* constructor_name = &Symbols::Dot();
@@ -925,6 +1099,10 @@ RawObject* Exceptions::Create(ExceptionType type, const Array& arguments) {
       library = Library::CoreLibrary();
       class_name = &Symbols::ArgumentError();
       constructor_name = &Symbols::DotValue();
+      break;
+    case kIntegerDivisionByZeroException:
+      library = Library::CoreLibrary();
+      class_name = &Symbols::IntegerDivisionByZeroException();
       break;
     case kNoSuchMethod:
       library = Library::CoreLibrary();
@@ -980,13 +1158,32 @@ RawObject* Exceptions::Create(ExceptionType type, const Array& arguments) {
       library = Library::CoreLibrary();
       class_name = &Symbols::_CompileTimeError();
       break;
+    case kLateFieldAssignedDuringInitialization:
+      library = Library::InternalLibrary();
+      class_name = &Symbols::LateError();
+      constructor_name = &Symbols::DotFieldADI();
+      break;
+    case kLateFieldNotInitialized:
+      library = Library::InternalLibrary();
+      class_name = &Symbols::LateError();
+      constructor_name = &Symbols::DotFieldNI();
+      break;
   }
 
-  Thread* thread = Thread::Current();
-  NoReloadScope no_reload_scope(thread->isolate(), thread);
   return DartLibraryCalls::InstanceCreate(library, *class_name,
                                           *constructor_name, arguments);
 }
 
+UnhandledExceptionPtr Exceptions::CreateUnhandledException(Zone* zone,
+                                                           ExceptionType type,
+                                                           const char* msg) {
+  const String& error_str = String::Handle(zone, String::New(msg));
+  const Array& args = Array::Handle(zone, Array::New(1));
+  args.SetAt(0, error_str);
+
+  Object& result = Object::Handle(zone, Exceptions::Create(type, args));
+  const StackTrace& stacktrace = StackTrace::Handle(zone);
+  return UnhandledException::New(Instance::Cast(result), stacktrace);
+}
 
 }  // namespace dart

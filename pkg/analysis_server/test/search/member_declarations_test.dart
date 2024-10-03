@@ -1,10 +1,7 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
-
-import 'package:analysis_server/protocol/protocol.dart';
 import 'package:analysis_server/protocol/protocol_generated.dart';
 import 'package:analyzer_plugin/protocol/protocol_common.dart';
 import 'package:test/test.dart';
@@ -12,7 +9,7 @@ import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'abstract_search_domain.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(MemberDeclarationsTest);
   });
@@ -21,26 +18,26 @@ main() {
 @reflectiveTest
 class MemberDeclarationsTest extends AbstractSearchDomainTest {
   void assertHasDeclaration(ElementKind kind, String className) {
-    result = findTopLevelResult(kind, className);
+    var result = findTopLevelResult(kind, className);
     if (result == null) {
       fail('Not found: kind=$kind in="$className"\nin\n' + results.join('\n'));
     }
+    this.result = result;
   }
 
   Future findMemberDeclarations(String name) async {
     await waitForTasksFinished();
-    Request request =
-        new SearchFindMemberDeclarationsParams(name).toRequest('0');
-    Response response = await waitResponse(request);
-    var result = new SearchFindMemberDeclarationsResult.fromResponse(response);
+    var request = SearchFindMemberDeclarationsParams(name).toRequest('0');
+    var response = await waitResponse(request);
+    var result = SearchFindMemberDeclarationsResult.fromResponse(response);
     searchId = result.id;
     return waitForSearchResults();
   }
 
-  SearchResult findTopLevelResult(ElementKind kind, String enclosingClass) {
-    for (SearchResult result in results) {
-      Element element = result.path[0];
-      Element clazz = result.path[1];
+  SearchResult? findTopLevelResult(ElementKind kind, String enclosingClass) {
+    for (var result in results) {
+      var element = result.path[0];
+      var clazz = result.path[1];
       if (element.kind == kind && clazz.name == enclosingClass) {
         return result;
       }
@@ -48,7 +45,7 @@ class MemberDeclarationsTest extends AbstractSearchDomainTest {
     return null;
   }
 
-  test_localVariable() async {
+  Future<void> test_localVariable() async {
     addTestFile('''
 class A {
   main() {
@@ -60,7 +57,7 @@ class A {
     expect(results, isEmpty);
   }
 
-  test_localVariable_forIn() async {
+  Future<void> test_localVariable_forIn() async {
     addTestFile('''
 class A {
   main() {
@@ -73,7 +70,7 @@ class A {
     expect(results, isEmpty);
   }
 
-  test_methodField() async {
+  Future<void> test_methodField() async {
     addTestFile('''
 class A {
   foo() {}
@@ -89,7 +86,7 @@ class B {
     assertHasDeclaration(ElementKind.FIELD, 'B');
   }
 
-  test_methodGetter() async {
+  Future<void> test_methodGetter() async {
     addTestFile('''
 class A {
   foo() {}
@@ -105,7 +102,7 @@ class B {
     assertHasDeclaration(ElementKind.GETTER, 'B');
   }
 
-  test_methodGetterSetter() async {
+  Future<void> test_methodGetterSetter() async {
     addTestFile('''
 class A {
   foo() {}
@@ -123,7 +120,7 @@ class B {
     assertHasDeclaration(ElementKind.SETTER, 'B');
   }
 
-  test_methodMethod() async {
+  Future<void> test_methodMethod() async {
     addTestFile('''
 class A {
   foo() {}
@@ -139,7 +136,7 @@ class B {
     assertHasDeclaration(ElementKind.METHOD, 'B');
   }
 
-  test_methodSetter() async {
+  Future<void> test_methodSetter() async {
     addTestFile('''
 class A {
   foo() {}

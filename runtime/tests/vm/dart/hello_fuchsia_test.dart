@@ -73,7 +73,7 @@ testSimpleReadWriteClose() async {
     int bytesRead = 0;
     int bytesWritten = 0;
     bool closedEventReceived = false;
-    List<int> data = new List<int>(messageSize);
+    List<int> data = new List<int>.filled(messageSize, -1);
     bool doneReading = false;
 
     client.writeEventsEnabled = false;
@@ -86,7 +86,7 @@ testSimpleReadWriteClose() async {
           print("client READ event bytesRead = $bytesRead");
           assert(bytesWritten == 0);
           assert(client.available() > 0);
-          var buffer = client.read(200);
+          var buffer = client.read(200)!;
           print("client READ event: read ${buffer.length} more bytes");
           data.setRange(bytesRead, bytesRead + buffer.length, buffer);
           bytesRead += buffer.length;
@@ -142,7 +142,7 @@ testSimpleReadWriteClose() async {
         case RawSocketEvent.READ:
           assert(socket.available() > 0);
           print("server READ event: ${bytesRead} read");
-          var buffer = socket.read();
+          var buffer = socket.read()!;
           print("server READ event: read ${buffer.length} more bytes");
           data.setRange(bytesRead, bytesRead + buffer.length, buffer);
           bytesRead += buffer.length;
@@ -161,7 +161,7 @@ testSimpleReadWriteClose() async {
             socket.writeEventsEnabled = true;
           } else {
             print("server WRITE event: done writing");
-            data = new List<int>(messageSize);
+            data = new List<int>.filled(messageSize, -1);
           }
           break;
         case RawSocketEvent.READ_CLOSED:
@@ -188,7 +188,7 @@ testSimpleReadWriteClose() async {
   }
 }
 
-testSimpleReadWriteShutdown({bool dropReads}) async {
+testSimpleReadWriteShutdown({required bool dropReads}) async {
   // This test creates a server and a client connects. The client then
   // writes and the server echos. When the server has finished its
   // echo it half-closes. When the client gets the close event is
@@ -215,7 +215,7 @@ testSimpleReadWriteShutdown({bool dropReads}) async {
     int bytesRead = 0;
     int bytesWritten = 0;
     bool closedEventReceived = false;
-    List<int> data = new List<int>(messageSize);
+    List<int> data = new List<int>.filled(messageSize, -1);
     bool doneReading = false;
 
     client.writeEventsEnabled = false;
@@ -236,7 +236,7 @@ testSimpleReadWriteShutdown({bool dropReads}) async {
           print("client READ event bytesRead = $bytesRead");
           assert(bytesWritten == 0);
           assert(client.available() > 0);
-          var buffer = client.read(200);
+          var buffer = client.read(200)!;
           print("client READ event: read ${buffer.length} more bytes");
           data.setRange(bytesRead, bytesRead + buffer.length, buffer);
           bytesRead += buffer.length;
@@ -298,7 +298,7 @@ testSimpleReadWriteShutdown({bool dropReads}) async {
             }
           }
           print("server READ event: ${bytesRead} read");
-          var buffer = socket.read();
+          var buffer = socket.read()!;
           print("server READ event: read ${buffer.length} more bytes");
           data.setRange(bytesRead, bytesRead + buffer.length, buffer);
           bytesRead += buffer.length;
@@ -313,7 +313,7 @@ testSimpleReadWriteShutdown({bool dropReads}) async {
             socket.writeEventsEnabled = true;
           } else {
             print("server WRITE event: done writing");
-            data = new List<int>(messageSize);
+            data = new List<int>.filled(messageSize, -1);
           }
           break;
         case RawSocketEvent.READ_CLOSED:
@@ -338,62 +338,11 @@ testSimpleReadWriteShutdown({bool dropReads}) async {
   }
 }
 
-Future testGoogleHttp(SecurityContext context, String outcome) async {
-  var client = new HttpClient(context: context);
-  try {
-    // First, check if the lookup works.
-    var address = await InternetAddress.lookup('www.google.com');
-    print(address);
-    var request = await client.getUrl(Uri.parse('http://www.google.com/'));
-    request.followRedirects = false;
-    var response = await request.close();
-    assert('pass' == outcome);
-    try {
-      await response.drain();
-    } catch (e) {
-      print('drain failed: $e');
-    }
-  } catch (e) {
-    // Lookup failed or connection failed.  Don't report a failure.
-    print("SocketException: $e");
-  } finally {
-    client.close();
-  }
-}
-
-Future testGoogleHttps(SecurityContext context, String outcome) async {
-  // If this isn't reasonable, the certificate will be rejected.
-  print(new DateTime.now());
-
-  var client = new HttpClient(context: context);
-  // We need to use an external server that is backed by a
-  // built-in root certificate authority.
-  try {
-    // First, check if the lookup works.
-    var address = await InternetAddress.lookup('www.google.com');
-    print(address);
-    var request = await client.getUrl(Uri.parse('https://www.google.com/'));
-    request.followRedirects = false;
-    var response = await request.close();
-    assert('pass' == outcome);
-    try {
-      await response.drain();
-    } catch (e) {
-      print('drain failed: $e');
-    }
-  } catch (e) {
-    // Lookup failed or connection failed.  Don't report a failure.
-    print("SocketException: $e");
-  } finally {
-    client.close();
-  }
-}
-
 Future testProcess() async {
   String exe = Platform.resolvedExecutable;
   print("Running $exe --version");
   Process p = await Process.start(exe, ["--version"]);
-  p.stderr.transform(UTF8.decoder).listen(print);
+  p.stderr.transform(utf8.decoder).listen(print);
   int code = await p.exitCode;
   print("$exe --version exited with code $code");
 }
@@ -428,7 +377,7 @@ Future testLs(String path) async {
 void testPlatformEnvironment() {
   Map<String, String> env = Platform.environment;
   for (String k in env.keys) {
-    String v = env[k];
+    String v = env[k]!;
     print("$k = '$v'");
   }
 }
@@ -482,7 +431,16 @@ bool testFileOpenDirectoryFails() {
     return true;
   } catch (e) {
     print("Unexpected Exception: $e");
-    return false;
+  }
+  return false;
+}
+
+
+Future testListInterfaces() async {
+  List<NetworkInterface> interfaces = await NetworkInterface.list();
+  print('Found ${interfaces.length} interfaces:');
+  for (var iface in interfaces) {
+    print('\t$iface');
   }
 }
 
@@ -514,14 +472,6 @@ main(List<String> args) async {
   print("testSimpleReadWriteShutdown");
   await testSimpleReadWriteShutdown(dropReads: false);
   print("testSimpleReadWriteShutdown done");
-
-  print("testGoogleHttp");
-  await testGoogleHttp(null, 'pass');
-  print("testGoogleHttp done");
-
-  print("testGoogleHttps");
-  await testGoogleHttps(null, 'pass');
-  print("testGoogleHttps done");
 
   print("lsTest");
   await testLs("/");
@@ -558,6 +508,10 @@ main(List<String> args) async {
   } else {
     print("testFileOpenDirectoryFails FAILED");
   }
+
+  print('testListInterfaces');
+  await testListInterfaces();
+  print('testListInterfaces done');
 
   print("Goodbyte, Fuchsia!");
 }

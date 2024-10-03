@@ -16,13 +16,12 @@
 #error Do not include simulator_arm64.h directly; use simulator.h.
 #endif
 
-#include "vm/constants_arm64.h"
+#include "vm/constants.h"
 
 namespace dart {
 
 class Isolate;
 class Mutex;
-class RawObject;
 class SimulatorSetjmpBuffer;
 class Thread;
 
@@ -69,25 +68,22 @@ class Simulator {
 
   int64_t get_sp() const { return get_register(SPREG); }
 
-  int64_t get_pc() const;
-  int64_t get_last_pc() const;
-  void set_pc(int64_t pc);
+  uint64_t get_pc() const;
+  uint64_t get_last_pc() const;
+  void set_pc(uint64_t pc);
 
-  // Accessors to the internal simulator stack base and top.
-  uword StackBase() const { return reinterpret_cast<uword>(stack_); }
-  uword StackTop() const;
+  // High address.
+  uword stack_base() const { return stack_base_; }
+  // Limit for StackOverflowError.
+  uword overflow_stack_limit() const { return overflow_stack_limit_; }
+  // Low address.
+  uword stack_limit() const { return stack_limit_; }
 
   // Accessor to the instruction counter.
   uint64_t get_icount() const { return icount_; }
 
-  // The thread's top_exit_frame_info refers to a Dart frame in the simulator
-  // stack. The simulator's top_exit_frame_info refers to a C++ frame in the
-  // native stack.
-  uword top_exit_frame_info() const { return top_exit_frame_info_; }
-  void set_top_exit_frame_info(uword value) { top_exit_frame_info_ = value; }
-
   // Call on program start.
-  static void InitOnce();
+  static void Init();
 
   // Dart generally calls into generated code with 4 parameters. This is a
   // convenience function, which sets up the simulator state and grabs the
@@ -101,22 +97,12 @@ class Simulator {
                bool fp_return = false,
                bool fp_args = false);
 
-  // Implementation of atomic compare and exchange in the same synchronization
-  // domain as other synchronization primitive instructions (e.g. ldrex, strex).
-  static uword CompareExchange(uword* address,
-                               uword compare_value,
-                               uword new_value);
-  static uint32_t CompareExchangeUint32(uint32_t* address,
-                                        uint32_t compare_value,
-                                        uint32_t new_value);
-
   // Runtime and native call support.
   enum CallKind {
     kRuntimeCall,
     kLeafRuntimeCall,
     kLeafFloatRuntimeCall,
-    kBootstrapNativeCall,
-    kNativeCall
+    kNativeCallWrapper
   };
   static uword RedirectExternalReference(uword function,
                                          CallKind call_kind,
@@ -149,11 +135,13 @@ class Simulator {
   int64_t last_pc_;
   int64_t pc_;
   char* stack_;
+  uword stack_limit_;
+  uword overflow_stack_limit_;
+  uword stack_base_;
   bool pc_modified_;
   uint64_t icount_;
   static int64_t flag_stop_sim_at_;
   SimulatorSetjmpBuffer* last_setjmp_buffer_;
-  uword top_exit_frame_info_;
 
   // Registered breakpoints.
   Instr* break_pc_;
@@ -180,43 +168,36 @@ class Simulator {
   inline int16_t ReadH(uword addr, Instr* instr);
   inline void WriteH(uword addr, uint16_t value, Instr* instr);
 
-  inline uint32_t ReadWU(uword addr, Instr* instr);
+  inline uint32_t ReadWU(uword addr,
+                         Instr* instr,
+                         bool must_be_aligned = false);
   inline int32_t ReadW(uword addr, Instr* instr);
   inline void WriteW(uword addr, uint32_t value, Instr* instr);
 
-  inline intptr_t ReadX(uword addr, Instr* instr);
+  inline intptr_t ReadX(uword addr, Instr* instr, bool must_be_aligned = false);
   inline void WriteX(uword addr, intptr_t value, Instr* instr);
-
-  // We keep track of 16 exclusive access address tags across all threads.
-  // Since we cannot simulate a native context switch, which clears
-  // the exclusive access state of the local monitor (using the CLREX
-  // instruction), we associate the thread requesting exclusive access to the
-  // address tag. Multiple threads requesting exclusive access (using the LDREX
-  // instruction) to the same address will result in multiple address tags being
-  // created for the same address, one per thread.
-  // At any given time, each thread is associated to at most one address tag.
-  static Mutex* exclusive_access_lock_;
-  static const int kNumAddressTags = 16;
-  static struct AddressTag {
-    Thread* thread;
-    uword addr;
-  } exclusive_access_state_[kNumAddressTags];
-  static int next_address_tag_;
 
   // Synchronization primitives support.
   void ClearExclusive();
   intptr_t ReadExclusiveX(uword addr, Instr* instr);
   intptr_t WriteExclusiveX(uword addr, intptr_t value, Instr* instr);
+  // 32 bit versions.
+  intptr_t ReadExclusiveW(uword addr, Instr* instr);
+  intptr_t WriteExclusiveW(uword addr, intptr_t value, Instr* instr);
 
-  // Set access to given address to 'exclusive state' for current thread.
-  static void SetExclusiveAccess(uword addr);
+  // Load Acquire & Store Release.
+  intptr_t ReadAcquire(uword addr, Instr* instr);
+  uint32_t ReadAcquireW(uword addr, Instr* instr);
+  void WriteRelease(uword addr, intptr_t value, Instr* instr);
+  void WriteReleaseW(uword addr, uint32_t value, Instr* instr);
 
-  // Returns true if the current thread has exclusive access to given address,
-  // returns false otherwise. In either case, set access to given address to
-  // 'open state' for all threads.
-  // If given addr is NULL, set access to 'open state' for current
-  // thread (CLREX).
-  static bool HasExclusiveAccessAndOpen(uword addr);
+  // Exclusive access reservation: address and value observed during
+  // load-exclusive. Store-exclusive verifies that address is the same and
+  // performs atomic compare-and-swap with remembered value to observe value
+  // changes. This implementation of ldxr/stxr instructions does not detect
+  // ABA situation and our uses of ldxr/stxr don't need this detection.
+  uword exclusive_access_addr_;
+  uword exclusive_access_value_;
 
   // Helper functions to set the conditional flags in the architecture state.
   void SetNZFlagsW(int32_t val);

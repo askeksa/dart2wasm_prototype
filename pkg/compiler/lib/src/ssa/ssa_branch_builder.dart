@@ -3,10 +3,10 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../common.dart';
+import '../inferrer/abstract_value_domain.dart';
 import '../io/source_information.dart';
-import '../tree/tree.dart' as ast;
 
-import 'graph_builder.dart';
+import 'builder_kernel.dart';
 import 'locals_handler.dart';
 import 'nodes.dart';
 
@@ -17,19 +17,21 @@ class SsaBranch {
   LocalsHandler exitLocals;
   SubGraph graph;
 
-  SsaBranch(this.branchBuilder) : block = new HBasicBlock();
+  SsaBranch(this.branchBuilder) : block = HBasicBlock();
 }
 
 class SsaBranchBuilder {
-  final GraphBuilder builder;
-  final ast.Node diagnosticNode;
+  final KernelSsaGraphBuilder builder;
+  final Spannable diagnosticNode;
 
   SsaBranchBuilder(this.builder, [this.diagnosticNode]);
 
+  AbstractValueDomain get _abstractValueDomain =>
+      builder.closedWorld.abstractValueDomain;
+
   void checkNotAborted() {
     if (builder.isAborted()) {
-      throw new SpannableAssertionFailure(
-          diagnosticNode, "aborted control flow");
+      failedAt(diagnosticNode, "aborted control flow");
     }
   }
 
@@ -44,7 +46,8 @@ class SsaBranchBuilder {
     checkNotAborted();
     assert(identical(builder.current, builder.lastOpenedBlock));
     HInstruction conditionValue = builder.popBoolified();
-    HIf branch = new HIf(conditionValue)..sourceInformation = sourceInformation;
+    HIf branch = HIf(_abstractValueDomain, conditionValue)
+      ..sourceInformation = sourceInformation;
     HBasicBlock conditionExitBlock = builder.current;
     builder.close(branch);
     conditionBranch.exitLocals = builder.localsHandler;
@@ -56,13 +59,11 @@ class SsaBranchBuilder {
         mayReuseFromLocals: conditionBranchLocalsCanBeReused);
 
     conditionBranch.graph =
-        new SubExpression(conditionBranch.block, conditionExitBlock);
+        SubExpression(conditionBranch.block, conditionExitBlock);
   }
 
-  /**
-   * Returns true if the locals of the [fromBranch] may be reused. A [:true:]
-   * return value implies that [mayReuseFromLocals] was set to [:true:].
-   */
+  /// Returns true if the locals of the [fromBranch] may be reused. A [:true:]
+  /// return value implies that [mayReuseFromLocals] was set to [:true:].
   bool mergeLocals(SsaBranch fromBranch, SsaBranch toBranch,
       {bool mayReuseFromLocals}) {
     LocalsHandler fromLocals = fromBranch.exitLocals;
@@ -71,7 +72,7 @@ class SsaBranchBuilder {
         toBranch.startLocals = fromLocals;
         return false;
       } else {
-        toBranch.startLocals = new LocalsHandler.from(fromLocals);
+        toBranch.startLocals = LocalsHandler.from(fromLocals);
         return true;
       }
     } else {
@@ -90,7 +91,7 @@ class SsaBranchBuilder {
       SsaBranch joinBranch, bool isExpression) {
     startBranch(branch);
     visitBranch();
-    branch.graph = new SubGraph(branch.block, builder.lastOpenedBlock);
+    branch.graph = SubGraph(branch.block, builder.lastOpenedBlock);
     branch.exitLocals = builder.localsHandler;
     if (!builder.isAborted()) {
       builder.goto(builder.current, joinBranch.block);
@@ -151,7 +152,9 @@ class SsaBranchBuilder {
   ///       t1 = boolify(y);
   ///     }
   ///     result = phi(t1, true);
-  void handleLogicalBinary(void left(), void right(), {bool isAnd}) {
+  void handleLogicalBinary(
+      void left(), void right(), SourceInformation sourceInformation,
+      {bool isAnd}) {
     HInstruction boolifiedLeft;
     HInstruction boolifiedRight;
 
@@ -160,7 +163,8 @@ class SsaBranchBuilder {
       boolifiedLeft = builder.popBoolified();
       builder.stack.add(boolifiedLeft);
       if (!isAnd) {
-        builder.push(new HNot(builder.pop(), builder.commonMasks.boolType));
+        builder.push(HNot(builder.pop(), _abstractValueDomain.boolType)
+          ..sourceInformation = sourceInformation);
       }
     }
 
@@ -169,13 +173,13 @@ class SsaBranchBuilder {
       boolifiedRight = builder.popBoolified();
     }
 
-    handleIf(visitCondition, visitThen, null);
+    handleIf(visitCondition, visitThen, null,
+        sourceInformation: sourceInformation);
     HConstant notIsAnd =
         builder.graph.addConstantBool(!isAnd, builder.closedWorld);
-    HPhi result = new HPhi.manyInputs(
-        null,
-        <HInstruction>[boolifiedRight, notIsAnd],
-        builder.commonMasks.dynamicType);
+    HPhi result = HPhi.manyInputs(
+        null, [boolifiedRight, notIsAnd], _abstractValueDomain.dynamicType)
+      ..sourceInformation = sourceInformation;
     builder.current.addPhi(result);
     builder.stack.add(result);
   }
@@ -183,10 +187,10 @@ class SsaBranchBuilder {
   void _handleDiamondBranch(
       void visitCondition(), void visitThen(), void visitElse(),
       {bool isExpression, SourceInformation sourceInformation}) {
-    SsaBranch conditionBranch = new SsaBranch(this);
-    SsaBranch thenBranch = new SsaBranch(this);
-    SsaBranch elseBranch = new SsaBranch(this);
-    SsaBranch joinBranch = new SsaBranch(this);
+    SsaBranch conditionBranch = SsaBranch(this);
+    SsaBranch thenBranch = SsaBranch(this);
+    SsaBranch elseBranch = SsaBranch(this);
+    SsaBranch joinBranch = SsaBranch(this);
 
     conditionBranch.startLocals = builder.localsHandler;
     builder.goto(builder.current, conditionBranch.block);
@@ -200,8 +204,8 @@ class SsaBranchBuilder {
 
     if (isExpression) {
       assert(thenValue != null && elseValue != null);
-      HPhi phi = new HPhi.manyInputs(null, <HInstruction>[thenValue, elseValue],
-          builder.commonMasks.dynamicType);
+      HPhi phi = HPhi.manyInputs(
+          null, [thenValue, elseValue], _abstractValueDomain.dynamicType);
       joinBranch.block.addPhi(phi);
       builder.stack.add(phi);
     }
@@ -213,10 +217,10 @@ class SsaBranchBuilder {
       joinBlock = joinBranch.block;
     }
 
-    HIfBlockInformation info = new HIfBlockInformation(
-        new HSubExpressionBlockInformation(conditionBranch.graph),
-        new HSubGraphBlockInformation(thenBranch.graph),
-        new HSubGraphBlockInformation(elseBranch.graph));
+    HIfBlockInformation info = HIfBlockInformation(
+        HSubExpressionBlockInformation(conditionBranch.graph),
+        HSubGraphBlockInformation(thenBranch.graph),
+        HSubGraphBlockInformation(elseBranch.graph));
 
     HBasicBlock conditionStartBlock = conditionBranch.block;
     conditionStartBlock.setBlockFlow(info, joinBlock);

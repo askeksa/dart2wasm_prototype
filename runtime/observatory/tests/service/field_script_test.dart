@@ -5,7 +5,7 @@
 library field_script_test;
 
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'test_helper.dart';
 import 'service_test_common.dart';
 
@@ -15,16 +15,16 @@ code() {
   print(otherField);
 }
 
-var tests = [
+var tests = <IsolateTest>[
   hasPausedAtStart,
   (Isolate isolate) async {
-    Library lib = await isolate.rootLibrary.load();
+    Library lib = await isolate.rootLibrary.load() as Library;
     var fields = lib.variables;
     expect(fields.length, 2);
     print(lib.variables);
     for (Field f in fields) {
       await f.load();
-      String locationString = await f.location.toUserString();
+      String locationString = await f.location!.toUserString();
       if (f.name == "tests") {
         expect(locationString, "field_script_test.dart:18:5");
       } else if (f.name == "otherField") {

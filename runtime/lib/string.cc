@@ -5,17 +5,18 @@
 #include "vm/bootstrap_natives.h"
 
 #include "include/dart_api.h"
-#include "vm/exceptions.h"
+#include "platform/unicode.h"
 #include "vm/dart_api_impl.h"
+#include "vm/exceptions.h"
 #include "vm/isolate.h"
 #include "vm/native_entry.h"
 #include "vm/object.h"
+#include "vm/object_store.h"
 #include "vm/symbols.h"
-#include "vm/unicode.h"
 
 namespace dart {
 
-DEFINE_NATIVE_ENTRY(String_fromEnvironment, 3) {
+DEFINE_NATIVE_ENTRY(String_fromEnvironment, 0, 3) {
   GET_NON_NULL_NATIVE_ARGUMENT(String, name, arguments->NativeArgAt(1));
   GET_NATIVE_ARGUMENT(String, default_value, arguments->NativeArgAt(2));
   // Call the embedder to supply us with the environment.
@@ -24,11 +25,10 @@ DEFINE_NATIVE_ENTRY(String_fromEnvironment, 3) {
   if (!env_value.IsNull()) {
     return Symbols::New(thread, env_value);
   }
-  return default_value.raw();
+  return default_value.ptr();
 }
 
-
-DEFINE_NATIVE_ENTRY(StringBase_createFromCodePoints, 3) {
+DEFINE_NATIVE_ENTRY(StringBase_createFromCodePoints, 0, 3) {
   GET_NON_NULL_NATIVE_ARGUMENT(Instance, list, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, start_obj, arguments->NativeArgAt(1));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, end_obj, arguments->NativeArgAt(2));
@@ -37,10 +37,10 @@ DEFINE_NATIVE_ENTRY(StringBase_createFromCodePoints, 3) {
   intptr_t length;
   if (list.IsGrowableObjectArray()) {
     const GrowableObjectArray& growableArray = GrowableObjectArray::Cast(list);
-    a ^= growableArray.data();
+    a = growableArray.data();
     length = growableArray.Length();
   } else if (list.IsArray()) {
-    a ^= Array::Cast(list).raw();
+    a = Array::Cast(list).ptr();
     length = a.Length();
   } else {
     Exceptions::ThrowArgumentError(list);
@@ -89,8 +89,7 @@ DEFINE_NATIVE_ENTRY(StringBase_createFromCodePoints, 3) {
   return TwoByteString::New(utf16_len, utf32_array, array_len, Heap::kNew);
 }
 
-
-DEFINE_NATIVE_ENTRY(StringBase_substringUnchecked, 3) {
+DEFINE_NATIVE_ENTRY(StringBase_substringUnchecked, 0, 3) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, start_obj, arguments->NativeArgAt(1));
@@ -100,7 +99,6 @@ DEFINE_NATIVE_ENTRY(StringBase_substringUnchecked, 3) {
   intptr_t end = end_obj.Value();
   return String::SubString(receiver, start, (end - start));
 }
-
 
 // Return the bitwise-or of all characters in the slice from start to end.
 static uint16_t CharacterLimit(const String& string,
@@ -162,8 +160,7 @@ static bool CheckSlicesOneByte(const String& base,
   return true;
 }
 
-
-DEFINE_NATIVE_ENTRY(StringBase_joinReplaceAllResult, 4) {
+DEFINE_NATIVE_ENTRY(StringBase_joinReplaceAllResult, 0, 4) {
   const String& base = String::CheckedHandle(zone, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(GrowableObjectArray, matches_growable,
                                arguments->NativeArgAt(1));
@@ -191,9 +188,9 @@ DEFINE_NATIVE_ENTRY(StringBase_joinReplaceAllResult, 4) {
   const intptr_t base_length = base.Length();
   String& result = String::Handle(zone);
   if (is_onebyte) {
-    result ^= OneByteString::New(length, Heap::kNew);
+    result = OneByteString::New(length, Heap::kNew);
   } else {
-    result ^= TwoByteString::New(length, Heap::kNew);
+    result = TwoByteString::New(length, Heap::kNew);
   }
   Instance& object = Instance::Handle(zone);
   intptr_t write_index = 0;
@@ -245,10 +242,10 @@ DEFINE_NATIVE_ENTRY(StringBase_joinReplaceAllResult, 4) {
   if (write_index < length) {
     Exceptions::ThrowArgumentError(matches_growable);
   }
-  return result.raw();
+  return result.ptr();
 }
 
-DEFINE_NATIVE_ENTRY(OneByteString_substringUnchecked, 3) {
+DEFINE_NATIVE_ENTRY(OneByteString_substringUnchecked, 0, 3) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   ASSERT(receiver.IsOneByteString());
@@ -260,42 +257,35 @@ DEFINE_NATIVE_ENTRY(OneByteString_substringUnchecked, 3) {
   return OneByteString::New(receiver, start, end - start, Heap::kNew);
 }
 
-
-// This is high-performance code.
-DEFINE_NATIVE_ENTRY(OneByteString_splitWithCharCode, 2) {
-  const String& receiver =
-      String::CheckedHandle(zone, arguments->NativeArgAt(0));
-  ASSERT(receiver.IsOneByteString());
-  GET_NON_NULL_NATIVE_ARGUMENT(Smi, smi_split_code, arguments->NativeArgAt(1));
-  const intptr_t len = receiver.Length();
-  const intptr_t split_code = smi_split_code.Value();
-  const GrowableObjectArray& result = GrowableObjectArray::Handle(
-      zone, GrowableObjectArray::New(16, Heap::kNew));
-  String& str = String::Handle(zone);
-  intptr_t start = 0;
-  intptr_t i = 0;
-  for (; i < len; i++) {
-    if (split_code == OneByteString::CharAt(receiver, i)) {
-      str = OneByteString::SubStringUnchecked(receiver, start, (i - start),
-                                              Heap::kNew);
-      result.Add(str);
-      start = i + 1;
-    }
+DEFINE_NATIVE_ENTRY(Internal_allocateOneByteString, 0, 1) {
+  GET_NON_NULL_NATIVE_ARGUMENT(Integer, length_obj, arguments->NativeArgAt(0));
+  const int64_t length = length_obj.AsInt64Value();
+  if ((length < 0) || (length > OneByteString::kMaxElements)) {
+    // Assume that negative lengths are the result of wrapping in code in
+    // string_patch.dart.
+    const Instance& exception = Instance::Handle(
+        thread->isolate_group()->object_store()->out_of_memory());
+    Exceptions::Throw(thread, exception);
+    UNREACHABLE();
   }
-  str = OneByteString::SubStringUnchecked(receiver, start, (i - start),
-                                          Heap::kNew);
-  result.Add(str);
-  return result.raw();
+  return OneByteString::New(static_cast<intptr_t>(length), Heap::kNew);
 }
 
-
-DEFINE_NATIVE_ENTRY(OneByteString_allocate, 1) {
-  GET_NON_NULL_NATIVE_ARGUMENT(Smi, length_obj, arguments->NativeArgAt(0));
-  return OneByteString::New(length_obj.Value(), Heap::kNew);
+DEFINE_NATIVE_ENTRY(Internal_allocateTwoByteString, 0, 1) {
+  GET_NON_NULL_NATIVE_ARGUMENT(Integer, length_obj, arguments->NativeArgAt(0));
+  const int64_t length = length_obj.AsInt64Value();
+  if ((length < 0) || (length > TwoByteString::kMaxElements)) {
+    // Assume that negative lengths are the result of wrapping in code in
+    // string_patch.dart.
+    const Instance& exception = Instance::Handle(
+        thread->isolate_group()->object_store()->out_of_memory());
+    Exceptions::Throw(thread, exception);
+    UNREACHABLE();
+  }
+  return TwoByteString::New(static_cast<intptr_t>(length), Heap::kNew);
 }
 
-
-DEFINE_NATIVE_ENTRY(OneByteString_allocateFromOneByteList, 3) {
+DEFINE_NATIVE_ENTRY(OneByteString_allocateFromOneByteList, 0, 3) {
   Instance& list = Instance::CheckedHandle(zone, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, start_obj, arguments->NativeArgAt(1));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, end_obj, arguments->NativeArgAt(2));
@@ -303,102 +293,72 @@ DEFINE_NATIVE_ENTRY(OneByteString_allocateFromOneByteList, 3) {
   intptr_t start = start_obj.Value();
   intptr_t end = end_obj.Value();
   if (start < 0) {
-    const Array& args = Array::Handle(Array::New(1));
-    args.SetAt(0, start_obj);
-    Exceptions::ThrowByType(Exceptions::kArgument, args);
+    Exceptions::ThrowArgumentError(start_obj);
   }
   intptr_t length = end - start;
   if (length < 0) {
-    const Array& args = Array::Handle(Array::New(1));
-    args.SetAt(0, end_obj);
-    Exceptions::ThrowByType(Exceptions::kArgument, args);
+    Exceptions::ThrowArgumentError(end_obj);
   }
   ASSERT(length >= 0);
 
   Heap::Space space = Heap::kNew;
-  if (list.IsTypedData()) {
-    const TypedData& array = TypedData::Cast(list);
-    if (end > array.LengthInBytes()) {
-      const Array& args = Array::Handle(Array::New(1));
-      args.SetAt(0, end_obj);
-      Exceptions::ThrowByType(Exceptions::kArgument, args);
+  if (list.IsTypedDataBase()) {
+    const TypedDataBase& array = TypedDataBase::Cast(list);
+    if (array.ElementType() != kUint8ArrayElement) {
+      Exceptions::ThrowArgumentError(list);
+    }
+    if (end > array.Length()) {
+      Exceptions::ThrowArgumentError(end_obj);
     }
     return OneByteString::New(array, start, length, space);
-  } else if (list.IsExternalTypedData()) {
-    const ExternalTypedData& array = ExternalTypedData::Cast(list);
-    if (end > array.LengthInBytes()) {
-      const Array& args = Array::Handle(Array::New(1));
-      args.SetAt(0, end_obj);
-      Exceptions::ThrowByType(Exceptions::kArgument, args);
-    }
-    return OneByteString::New(array, start, length, space);
-  } else if (RawObject::IsTypedDataViewClassId(list.GetClassId())) {
-    const Instance& view = Instance::Cast(list);
-    if (end > Smi::Value(TypedDataView::Length(view))) {
-      const Array& args = Array::Handle(Array::New(1));
-      args.SetAt(0, end_obj);
-      Exceptions::ThrowByType(Exceptions::kArgument, args);
-    }
-    const Instance& data_obj = Instance::Handle(TypedDataView::Data(view));
-    intptr_t data_offset = Smi::Value(TypedDataView::OffsetInBytes(view));
-    if (data_obj.IsTypedData()) {
-      const TypedData& array = TypedData::Cast(data_obj);
-      return OneByteString::New(array, data_offset + start, length, space);
-    } else if (data_obj.IsExternalTypedData()) {
-      const ExternalTypedData& array = ExternalTypedData::Cast(data_obj);
-      return OneByteString::New(array, data_offset + start, length, space);
-    }
   } else if (list.IsArray()) {
     const Array& array = Array::Cast(list);
     if (end > array.Length()) {
-      const Array& args = Array::Handle(Array::New(1));
-      args.SetAt(0, end_obj);
-      Exceptions::ThrowByType(Exceptions::kArgument, args);
+      Exceptions::ThrowArgumentError(end_obj);
     }
     String& string = String::Handle(OneByteString::New(length, space));
     for (int i = 0; i < length; i++) {
-      intptr_t value =
-          Smi::Value(reinterpret_cast<RawSmi*>(array.At(start + i)));
+      intptr_t value = Smi::Value(static_cast<SmiPtr>(array.At(start + i)));
       OneByteString::SetCharAt(string, i, value);
     }
-    return string.raw();
+    return string.ptr();
   } else if (list.IsGrowableObjectArray()) {
     const GrowableObjectArray& array = GrowableObjectArray::Cast(list);
     if (end > array.Length()) {
-      const Array& args = Array::Handle(Array::New(1));
-      args.SetAt(0, end_obj);
-      Exceptions::ThrowByType(Exceptions::kArgument, args);
+      Exceptions::ThrowArgumentError(end_obj);
     }
     String& string = String::Handle(OneByteString::New(length, space));
     for (int i = 0; i < length; i++) {
-      intptr_t value =
-          Smi::Value(reinterpret_cast<RawSmi*>(array.At(start + i)));
+      intptr_t value = Smi::Value(static_cast<SmiPtr>(array.At(start + i)));
       OneByteString::SetCharAt(string, i, value);
     }
-    return string.raw();
+    return string.ptr();
   }
   UNREACHABLE();
   return Object::null();
 }
 
-
-DEFINE_NATIVE_ENTRY(OneByteString_setAt, 3) {
+DEFINE_NATIVE_ENTRY(Internal_writeIntoOneByteString, 0, 3) {
   GET_NON_NULL_NATIVE_ARGUMENT(String, receiver, arguments->NativeArgAt(0));
   ASSERT(receiver.IsOneByteString());
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, index_obj, arguments->NativeArgAt(1));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, code_point_obj, arguments->NativeArgAt(2));
-  ASSERT((0 <= code_point_obj.Value()) && (code_point_obj.Value() <= 0xFF));
-  OneByteString::SetCharAt(receiver, index_obj.Value(), code_point_obj.Value());
+  OneByteString::SetCharAt(receiver, index_obj.Value(),
+                           code_point_obj.Value() & 0xFF);
   return Object::null();
 }
 
-
-DEFINE_NATIVE_ENTRY(ExternalOneByteString_getCid, 0) {
-  return Smi::New(kExternalOneByteStringCid);
+DEFINE_NATIVE_ENTRY(Internal_writeIntoTwoByteString, 0, 3) {
+  GET_NON_NULL_NATIVE_ARGUMENT(String, receiver, arguments->NativeArgAt(0));
+  ASSERT(receiver.IsTwoByteString());
+  GET_NON_NULL_NATIVE_ARGUMENT(Smi, index_obj, arguments->NativeArgAt(1));
+  GET_NON_NULL_NATIVE_ARGUMENT(Smi, code_point_obj, arguments->NativeArgAt(2));
+  TwoByteString::SetCharAt(receiver, index_obj.Value(),
+                           code_point_obj.Value() & 0xFFFF);
+  return Object::null();
 }
 
-
-DEFINE_NATIVE_ENTRY(TwoByteString_allocateFromTwoByteList, 3) {
+DEFINE_NATIVE_ENTRY(TwoByteString_allocateFromTwoByteList, 0, 3) {
   Instance& list = Instance::CheckedHandle(zone, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, start_obj, arguments->NativeArgAt(1));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, end_obj, arguments->NativeArgAt(2));
@@ -414,8 +374,8 @@ DEFINE_NATIVE_ENTRY(TwoByteString_allocateFromTwoByteList, 3) {
   }
 
   Heap::Space space = Heap::kNew;
-  if (list.IsTypedData()) {
-    const TypedData& array = TypedData::Cast(list);
+  if (list.IsTypedDataBase()) {
+    const TypedDataBase& array = TypedDataBase::Cast(list);
     if (array.ElementType() != kUint16ArrayElement) {
       Exceptions::ThrowArgumentError(list);
     }
@@ -423,35 +383,6 @@ DEFINE_NATIVE_ENTRY(TwoByteString_allocateFromTwoByteList, 3) {
       Exceptions::ThrowArgumentError(end_obj);
     }
     return TwoByteString::New(array, start * sizeof(uint16_t), length, space);
-  } else if (list.IsExternalTypedData()) {
-    const ExternalTypedData& array = ExternalTypedData::Cast(list);
-    if (array.ElementType() != kUint16ArrayElement) {
-      Exceptions::ThrowArgumentError(list);
-    }
-    if (end > array.Length()) {
-      Exceptions::ThrowArgumentError(end_obj);
-    }
-    return TwoByteString::New(array, start * sizeof(uint16_t), length, space);
-  } else if (RawObject::IsTypedDataViewClassId(list.GetClassId())) {
-    const intptr_t cid = list.GetClassId();
-    if (cid != kTypedDataUint16ArrayViewCid) {
-      Exceptions::ThrowArgumentError(list);
-    }
-    if (end > Smi::Value(TypedDataView::Length(list))) {
-      Exceptions::ThrowArgumentError(end_obj);
-    }
-    const Instance& data_obj =
-        Instance::Handle(zone, TypedDataView::Data(list));
-    intptr_t data_offset = Smi::Value(TypedDataView::OffsetInBytes(list));
-    if (data_obj.IsTypedData()) {
-      const TypedData& array = TypedData::Cast(data_obj);
-      return TwoByteString::New(array, data_offset + start * sizeof(uint16_t),
-                                length, space);
-    } else if (data_obj.IsExternalTypedData()) {
-      const ExternalTypedData& array = ExternalTypedData::Cast(data_obj);
-      return TwoByteString::New(array, data_offset + start * sizeof(uint16_t),
-                                length, space);
-    }
   } else if (list.IsArray()) {
     const Array& array = Array::Cast(list);
     if (end > array.Length()) {
@@ -460,11 +391,10 @@ DEFINE_NATIVE_ENTRY(TwoByteString_allocateFromTwoByteList, 3) {
     const String& string =
         String::Handle(zone, TwoByteString::New(length, space));
     for (int i = 0; i < length; i++) {
-      intptr_t value =
-          Smi::Value(reinterpret_cast<RawSmi*>(array.At(start + i)));
+      intptr_t value = Smi::Value(static_cast<SmiPtr>(array.At(start + i)));
       TwoByteString::SetCharAt(string, i, value);
     }
-    return string.raw();
+    return string.ptr();
   } else if (list.IsGrowableObjectArray()) {
     const GrowableObjectArray& array = GrowableObjectArray::Cast(list);
     if (end > array.Length()) {
@@ -473,18 +403,16 @@ DEFINE_NATIVE_ENTRY(TwoByteString_allocateFromTwoByteList, 3) {
     const String& string =
         String::Handle(zone, TwoByteString::New(length, space));
     for (int i = 0; i < length; i++) {
-      intptr_t value =
-          Smi::Value(reinterpret_cast<RawSmi*>(array.At(start + i)));
+      intptr_t value = Smi::Value(static_cast<SmiPtr>(array.At(start + i)));
       TwoByteString::SetCharAt(string, i, value);
     }
-    return string.raw();
+    return string.ptr();
   }
   UNREACHABLE();
   return Object::null();
 }
 
-
-DEFINE_NATIVE_ENTRY(String_getHashCode, 1) {
+DEFINE_NATIVE_ENTRY(String_getHashCode, 0, 1) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   intptr_t hash_val = receiver.Hash();
@@ -493,13 +421,11 @@ DEFINE_NATIVE_ENTRY(String_getHashCode, 1) {
   return Smi::New(hash_val);
 }
 
-
-DEFINE_NATIVE_ENTRY(String_getLength, 1) {
+DEFINE_NATIVE_ENTRY(String_getLength, 0, 1) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   return Smi::New(receiver.Length());
 }
-
 
 static uint16_t StringValueAt(const String& str, const Integer& index) {
   if (index.IsSmi()) {
@@ -514,8 +440,7 @@ static uint16_t StringValueAt(const String& str, const Integer& index) {
   return 0;
 }
 
-
-DEFINE_NATIVE_ENTRY(String_charAt, 2) {
+DEFINE_NATIVE_ENTRY(String_charAt, 0, 2) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Integer, index, arguments->NativeArgAt(1));
@@ -523,9 +448,8 @@ DEFINE_NATIVE_ENTRY(String_charAt, 2) {
   return Symbols::FromCharCode(thread, static_cast<int32_t>(value));
 }
 
-
 // Returns the 16-bit UTF-16 code unit at the given index.
-DEFINE_NATIVE_ENTRY(String_codeUnitAt, 2) {
+DEFINE_NATIVE_ENTRY(String_codeUnitAt, 0, 2) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Integer, index, arguments->NativeArgAt(1));
@@ -533,32 +457,28 @@ DEFINE_NATIVE_ENTRY(String_codeUnitAt, 2) {
   return Smi::New(static_cast<intptr_t>(value));
 }
 
-
-DEFINE_NATIVE_ENTRY(String_concat, 2) {
+DEFINE_NATIVE_ENTRY(String_concat, 0, 2) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(String, b, arguments->NativeArgAt(1));
   return String::Concat(receiver, b);
 }
 
-
-DEFINE_NATIVE_ENTRY(String_toLowerCase, 1) {
+DEFINE_NATIVE_ENTRY(String_toLowerCase, 0, 1) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   ASSERT(!receiver.IsNull());
   return String::ToLowerCase(receiver);
 }
 
-
-DEFINE_NATIVE_ENTRY(String_toUpperCase, 1) {
+DEFINE_NATIVE_ENTRY(String_toUpperCase, 0, 1) {
   const String& receiver =
       String::CheckedHandle(zone, arguments->NativeArgAt(0));
   ASSERT(!receiver.IsNull());
   return String::ToUpperCase(receiver);
 }
 
-
-DEFINE_NATIVE_ENTRY(String_concatRange, 3) {
+DEFINE_NATIVE_ENTRY(String_concatRange, 0, 3) {
   GET_NON_NULL_NATIVE_ARGUMENT(Instance, argument, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, start, arguments->NativeArgAt(1));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, end, arguments->NativeArgAt(2));
@@ -570,7 +490,7 @@ DEFINE_NATIVE_ENTRY(String_concatRange, 3) {
   Array& strings = Array::Handle();
   intptr_t length = -1;
   if (argument.IsArray()) {
-    strings ^= argument.raw();
+    strings ^= argument.ptr();
     length = strings.Length();
   } else if (argument.IsGrowableObjectArray()) {
     const GrowableObjectArray& g_array = GrowableObjectArray::Cast(argument);
@@ -593,8 +513,7 @@ DEFINE_NATIVE_ENTRY(String_concatRange, 3) {
   return String::ConcatAllRange(strings, start_ix, end_ix, Heap::kNew);
 }
 
-
-DEFINE_NATIVE_ENTRY(StringBuffer_createStringFromUint16Array, 3) {
+DEFINE_NATIVE_ENTRY(StringBuffer_createStringFromUint16Array, 0, 3) {
   GET_NON_NULL_NATIVE_ARGUMENT(TypedData, codeUnits, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Smi, length, arguments->NativeArgAt(1));
   GET_NON_NULL_NATIVE_ARGUMENT(Bool, isLatin1, arguments->NativeArgAt(2));
@@ -611,7 +530,7 @@ DEFINE_NATIVE_ENTRY(StringBuffer_createStringFromUint16Array, 3) {
 
   uint16_t* data_position = reinterpret_cast<uint16_t*>(codeUnits.DataAddr(0));
   String::Copy(result, 0, data_position, length_value);
-  return result.raw();
+  return result.ptr();
 }
 
 }  // namespace dart

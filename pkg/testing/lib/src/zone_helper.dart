@@ -5,17 +5,17 @@
 /// Helper functions for running code in a Zone.
 library testing.zone_helper;
 
-import 'dart:async' show Completer, Future, ZoneSpecification, runZoned;
+import 'dart:async' show Completer, Future, ZoneSpecification, runZonedGuarded;
 
 import 'dart:io' show exit, stderr;
 
 import 'dart:isolate' show Capability, Isolate, ReceivePort;
 
-import 'log.dart' show logUncaughtError;
+import 'log.dart' show StdoutLogger;
 
 Future runGuarded(Future f(),
-    {void printLineOnStdout(line),
-    void handleLateError(error, StackTrace stackTrace)}) {
+    {void Function(String)? printLineOnStdout,
+    void Function(dynamic, StackTrace)? handleLateError}) {
   var printWrapper;
   if (printLineOnStdout != null) {
     printWrapper = (_1, _2, _3, String line) {
@@ -26,7 +26,7 @@ Future runGuarded(Future f(),
   Completer completer = new Completer();
 
   handleUncaughtError(error, StackTrace stackTrace) {
-    logUncaughtError(error, stackTrace);
+    StdoutLogger().logUncaughtError(error, stackTrace);
     if (!completer.isCompleted) {
       completer.completeError(error, stackTrace);
     } else if (handleLateError != null) {
@@ -39,6 +39,7 @@ Future runGuarded(Future f(),
         // Ignored.
       }
       stderr
+          // ignore: unnecessary_null_comparison
           .write("$errorString\n" + (stackTrace == null ? "" : "$stackTrace"));
       stderr.flush();
       exit(255);
@@ -48,7 +49,8 @@ Future runGuarded(Future f(),
   ZoneSpecification specification = new ZoneSpecification(print: printWrapper);
 
   ReceivePort errorPort = new ReceivePort();
-  Future errorFuture = errorPort.listen((List errors) {
+  Future errorFuture = errorPort.listen((_errors) {
+    List errors = _errors;
     Isolate.current.removeErrorListener(errorPort.sendPort);
     errorPort.close();
     var error = errors[0];
@@ -62,8 +64,11 @@ Future runGuarded(Future f(),
   Isolate.current.setErrorsFatal(false);
   Isolate.current.addErrorListener(errorPort.sendPort);
   return acknowledgeControlMessages(Isolate.current).then((_) {
-    runZoned(() => new Future(f).then(completer.complete),
-        zoneSpecification: specification, onError: handleUncaughtError);
+    runZonedGuarded(
+      () => new Future(f).then(completer.complete),
+      handleUncaughtError,
+      zoneSpecification: specification,
+    );
 
     return completer.future.whenComplete(() {
       errorPort.close();
@@ -77,7 +82,7 @@ Future runGuarded(Future f(),
 /// Ping [isolate] to ensure control messages have been delivered.  Control
 /// messages are things like [Isolate.addErrorListener] and
 /// [Isolate.addOnExitListener].
-Future acknowledgeControlMessages(Isolate isolate, {Capability resume}) {
+Future acknowledgeControlMessages(Isolate isolate, {Capability? resume}) {
   ReceivePort ping = new ReceivePort();
   Isolate.current.ping(ping.sendPort);
   if (resume == null) {

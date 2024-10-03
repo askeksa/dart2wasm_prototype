@@ -10,6 +10,7 @@
 
 #include "include/dart_api.h"
 #include "platform/globals.h"
+#include "platform/utils.h"
 
 namespace dart {
 namespace bin {
@@ -27,6 +28,9 @@ class OSError {
   }
   virtual ~OSError() { free(message_); }
 
+  // Reload this OSError with the current OS error, discarding the previous.
+  void Reload();
+
   SubSystem sub_system() { return sub_system_; }
   int code() { return code_; }
   char* message() { return message_; }
@@ -40,7 +44,7 @@ class OSError {
     if (message == NULL) {
       message_ = NULL;
     } else {
-      message_ = strdup(message);
+      message_ = Utils::StrDup(message);
     }
   }
 
@@ -50,7 +54,6 @@ class OSError {
 
   DISALLOW_COPY_AND_ASSIGN(OSError);
 };
-
 
 class StringUtils {
  public:
@@ -64,8 +67,8 @@ class StringUtils {
   // character. If result_len is not NUL, it is used to set the number
   // of characters in the result.
   //
-  // These conversion functions are only implemented on Windows as the
-  // Dart code only hit this path on Windows.
+  // A return value of `nullptr` indicates that the conversion is not supported,
+  // which is true on all platforms other than Windows.
   static const char* ConsoleStringToUtf8(const char* str,
                                          intptr_t len = -1,
                                          intptr_t* result_len = NULL);
@@ -79,14 +82,10 @@ class StringUtils {
                                    intptr_t len = -1,
                                    intptr_t* result_len = NULL);
 
-  // Not all platforms support strndup.
-  static char* StrNDup(const char* s, intptr_t n);
-
  private:
   DISALLOW_ALLOCATION();
   DISALLOW_IMPLICIT_CONSTRUCTORS(StringUtils);
 };
-
 
 class ShellUtils {
  public:
@@ -101,7 +100,6 @@ class ShellUtils {
   DISALLOW_ALLOCATION();
   DISALLOW_IMPLICIT_CONSTRUCTORS(ShellUtils);
 };
-
 
 class TimerUtils {
  public:

@@ -2,13 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:convert' show JSON;
+import 'dart:convert' show jsonDecode, jsonEncode;
 
 import 'dart:io';
 
 import 'package:testing/src/run_tests.dart' show CommandLine;
 
-main(List<String> arguments) async {
+Future<void> main(List<String> arguments) async {
   CommandLine cl = CommandLine.parse(arguments);
   Set<String> fields = cl.commaSeparated("--fields=");
   if (fields.isEmpty) {
@@ -16,7 +16,7 @@ main(List<String> arguments) async {
   }
   for (String filename in cl.arguments) {
     String json = await new File(filename).readAsString();
-    Map<String, dynamic> data = JSON.decode(json) as Map<String, dynamic>;
+    Map<String, dynamic> data = jsonDecode(json) as Map<String, dynamic>;
     StringBuffer sb = new StringBuffer();
     bool isFirst = true;
     for (String field in fields) {
@@ -25,7 +25,7 @@ main(List<String> arguments) async {
       }
       if (field.startsWith("json:")) {
         field = field.substring(5);
-        sb.write(JSON.encode(data[field]));
+        sb.write(jsonEncode(data[field]));
       } else {
         sb.write(data[field]);
       }

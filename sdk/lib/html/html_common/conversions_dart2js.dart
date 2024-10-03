@@ -1,26 +1,71 @@
 part of html_common;
 
-/// Converts a JavaScript object with properties into a Dart Map.
-/// Not suitable for nested objects.
-Map convertNativeToDart_Dictionary(object) {
+/// Converts native values to their Dart equivalent
+///
+/// This includes other maps, lists, or values that don't need a conversion e.g.
+/// bool, String.
+_convertNativeToDart_Value(value) {
+  if (value == null) return value;
+  if (value is String || value is num || value is bool) return value;
+  if (isJavaScriptSimpleObject(value)) {
+    return convertNativeToDart_Dictionary(value);
+  }
+  if (JS('bool', 'Array.isArray(#)', value)) {
+    List values = [];
+    for (var i = 0; i < JS<int>('int', '#.length', value); i++) {
+      values.add(_convertNativeToDart_Value(JS('var', '#[#]', value, i)));
+    }
+
+    return values;
+  }
+  return value;
+}
+
+/// Recursively converts a JavaScript object with properties into a Dart Map.
+/// This includes maps, lists, and other values that don't need a conversion.
+Map<String, dynamic>? convertNativeToDart_Dictionary(object) {
   if (object == null) return null;
-  var dict = {};
-  var keys = JS('JSExtendableArray', 'Object.getOwnPropertyNames(#)', object);
+  var dict = <String, dynamic>{};
+  var keys = JS<JSExtendableArray>(
+      'JSExtendableArray', 'Object.getOwnPropertyNames(#)', object);
   for (final key in keys) {
-    dict[key] = JS('var', '#[#]', object, key);
+    dict[JS('String', '#', key)] =
+        _convertNativeToDart_Value(JS('var', '#[#]', object, key));
   }
   return dict;
 }
 
-/// Converts a flat Dart map into a JavaScript object with properties.
-convertDartToNative_Dictionary(Map dict, [void postCreate(dynamic)]) {
+/// Converts values that occur within a Dart map for map conversion.
+///
+/// This includes other maps, lists, or values that don't need a conversion e.g.
+/// bool, String.
+_convertDartToNative_Value(Object? value) {
+  if (value == null) return value;
+  if (value is String || value is num || value is bool) return value;
+  if (value is Map) return convertDartToNative_Dictionary(value);
+  if (value is List) {
+    var array = JS('var', '[]');
+    value.forEach((element) {
+      JS('void', '#.push(#)', array, _convertDartToNative_Value(element));
+    });
+    value = array;
+  }
+  return value;
+}
+
+/// Converts a potentially nested Dart map to a JavaScript object with
+/// properties.
+///
+/// This method requires that the values within the map are either maps
+/// themselves, lists, or do not need a conversion.
+convertDartToNative_Dictionary(Map? dict, [void postCreate(Object? f)?]) {
   if (dict == null) return null;
   var object = JS('var', '{}');
   if (postCreate != null) {
     postCreate(object);
   }
-  dict.forEach((String key, value) {
-    JS('void', '#[#] = #', object, key, value);
+  dict.forEach((key, value) {
+    JS('void', '#[#] = #', object, key, _convertDartToNative_Value(value));
   });
   return object;
 }
@@ -36,7 +81,7 @@ List convertDartToNative_StringArray(List<String> input) {
 }
 
 DateTime convertNativeToDart_DateTime(date) {
-  var millisSinceEpoch = JS('int', '#.getTime()', date);
+  int millisSinceEpoch = JS('int', '#.getTime()', date);
   return new DateTime.fromMillisecondsSinceEpoch(millisSinceEpoch, isUtc: true);
 }
 
@@ -53,18 +98,31 @@ convertNativeToDart_AcceptStructuredClone(object, {mustCopy: false}) =>
         .convertNativeToDart_AcceptStructuredClone(object, mustCopy: mustCopy);
 
 class _StructuredCloneDart2Js extends _StructuredClone {
+  JSObject newJsObject() => JS('JSObject', '{}');
+
+  void forEachObjectKey(object, action(key, value)) {
+    for (final key
+        in JS('returns:JSExtendableArray;new:true', 'Object.keys(#)', object)) {
+      action(key, JS('var', '#[#]', object, key));
+    }
+  }
+
+  void putIntoObject(object, key, value) =>
+      JS('void', '#[#] = #', object, key, value);
+
   newJsMap() => JS('var', '{}');
   putIntoMap(map, key, value) => JS('void', '#[#] = #', map, key, value);
   newJsList(length) => JS('JSExtendableArray', 'new Array(#)', length);
-  cloneNotRequired(e) => (e is NativeByteBuffer || e is NativeTypedData);
+  cloneNotRequired(e) =>
+      (e is NativeByteBuffer || e is NativeTypedData || e is MessagePort);
 }
 
 class _AcceptStructuredCloneDart2Js extends _AcceptStructuredClone {
-  newJsList(length) => JS('JSExtendableArray', 'new Array(#)', length);
-  newDartList(length) => newJsList(length);
-  identicalInJs(a, b) => identical(a, b);
+  List newJsList(length) => JS('JSExtendableArray', 'new Array(#)', length);
+  List newDartList(length) => newJsList(length);
+  bool identicalInJs(a, b) => identical(a, b);
 
-  void forEachJsField(object, action) {
+  void forEachJsField(object, action(key, value)) {
     for (final key in JS('JSExtendableArray', 'Object.keys(#)', object)) {
       action(key, JS('var', '#[#]', object, key));
     }
@@ -85,18 +143,9 @@ bool isImmutableJavaScriptArray(value) =>
 bool isJavaScriptPromise(value) =>
     JS('bool', r'typeof Promise != "undefined" && # instanceof Promise', value);
 
-Future convertNativePromiseToDartFuture(promise) {
-  var completer = new Completer();
-  var then = convertDartClosureToJS((result) => completer.complete(result), 1);
-  var error =
-      convertDartClosureToJS((result) => completer.completeError(result), 1);
-  var newPromise = JS('', '#.then(#)["catch"](#)', promise, then, error);
-  return completer.future;
-}
-
 const String _serializedScriptValue = 'num|String|bool|'
     'JSExtendableArray|=Object|'
-    'Blob|File|NativeByteBuffer|NativeTypedData'
+    'Blob|File|NativeByteBuffer|NativeTypedData|MessagePort'
     // TODO(sra): Add Date, RegExp.
     ;
 const annotation_Creates_SerializedScriptValue =

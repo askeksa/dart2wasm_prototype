@@ -5,11 +5,14 @@
 #ifndef RUNTIME_VM_DART_API_IMPL_H_
 #define RUNTIME_VM_DART_API_IMPL_H_
 
+#include <memory>
+
 #include "vm/allocation.h"
+#include "vm/heap/safepoint.h"
 #include "vm/native_arguments.h"
 #include "vm/object.h"
-#include "vm/safepoint.h"
 #include "vm/thread_registry.h"
+#include "vm/timeline.h"
 
 namespace dart {
 
@@ -25,13 +28,24 @@ const char* CanonicalFunction(const char* func);
 
 #define CURRENT_FUNC CanonicalFunction(__FUNCTION__)
 
+// Checks that the current isolate group is not NULL.
+#define CHECK_ISOLATE_GROUP(isolate_group)                                     \
+  do {                                                                         \
+    if ((isolate_group) == NULL) {                                             \
+      FATAL1(                                                                  \
+          "%s expects there to be a current isolate group. Did you "           \
+          "forget to call Dart_CreateIsolateGroup or Dart_EnterIsolate?",      \
+          CURRENT_FUNC);                                                       \
+    }                                                                          \
+  } while (0)
+
 // Checks that the current isolate is not NULL.
 #define CHECK_ISOLATE(isolate)                                                 \
   do {                                                                         \
     if ((isolate) == NULL) {                                                   \
       FATAL1(                                                                  \
           "%s expects there to be a current isolate. Did you "                 \
-          "forget to call Dart_CreateIsolate or Dart_EnterIsolate?",           \
+          "forget to call Dart_CreateIsolateGroup or Dart_EnterIsolate?",      \
           CURRENT_FUNC);                                                       \
     }                                                                          \
   } while (0)
@@ -51,7 +65,7 @@ const char* CanonicalFunction(const char* func);
 #define CHECK_API_SCOPE(thread)                                                \
   do {                                                                         \
     Thread* tmpT = (thread);                                                   \
-    Isolate* tmpI = tmpT->isolate();                                           \
+    Isolate* tmpI = tmpT == NULL ? NULL : tmpT->isolate();                     \
     CHECK_ISOLATE(tmpI);                                                       \
     if (tmpT->api_top_scope() == NULL) {                                       \
       FATAL1(                                                                  \
@@ -67,26 +81,28 @@ const char* CanonicalFunction(const char* func);
   TransitionNativeToVM transition(T);                                          \
   HANDLESCOPE(T);
 
-
 #define RETURN_TYPE_ERROR(zone, dart_handle, type)                             \
   do {                                                                         \
     const Object& tmp =                                                        \
         Object::Handle(zone, Api::UnwrapHandle((dart_handle)));                \
     if (tmp.IsNull()) {                                                        \
-      return Api::NewError("%s expects argument '%s' to be non-null.",         \
-                           CURRENT_FUNC, #dart_handle);                        \
+      return Api::NewArgumentError("%s expects argument '%s' to be non-null.", \
+                                   CURRENT_FUNC, #dart_handle);                \
     } else if (tmp.IsError()) {                                                \
       return dart_handle;                                                      \
     }                                                                          \
-    return Api::NewError("%s expects argument '%s' to be of type %s.",         \
-                         CURRENT_FUNC, #dart_handle, #type);                   \
+    return Api::NewArgumentError("%s expects argument '%s' to be of type %s.", \
+                                 CURRENT_FUNC, #dart_handle, #type);           \
   } while (0)
-
 
 #define RETURN_NULL_ERROR(parameter)                                           \
   return Api::NewError("%s expects argument '%s' to be non-null.",             \
-                       CURRENT_FUNC, #parameter);
+                       CURRENT_FUNC, #parameter)
 
+#define CHECK_NULL(parameter)                                                  \
+  if (parameter == NULL) {                                                     \
+    RETURN_NULL_ERROR(parameter);                                              \
+  }
 
 #define CHECK_LENGTH(length, max_elements)                                     \
   do {                                                                         \
@@ -99,26 +115,41 @@ const char* CanonicalFunction(const char* func);
     }                                                                          \
   } while (0)
 
+#ifdef SUPPORT_TIMELINE
+#define API_TIMELINE_DURATION(thread)                                          \
+  TimelineBeginEndScope api_tbes(thread, Timeline::GetAPIStream(), CURRENT_FUNC)
+
+#define API_TIMELINE_BEGIN_END(thread)                                         \
+  TimelineBeginEndScope api_tbes(thread, Timeline::GetAPIStream(), CURRENT_FUNC)
+
+#else
+#define API_TIMELINE_DURATION(thread)                                          \
+  do {                                                                         \
+  } while (false)
+#define API_TIMELINE_BEGIN_END(thread)                                         \
+  do {                                                                         \
+  } while (false)
+#endif  // !PRODUCT
 
 class Api : AllStatic {
  public:
   // Create on the stack to provide a new throw-safe api scope.
-  class Scope : public StackResource {
+  class Scope : public ThreadStackResource {
    public:
-    explicit Scope(Thread* thread) : StackResource(thread) {
-      Dart_EnterScope();
+    explicit Scope(Thread* thread) : ThreadStackResource(thread) {
+      thread->EnterApiScope();
     }
-    ~Scope() { Dart_ExitScope(); }
+    ~Scope() { thread()->ExitApiScope(); }
 
    private:
     DISALLOW_COPY_AND_ASSIGN(Scope);
   };
 
   // Creates a new local handle.
-  static Dart_Handle NewHandle(Thread* thread, RawObject* raw);
+  static Dart_Handle NewHandle(Thread* thread, ObjectPtr raw);
 
   // Unwraps the raw object from the handle.
-  static RawObject* UnwrapHandle(Dart_Handle object);
+  static ObjectPtr UnwrapHandle(Dart_Handle object);
 
 // Unwraps a raw Type from the handle.  The handle will be null if
 // the object was not of the requested Type.
@@ -143,29 +174,32 @@ class Api : AllStatic {
   // Casts the internal Isolate* type to the external Dart_Isolate type.
   static Dart_Isolate CastIsolate(Isolate* isolate);
 
+  // Casts the internal IsolateGroup* type to the external Dart_IsolateGroup
+  // type.
+  static Dart_IsolateGroup CastIsolateGroup(IsolateGroup* isolate);
+
   // Gets the handle used to designate successful return.
   static Dart_Handle Success() { return Api::True(); }
 
-  // Sets up the acquired error object after initializing an Isolate. This
-  // object is pre-created because we will not be able to allocate this
-  // object when the error actually occurs. When the error occurs there will
-  // be outstanding acquires to internal data pointers making it unsafe to
-  // allocate objects on the dart heap.
-  static void SetupAcquiredError(Isolate* isolate);
-
-  // Gets the handle which holds the pre-created acquired error object.
-  static Dart_Handle AcquiredError(Isolate* isolate);
-
   // Returns true if the handle holds a Smi.
   static bool IsSmi(Dart_Handle handle) {
-    // TODO(turnidge): Assumes RawObject* is at offset zero.  Fix.
-    RawObject* raw = *(reinterpret_cast<RawObject**>(handle));
+    // Important: we do not require current thread to be in VM state because
+    // we do not dereference the handle.
+    ObjectPtr raw = *(reinterpret_cast<ObjectPtr*>(handle));
     return !raw->IsHeapObject();
+  }
+
+  // Returns the value of a Smi.
+  static intptr_t SmiValue(Dart_Handle handle) {
+    // Important: we do not require current thread to be in VM state because
+    // we do not dereference the handle.
+    ObjectPtr value = *(reinterpret_cast<ObjectPtr*>(handle));
+    return Smi::Value(static_cast<SmiPtr>(value));
   }
 
   // Returns true if the handle holds a Dart Instance.
   static bool IsInstance(Dart_Handle handle) {
-    return (ClassId(handle) >= kInstanceCid);
+    return !IsInternalOnlyClassId(ClassId(handle));
   }
 
   // Returns true if the handle is non-dangling.
@@ -173,19 +207,11 @@ class Api : AllStatic {
 
   // Returns true if the handle holds an Error.
   static bool IsError(Dart_Handle handle) {
-    return RawObject::IsErrorClassId(ClassId(handle));
-  }
-
-  // Returns the value of a Smi.
-  static intptr_t SmiValue(Dart_Handle handle) {
-    // TODO(turnidge): Assumes RawObject* is at offset zero.  Fix.
-    uword value = *(reinterpret_cast<uword*>(handle));
-    return Smi::ValueFromRaw(value);
+    return IsErrorClassId(ClassId(handle));
   }
 
   static intptr_t ClassId(Dart_Handle handle) {
-    // TODO(turnidge): Assumes RawObject* is at offset zero.  Fix.
-    RawObject* raw = *(reinterpret_cast<RawObject**>(handle));
+    ObjectPtr raw = UnwrapHandle(handle);
     if (!raw->IsHeapObject()) {
       return kSmiCid;
     }
@@ -194,6 +220,8 @@ class Api : AllStatic {
 
   // Generates a handle used to designate an error return.
   static Dart_Handle NewError(const char* format, ...) PRINTF_ATTRIBUTE(1, 2);
+  static Dart_Handle NewArgumentError(const char* format, ...)
+      PRINTF_ATTRIBUTE(1, 2);
 
   // Gets a handle to Null.
   static Dart_Handle Null() { return null_handle_; }
@@ -207,14 +235,33 @@ class Api : AllStatic {
   // Gets a handle to EmptyString.
   static Dart_Handle EmptyString() { return empty_string_handle_; }
 
+  // Gets the handle which holds the pre-created acquired error object.
+  static Dart_Handle NoCallbacksError() { return no_callbacks_error_handle_; }
+
+  // Gets the handle for unwind-is-in-progress error.
+  static Dart_Handle UnwindInProgressError() {
+    return unwind_in_progress_error_handle_;
+  }
+
+  static bool IsProtectedHandle(Dart_Handle object) {
+    if (object == NULL) return false;
+    return (object == true_handle_) || (object == false_handle_) ||
+           (object == null_handle_) || (object == empty_string_handle_) ||
+           (object == no_callbacks_error_handle_) ||
+           (object == unwind_in_progress_error_handle_);
+  }
+
   // Retrieves the top ApiLocalScope.
   static ApiLocalScope* TopScope(Thread* thread);
 
-  // Performs one-time initialization needed by the API.
-  static void InitOnce();
+  // Performs initialization needed by the API.
+  static void Init();
 
   // Allocates handles for objects in the VM isolate.
   static void InitHandles();
+
+  // Cleanup
+  static void Cleanup();
 
   // Helper function to get the peer value of an external string object.
   static bool StringGetPeerHelper(NativeArguments* args,
@@ -261,12 +308,14 @@ class Api : AllStatic {
   static void SetWeakHandleReturnValue(NativeArguments* args,
                                        Dart_WeakPersistentHandle retval);
 
-  static RawString* GetEnvironmentValue(Thread* thread, const String& name);
+  static StringPtr GetEnvironmentValue(Thread* thread, const String& name);
+
+  static bool IsFfiEnabled() { return FLAG_enable_ffi; }
 
  private:
-  static Dart_Handle InitNewHandle(Thread* thread, RawObject* raw);
+  static Dart_Handle InitNewHandle(Thread* thread, ObjectPtr raw);
 
-  static RawString* CallEnvironmentCallback(Thread* thread, const String& name);
+  static StringPtr CallEnvironmentCallback(Thread* thread, const String& name);
 
   // Thread local key used by the API. Currently holds the current
   // ApiNativeScope if any.
@@ -275,6 +324,8 @@ class Api : AllStatic {
   static Dart_Handle false_handle_;
   static Dart_Handle null_handle_;
   static Dart_Handle empty_string_handle_;
+  static Dart_Handle no_callbacks_error_handle_;
+  static Dart_Handle unwind_in_progress_error_handle_;
 
   friend class ApiNativeScope;
 };
@@ -287,18 +338,22 @@ class Api : AllStatic {
 
 #define CHECK_CALLBACK_STATE(thread)                                           \
   if (thread->no_callback_scope_depth() != 0) {                                \
-    return reinterpret_cast<Dart_Handle>(                                      \
-        Api::AcquiredError(thread->isolate()));                                \
-  }
-
-#define CHECK_COMPILATION_ALLOWED(isolate)                                     \
-  if (!isolate->compilation_allowed()) {                                       \
-    return Api::NewError("%s: Cannot load after Dart_Precompile",              \
-                         CURRENT_FUNC);                                        \
+    return reinterpret_cast<Dart_Handle>(Api::NoCallbacksError());             \
+  }                                                                            \
+  if (thread->is_unwind_in_progress()) {                                       \
+    return reinterpret_cast<Dart_Handle>(Api::UnwindInProgressError());        \
   }
 
 #define ASSERT_CALLBACK_STATE(thread)                                          \
   ASSERT(thread->no_callback_scope_depth() == 0)
+
+class IsolateGroupSource;
+
+// Creates a new isolate from [source] (which should come from an existing
+// isolate).
+Isolate* CreateWithinExistingIsolateGroup(IsolateGroup* group,
+                                          const char* name,
+                                          char** error);
 
 }  // namespace dart.
 

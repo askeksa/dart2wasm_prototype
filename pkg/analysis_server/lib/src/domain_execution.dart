@@ -1,84 +1,88 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-library domain.execution;
-
-import 'dart:async';
 import 'dart:collection';
-import 'dart:core';
 
-import 'package:analysis_server/protocol/protocol.dart';
-import 'package:analysis_server/protocol/protocol_generated.dart';
+import 'package:analysis_server/protocol/protocol_constants.dart';
 import 'package:analysis_server/src/analysis_server.dart';
-import 'package:analysis_server/src/constants.dart';
+import 'package:analysis_server/src/protocol_server.dart';
+import 'package:analysis_server/src/utilities/progress.dart';
 import 'package:analyzer/file_system/file_system.dart';
-import 'package:analyzer/src/dart/analysis/driver.dart';
-import 'package:analyzer/src/generated/engine.dart';
-import 'package:analyzer/src/generated/source.dart';
 
-/**
- * Instances of the class [ExecutionDomainHandler] implement a [RequestHandler]
- * that handles requests in the `execution` domain.
- */
+/// Instances of the class [ExecutionDomainHandler] implement a [RequestHandler]
+/// that handles requests in the `execution` domain.
 class ExecutionDomainHandler implements RequestHandler {
-  /**
-   * The analysis server that is using this handler to process requests.
-   */
+  /// The analysis server that is using this handler to process requests.
   final AnalysisServer server;
 
-  /**
-   * The next execution context identifier to be returned.
-   */
+  /// The next execution context identifier to be returned.
   int nextContextId = 0;
 
-  /**
-   * A table mapping execution context id's to the root of the context.
-   */
-  Map<String, String> contextMap = new HashMap<String, String>();
+  /// A table mapping execution context id's to the root of the context.
+  final Map<String, String> contextMap = HashMap<String, String>();
 
-  /**
-   * The subscription to the 'onAnalysisComplete' events,
-   * used to send notifications when
-   */
-  StreamSubscription onFileAnalyzed;
-
-  /**
-   * Initialize a newly created handler to handle requests for the given [server].
-   */
+  /// Initialize a newly created handler to handle requests for the given
+  /// [server].
   ExecutionDomainHandler(this.server);
 
-  /**
-   * Implement the `execution.createContext` request.
-   */
+  /// Implement the `execution.createContext` request.
   Response createContext(Request request) {
-    String file =
-        new ExecutionCreateContextParams.fromRequest(request).contextRoot;
-    String contextId = (nextContextId++).toString();
+    var file = ExecutionCreateContextParams.fromRequest(request).contextRoot;
+    var contextId = (nextContextId++).toString();
     contextMap[contextId] = file;
-    return new ExecutionCreateContextResult(contextId).toResponse(request.id);
+    return ExecutionCreateContextResult(contextId).toResponse(request.id);
   }
 
-  /**
-   * Implement the `execution.deleteContext` request.
-   */
+  /// Implement the `execution.deleteContext` request.
   Response deleteContext(Request request) {
-    String contextId = new ExecutionDeleteContextParams.fromRequest(request).id;
+    var contextId = ExecutionDeleteContextParams.fromRequest(request).id;
     contextMap.remove(contextId);
-    return new ExecutionDeleteContextResult().toResponse(request.id);
+    return ExecutionDeleteContextResult().toResponse(request.id);
+  }
+
+  /// Implement the 'execution.getSuggestions' request.
+  void getSuggestions(Request request) async {
+//    var params = new ExecutionGetSuggestionsParams.fromRequest(request);
+//    var computer = new RuntimeCompletionComputer(
+//        server.resourceProvider,
+//        server.fileContentOverlay,
+//        server.getAnalysisDriver(params.contextFile),
+//        params.code,
+//        params.offset,
+//        params.contextFile,
+//        params.contextOffset,
+//        params.variables,
+//        params.expressions);
+//    RuntimeCompletionResult completionResult = await computer.compute();
+//
+//    // Send the response.
+//    var result = new ExecutionGetSuggestionsResult(
+//        suggestions: completionResult.suggestions,
+//        expressions: completionResult.expressions);
+    // TODO(brianwilkerson) Re-enable this functionality after implementing a
+    // way of computing suggestions that is compatible with AnalysisSession.
+    var result = ExecutionGetSuggestionsResult(
+        suggestions: <CompletionSuggestion>[],
+        expressions: <RuntimeCompletionExpression>[]);
+    server.sendResponse(result.toResponse(request.id));
   }
 
   @override
-  Response handleRequest(Request request) {
+  Response? handleRequest(
+      Request request, CancellationToken cancellationToken) {
     try {
-      String requestName = request.method;
-      if (requestName == EXECUTION_CREATE_CONTEXT) {
+      var requestName = request.method;
+      if (requestName == EXECUTION_REQUEST_CREATE_CONTEXT) {
         return createContext(request);
-      } else if (requestName == EXECUTION_DELETE_CONTEXT) {
+      } else if (requestName == EXECUTION_REQUEST_DELETE_CONTEXT) {
         return deleteContext(request);
-      } else if (requestName == EXECUTION_MAP_URI) {
+      } else if (requestName == EXECUTION_REQUEST_GET_SUGGESTIONS) {
+        getSuggestions(request);
+        return Response.DELAYED_RESPONSE;
+      } else if (requestName == EXECUTION_REQUEST_MAP_URI) {
         return mapUri(request);
-      } else if (requestName == EXECUTION_SET_SUBSCRIPTIONS) {
+      } else if (requestName == EXECUTION_REQUEST_SET_SUBSCRIPTIONS) {
         return setSubscriptions(request);
       }
     } on RequestFailure catch (exception) {
@@ -87,185 +91,59 @@ class ExecutionDomainHandler implements RequestHandler {
     return null;
   }
 
-  /**
-   * Implement the 'execution.mapUri' request.
-   */
+  /// Implement the 'execution.mapUri' request.
   Response mapUri(Request request) {
-    ExecutionMapUriParams params =
-        new ExecutionMapUriParams.fromRequest(request);
-    String contextId = params.id;
-    String path = contextMap[contextId];
+    var params = ExecutionMapUriParams.fromRequest(request);
+    var contextId = params.id;
+    var path = contextMap[contextId];
     if (path == null) {
-      return new Response.invalidParameter(request, 'id',
+      return Response.invalidParameter(request, 'id',
           'There is no execution context with an id of $contextId');
     }
 
-    SourceFactory sourceFactory;
-    AnalysisDriver driver;
-    if (server.options.enableNewAnalysisDriver) {
-      driver = server.getAnalysisDriver(path);
-      if (driver == null) {
-        return new Response.invalidExecutionContext(request, contextId);
-      }
-      sourceFactory = driver.sourceFactory;
-    } else {
-      AnalysisContext context = server.getContainingContext(path);
-      if (context == null) {
-        return new Response.invalidExecutionContext(request, contextId);
-      }
-      sourceFactory = context.sourceFactory;
+    var driver = server.getAnalysisDriver(path);
+    if (driver == null) {
+      return Response.invalidExecutionContext(request, contextId);
     }
+    var sourceFactory = driver.sourceFactory;
 
-    String file = params.file;
-    String uri = params.uri;
+    var file = params.file;
+    var uri = params.uri;
     if (file != null) {
       if (uri != null) {
-        return new Response.invalidParameter(request, 'file',
+        return Response.invalidParameter(request, 'file',
             'Either file or uri must be provided, but not both');
       }
-      Resource resource = server.resourceProvider.getResource(file);
+      var resource = server.resourceProvider.getResource(file);
       if (!resource.exists) {
-        return new Response.invalidParameter(request, 'file', 'Must exist');
+        return Response.invalidParameter(request, 'file', 'Must exist');
       } else if (resource is! File) {
-        return new Response.invalidParameter(
+        return Response.invalidParameter(
             request, 'file', 'Must not refer to a directory');
       }
 
-      Source source;
-      if (server.options.enableNewAnalysisDriver) {
-        source = driver.fsState.getFileForPath(file).source;
-      } else {
-        ContextSourcePair contextSource = server.getContextSourcePair(file);
-        source = contextSource.source;
-      }
-      if (source.uriKind != UriKind.FILE_URI) {
+      var source = driver.fsState.getFileForPath(file).source;
+      if (!source.uri.isScheme('file')) {
         uri = source.uri.toString();
       } else {
-        uri = sourceFactory.restoreUri(source).toString();
+        uri = sourceFactory.pathToUri(file).toString();
       }
-      return new ExecutionMapUriResult(uri: uri).toResponse(request.id);
+      return ExecutionMapUriResult(uri: uri).toResponse(request.id);
     } else if (uri != null) {
-      Source source = sourceFactory.forUri(uri);
+      var source = sourceFactory.forUri(uri);
       if (source == null) {
-        return new Response.invalidParameter(request, 'uri', 'Invalid URI');
+        return Response.invalidParameter(request, 'uri', 'Invalid URI');
       }
       file = source.fullName;
-      return new ExecutionMapUriResult(file: file).toResponse(request.id);
+      return ExecutionMapUriResult(file: file).toResponse(request.id);
     }
-    return new Response.invalidParameter(
+    return Response.invalidParameter(
         request, 'file', 'Either file or uri must be provided');
   }
 
-  /**
-   * Implement the 'execution.setSubscriptions' request.
-   */
+  /// Implement the 'execution.setSubscriptions' request.
   Response setSubscriptions(Request request) {
-    if (server.options.enableNewAnalysisDriver) {
-      // Under the analysis driver, setSubscriptions() becomes a no-op.
-      return new ExecutionSetSubscriptionsResult().toResponse(request.id);
-    } else {
-      List<ExecutionService> subscriptions =
-          new ExecutionSetSubscriptionsParams.fromRequest(request)
-              .subscriptions;
-      if (subscriptions.contains(ExecutionService.LAUNCH_DATA)) {
-        if (onFileAnalyzed == null) {
-          onFileAnalyzed = server.onFileAnalyzed.listen(_fileAnalyzed);
-          _reportCurrentFileStatus();
-        }
-      } else {
-        if (onFileAnalyzed != null) {
-          onFileAnalyzed.cancel();
-          onFileAnalyzed = null;
-        }
-      }
-      return new ExecutionSetSubscriptionsResult().toResponse(request.id);
-    }
-  }
-
-  void _fileAnalyzed(ChangeNotice notice) {
-    ServerPerformanceStatistics.executionNotifications.makeCurrentWhile(() {
-      Source source = notice.source;
-      String filePath = source.fullName;
-      // check files
-      bool isDartFile = notice.resolvedDartUnit != null;
-      if (!isDartFile) {
-        return;
-      }
-      // prepare context
-      AnalysisContext context = server.getContainingContext(filePath);
-      if (context == null) {
-        return;
-      }
-      // analyze the file
-      if (isDartFile) {
-        ExecutableKind kind = ExecutableKind.NOT_EXECUTABLE;
-        if (context.isClientLibrary(source)) {
-          kind = ExecutableKind.CLIENT;
-          if (context.isServerLibrary(source)) {
-            kind = ExecutableKind.EITHER;
-          }
-        } else if (context.isServerLibrary(source)) {
-          kind = ExecutableKind.SERVER;
-        }
-        server.sendNotification(
-            new ExecutionLaunchDataParams(filePath, kind: kind)
-                .toNotification());
-      }
-    });
-  }
-
-  /**
-   * Return `true` if the given [filePath] represents a file that is in an
-   * analysis root.
-   */
-  bool _isInAnalysisRoot(String filePath) =>
-      server.contextManager.isInAnalysisRoot(filePath);
-
-  void _reportCurrentFileStatus() {
-    for (AnalysisContext context in server.analysisContexts) {
-      List<Source> librarySources = context.librarySources;
-      List<Source> clientSources = context.launchableClientLibrarySources;
-      List<Source> serverSources = context.launchableServerLibrarySources;
-      for (Source source in clientSources) {
-        if (serverSources.remove(source)) {
-          _sendKindNotification(source.fullName, ExecutableKind.EITHER);
-        } else {
-          _sendKindNotification(source.fullName, ExecutableKind.CLIENT);
-        }
-        librarySources.remove(source);
-      }
-      for (Source source in serverSources) {
-        _sendKindNotification(source.fullName, ExecutableKind.SERVER);
-        librarySources.remove(source);
-      }
-      for (Source source in librarySources) {
-        _sendKindNotification(source.fullName, ExecutableKind.NOT_EXECUTABLE);
-      }
-      for (Source source in context.htmlSources) {
-        String filePath = source.fullName;
-        if (_isInAnalysisRoot(filePath)) {
-          List<Source> libraries =
-              context.getLibrariesReferencedFromHtml(source);
-          server.sendNotification(new ExecutionLaunchDataParams(filePath,
-                  referencedFiles: _getFullNames(libraries))
-              .toNotification());
-        }
-      }
-    }
-  }
-
-  /**
-   * Send a notification indicating the [kind] of the file with the given
-   * [filePath], but only if the file is in an analysis root.
-   */
-  void _sendKindNotification(String filePath, ExecutableKind kind) {
-    if (_isInAnalysisRoot(filePath)) {
-      server.sendNotification(
-          new ExecutionLaunchDataParams(filePath, kind: kind).toNotification());
-    }
-  }
-
-  static List<String> _getFullNames(List<Source> sources) {
-    return sources.map((Source source) => source.fullName).toList();
+    // Under the analysis driver, setSubscriptions() becomes a no-op.
+    return ExecutionSetSubscriptionsResult().toResponse(request.id);
   }
 }

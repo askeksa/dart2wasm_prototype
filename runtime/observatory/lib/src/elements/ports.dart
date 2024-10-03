@@ -9,37 +9,26 @@ import 'package:observatory/src/elements/helpers/any_ref.dart';
 import 'package:observatory/src/elements/helpers/nav_bar.dart';
 import 'package:observatory/src/elements/helpers/nav_menu.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/instance_ref.dart';
 import 'package:observatory/src/elements/nav/isolate_menu.dart';
 import 'package:observatory/src/elements/nav/notify.dart';
 import 'package:observatory/src/elements/nav/refresh.dart';
 import 'package:observatory/src/elements/nav/top_menu.dart';
 import 'package:observatory/src/elements/nav/vm_menu.dart';
-import 'package:observatory/src/elements/view_footer.dart';
 
-class PortsElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<PortsElement>('ports-page', dependencies: const [
-    NavTopMenuElement.tag,
-    NavVMMenuElement.tag,
-    NavIsolateMenuElement.tag,
-    NavRefreshElement.tag,
-    NavNotifyElement.tag,
-    InstanceRefElement.tag,
-    ViewFooterElement.tag
-  ]);
-
-  RenderingScheduler<PortsElement> _r;
+class PortsElement extends CustomElement implements Renderable {
+  late RenderingScheduler<PortsElement> _r;
 
   Stream<RenderedEvent<PortsElement>> get onRendered => _r.onRendered;
 
-  M.VM _vm;
-  M.IsolateRef _isolate;
-  M.EventRepository _events;
-  M.NotificationRepository _notifications;
-  M.PortsRepository _ports;
-  M.ObjectRepository _objects;
-  M.Ports _isolatePorts;
+  late M.VM _vm;
+  late M.IsolateRef _isolate;
+  late M.EventRepository _events;
+  late M.NotificationRepository _notifications;
+  late M.PortsRepository _ports;
+  late M.ObjectRepository _objects;
+  M.Ports? _isolatePorts;
 
   M.IsolateRef get isolate => _isolate;
   M.NotificationRepository get notifications => _notifications;
@@ -53,15 +42,15 @@ class PortsElement extends HtmlElement implements Renderable {
       M.NotificationRepository notifications,
       M.PortsRepository ports,
       M.ObjectRepository objects,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(vm != null);
     assert(isolate != null);
     assert(events != null);
     assert(notifications != null);
     assert(ports != null);
     assert(objects != null);
-    PortsElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    PortsElement e = new PortsElement.created();
+    e._r = new RenderingScheduler<PortsElement>(e, queue: queue);
     e._vm = vm;
     e._isolate = isolate;
     e._events = events;
@@ -71,10 +60,10 @@ class PortsElement extends HtmlElement implements Renderable {
     return e;
   }
 
-  PortsElement.created() : super.created();
+  PortsElement.created() : super.created('ports-page');
 
   int get portCount {
-    return _isolatePorts == null ? 0 : _isolatePorts.elements.length;
+    return _isolatePorts == null ? 0 : _isolatePorts!.elements.length;
   }
 
   @override
@@ -87,30 +76,30 @@ class PortsElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [
-      navBar([
-        new NavTopMenuElement(queue: _r.queue),
-        new NavVMMenuElement(_vm, _events, queue: _r.queue),
-        new NavIsolateMenuElement(_isolate, _events, queue: _r.queue),
+    children = <Element>[
+      navBar(<Element>[
+        new NavTopMenuElement(queue: _r.queue).element,
+        new NavVMMenuElement(_vm, _events, queue: _r.queue).element,
+        new NavIsolateMenuElement(_isolate, _events, queue: _r.queue).element,
         navMenu('ports'),
-        new NavRefreshElement(queue: _r.queue)
-          ..onRefresh.listen((_) => _refresh()),
-        new NavNotifyElement(_notifications, queue: _r.queue)
+        (new NavRefreshElement(queue: _r.queue)
+              ..onRefresh.listen((_) => _refresh()))
+            .element,
+        new NavNotifyElement(_notifications, queue: _r.queue).element
       ]),
       new DivElement()
         ..classes = ['content-centered']
-        ..children = [
+        ..children = <Element>[
           new HeadingElement.h1()..text = 'Ports ($portCount)',
           new HRElement(),
           new BRElement(),
           new DivElement()..children = _createList(),
         ],
-      new ViewFooterElement(queue: _r.queue)
     ];
   }
 
@@ -119,13 +108,13 @@ class PortsElement extends HtmlElement implements Renderable {
       return const [];
     }
     int i = 0;
-    return _isolatePorts.elements
-        .map((port) => new DivElement()
+    return _isolatePorts!.elements
+        .map<Element>((port) => new DivElement()
           ..classes = ['memberItem']
-          ..children = [
+          ..children = <Element>[
             new DivElement()
               ..classes = ['memberName']
-              ..children = [
+              ..children = <Element>[
                 new SpanElement()
                   ..classes = ['port-number']
                   ..text = '[ ${++i} ] ',
@@ -133,7 +122,7 @@ class PortsElement extends HtmlElement implements Renderable {
               ],
             new DivElement()
               ..classes = ['memberValue']
-              ..children = [
+              ..children = <Element>[
                 anyRef(_isolate, port.handler, _objects, queue: _r.queue)
               ]
           ])

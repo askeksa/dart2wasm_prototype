@@ -11,8 +11,8 @@ class A {
   A(this.f);
 }
 
-foo(i) {
-  var j = 0x7fffffffffffffff + i;
+foo(int i) {
+  int j = 0x7fffffffffffffff + i;
   var c = new A(j); // allocation will be sunk
   var r = 0;
   for (var k = 0; k < 10; k++) {

@@ -1,15 +1,14 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'package:analysis_server/src/services/correction/status.dart';
 import 'package:analyzer_plugin/protocol/protocol_common.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'abstract_rename.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(RenameLocalTest);
   });
@@ -17,9 +16,9 @@ main() {
 
 @reflectiveTest
 class RenameLocalTest extends RenameRefactoringTest {
-  test_checkFinalConditions_hasLocalFunction_after() async {
+  Future<void> test_checkFinalConditions_hasLocalFunction_after() async {
     await indexTestUnit('''
-main() {
+void f() {
   int test = 0;
   newName() => 1;
 }
@@ -27,15 +26,15 @@ main() {
     createRenameRefactoringAtString('test = 0');
     // check status
     refactoring.newName = 'newName';
-    RefactoringStatus status = await refactoring.checkFinalConditions();
+    var status = await refactoring.checkFinalConditions();
     assertRefactoringStatus(status, RefactoringProblemSeverity.ERROR,
         expectedMessage: "Duplicate function 'newName'.",
         expectedContextSearch: 'newName() => 1');
   }
 
-  test_checkFinalConditions_hasLocalFunction_before() async {
+  Future<void> test_checkFinalConditions_hasLocalFunction_before() async {
     await indexTestUnit('''
-main() {
+void f() {
   newName() => 1;
   int test = 0;
 }
@@ -43,14 +42,14 @@ main() {
     createRenameRefactoringAtString('test = 0');
     // check status
     refactoring.newName = 'newName';
-    RefactoringStatus status = await refactoring.checkFinalConditions();
+    var status = await refactoring.checkFinalConditions();
     assertRefactoringStatus(status, RefactoringProblemSeverity.ERROR,
         expectedMessage: "Duplicate function 'newName'.");
   }
 
-  test_checkFinalConditions_hasLocalVariable_after() async {
+  Future<void> test_checkFinalConditions_hasLocalVariable_after() async {
     await indexTestUnit('''
-main() {
+void f() {
   int test = 0;
   var newName = 1;
   print(newName);
@@ -59,16 +58,16 @@ main() {
     createRenameRefactoringAtString('test = 0');
     // check status
     refactoring.newName = 'newName';
-    RefactoringStatus status = await refactoring.checkFinalConditions();
+    var status = await refactoring.checkFinalConditions();
     expect(status.problems, hasLength(1));
     assertRefactoringStatus(status, RefactoringProblemSeverity.ERROR,
         expectedMessage: "Duplicate local variable 'newName'.",
         expectedContextSearch: 'newName = 1;');
   }
 
-  test_checkFinalConditions_hasLocalVariable_before() async {
+  Future<void> test_checkFinalConditions_hasLocalVariable_before() async {
     await indexTestUnit('''
-main() {
+void f() {
   var newName = 1;
   int test = 0;
 }
@@ -76,15 +75,15 @@ main() {
     createRenameRefactoringAtString('test = 0');
     // check status
     refactoring.newName = 'newName';
-    RefactoringStatus status = await refactoring.checkFinalConditions();
+    var status = await refactoring.checkFinalConditions();
     assertRefactoringStatus(status, RefactoringProblemSeverity.ERROR,
         expectedMessage: "Duplicate local variable 'newName'.",
         expectedContextSearch: 'newName = 1;');
   }
 
-  test_checkFinalConditions_hasLocalVariable_otherBlock() async {
+  Future<void> test_checkFinalConditions_hasLocalVariable_otherBlock() async {
     await indexTestUnit('''
-main() {
+void f() {
   {
     var newName = 1;
   }
@@ -99,9 +98,10 @@ main() {
     return assertRefactoringConditionsOK();
   }
 
-  test_checkFinalConditions_hasLocalVariable_otherForEachLoop() async {
+  Future<void>
+      test_checkFinalConditions_hasLocalVariable_otherForEachLoop() async {
     await indexTestUnit('''
-main() {
+void f() {
   for (int newName in []) {}
   for (int test in []) {}
 }
@@ -112,9 +112,9 @@ main() {
     return assertRefactoringConditionsOK();
   }
 
-  test_checkFinalConditions_hasLocalVariable_otherForLoop() async {
+  Future<void> test_checkFinalConditions_hasLocalVariable_otherForLoop() async {
     await indexTestUnit('''
-main() {
+void f() {
   for (int newName = 0; newName < 10; newName++) {}
   for (int test = 0; test < 10; test++) {}
 }
@@ -125,12 +125,13 @@ main() {
     return assertRefactoringConditionsOK();
   }
 
-  test_checkFinalConditions_hasLocalVariable_otherFunction() async {
+  Future<void>
+      test_checkFinalConditions_hasLocalVariable_otherFunction() async {
     await indexTestUnit('''
-main() {
+void f() {
   int test = 0;
 }
-main2() {
+void g() {
   var newName = 1;
 }
 ''');
@@ -140,11 +141,11 @@ main2() {
     return assertRefactoringConditionsOK();
   }
 
-  test_checkFinalConditions_shadows_classMember() async {
+  Future<void> test_checkFinalConditions_shadows_classMember() async {
     await indexTestUnit('''
 class A {
   var newName = 1;
-  main() {
+  void f() {
     var test = 0;
     print(newName);
   }
@@ -153,14 +154,15 @@ class A {
     createRenameRefactoringAtString('test = 0');
     // check status
     refactoring.newName = 'newName';
-    RefactoringStatus status = await refactoring.checkFinalConditions();
+    var status = await refactoring.checkFinalConditions();
     assertRefactoringStatus(status, RefactoringProblemSeverity.ERROR,
         expectedMessage: 'Usage of field "A.newName" declared in "test.dart" '
             'will be shadowed by renamed local variable.',
         expectedContextSearch: 'newName);');
   }
 
-  test_checkFinalConditions_shadows_classMember_namedParameter() async {
+  Future<void>
+      test_checkFinalConditions_shadows_classMember_namedParameter() async {
     await indexTestUnit('''
 class A {
   foo({test: 1}) { // in A
@@ -176,18 +178,19 @@ class B extends A {
     createRenameRefactoringAtString('test: 1}) { // in A');
     // check status
     refactoring.newName = 'newName';
-    RefactoringStatus status = await refactoring.checkFinalConditions();
+    var status = await refactoring.checkFinalConditions();
     assertRefactoringStatus(status, RefactoringProblemSeverity.ERROR,
         expectedMessage: 'Usage of field "B.newName" declared in "test.dart" '
             'will be shadowed by renamed parameter.',
         expectedContextSearch: 'newName);');
   }
 
-  test_checkFinalConditions_shadows_classMemberOK_qualifiedReference() async {
+  Future<void>
+      test_checkFinalConditions_shadows_classMemberOK_qualifiedReference() async {
     await indexTestUnit('''
 class A {
   var newName = 1;
-  main() {
+  void f() {
     var test = 0;
     print(this.newName);
   }
@@ -199,10 +202,11 @@ class A {
     return assertRefactoringConditionsOK();
   }
 
-  test_checkFinalConditions_shadows_OK_namedParameterReference() async {
+  Future<void>
+      test_checkFinalConditions_shadows_OK_namedParameterReference() async {
     await indexTestUnit('''
 void f({newName}) {}
-main() {
+void g() {
   var test = 0;
   f(newName: test);
 }
@@ -213,10 +217,10 @@ main() {
     return assertRefactoringFinalConditionsOK();
   }
 
-  test_checkFinalConditions_shadows_topLevelFunction() async {
+  Future<void> test_checkFinalConditions_shadows_topLevelFunction() async {
     await indexTestUnit('''
 newName() {}
-main() {
+void f() {
   var test = 0;
   newName(); // ref
 }
@@ -224,69 +228,64 @@ main() {
     createRenameRefactoringAtString('test = 0');
     // check status
     refactoring.newName = 'newName';
-    RefactoringStatus status = await refactoring.checkFinalConditions();
+    var status = await refactoring.checkFinalConditions();
     assertRefactoringStatus(status, RefactoringProblemSeverity.ERROR,
         expectedContextSearch: 'newName(); // ref');
   }
 
-  test_checkNewName_FunctionElement() async {
+  Future<void> test_checkNewName_FunctionElement() async {
     await indexTestUnit('''
-main() {
+void f() {
   int test() => 0;
 }
 ''');
     createRenameRefactoringAtString('test() => 0;');
-    // null
-    refactoring.newName = null;
-    assertRefactoringStatus(
-        refactoring.checkNewName(), RefactoringProblemSeverity.FATAL,
-        expectedMessage: "Function name must not be null.");
-    // OK
-    refactoring.newName = 'newName';
-    assertRefactoringStatusOK(refactoring.checkNewName());
-  }
-
-  test_checkNewName_LocalVariableElement() async {
-    await indexTestUnit('''
-main() {
-  int test = 0;
-}
-''');
-    createRenameRefactoringAtString('test = 0;');
-    // null
-    refactoring.newName = null;
-    assertRefactoringStatus(
-        refactoring.checkNewName(), RefactoringProblemSeverity.FATAL,
-        expectedMessage: "Variable name must not be null.");
     // empty
     refactoring.newName = '';
     assertRefactoringStatus(
         refactoring.checkNewName(), RefactoringProblemSeverity.FATAL,
-        expectedMessage: "Variable name must not be empty.");
+        expectedMessage: 'Function name must not be empty.');
     // OK
     refactoring.newName = 'newName';
     assertRefactoringStatusOK(refactoring.checkNewName());
   }
 
-  test_checkNewName_ParameterElement() async {
+  Future<void> test_checkNewName_LocalVariableElement() async {
     await indexTestUnit('''
-main(test) {
+void f() {
+  int test = 0;
+}
+''');
+    createRenameRefactoringAtString('test = 0;');
+    // empty
+    refactoring.newName = '';
+    assertRefactoringStatus(
+        refactoring.checkNewName(), RefactoringProblemSeverity.FATAL,
+        expectedMessage: 'Variable name must not be empty.');
+    // OK
+    refactoring.newName = 'newName';
+    assertRefactoringStatusOK(refactoring.checkNewName());
+  }
+
+  Future<void> test_checkNewName_ParameterElement() async {
+    await indexTestUnit('''
+void f(test) {
 }
 ''');
     createRenameRefactoringAtString('test) {');
-    // null
-    refactoring.newName = null;
+    // empty
+    refactoring.newName = '';
     assertRefactoringStatus(
         refactoring.checkNewName(), RefactoringProblemSeverity.FATAL,
-        expectedMessage: "Parameter name must not be null.");
+        expectedMessage: 'Parameter name must not be empty.');
     // OK
     refactoring.newName = 'newName';
     assertRefactoringStatusOK(refactoring.checkNewName());
   }
 
-  test_createChange_localFunction() async {
+  Future<void> test_createChange_localFunction() async {
     await indexTestUnit('''
-main() {
+void f() {
   int test() => 0;
   print(test);
   print(test());
@@ -299,7 +298,7 @@ main() {
     refactoring.newName = 'newName';
     // validate change
     return assertSuccessfulRefactoring('''
-main() {
+void f() {
   int newName() => 0;
   print(newName);
   print(newName());
@@ -307,9 +306,10 @@ main() {
 ''');
   }
 
-  test_createChange_localFunction_sameNameDifferenceScopes() async {
+  Future<void>
+      test_createChange_localFunction_sameNameDifferenceScopes() async {
     await indexTestUnit('''
-main() {
+void f() {
   {
     int test() => 0;
     print(test);
@@ -330,7 +330,7 @@ main() {
     refactoring.newName = 'newName';
     // validate change
     return assertSuccessfulRefactoring('''
-main() {
+void f() {
   {
     int test() => 0;
     print(test);
@@ -347,9 +347,9 @@ main() {
 ''');
   }
 
-  test_createChange_localVariable() async {
+  Future<void> test_createChange_localVariable() async {
     await indexTestUnit('''
-main() {
+void f() {
   int test = 0;
   test = 1;
   test += 2;
@@ -363,7 +363,7 @@ main() {
     refactoring.newName = 'newName';
     // validate change
     return assertSuccessfulRefactoring('''
-main() {
+void f() {
   int newName = 0;
   newName = 1;
   newName += 2;
@@ -372,9 +372,10 @@ main() {
 ''');
   }
 
-  test_createChange_localVariable_sameNameDifferenceScopes() async {
+  Future<void>
+      test_createChange_localVariable_sameNameDifferenceScopes() async {
     await indexTestUnit('''
-main() {
+void f() {
   {
     int test = 0;
     print(test);
@@ -395,7 +396,7 @@ main() {
     refactoring.newName = 'newName';
     // validate change
     return assertSuccessfulRefactoring('''
-main() {
+void f() {
   {
     int test = 0;
     print(test);
@@ -412,14 +413,14 @@ main() {
 ''');
   }
 
-  test_createChange_parameter() async {
+  Future<void> test_createChange_parameter_named() async {
     await indexTestUnit('''
-myFunction({int test}) {
+myFunction({required int test}) {
   test = 1;
   test += 2;
   print(test);
 }
-main() {
+void f() {
   myFunction(test: 2);
 }
 ''');
@@ -430,76 +431,188 @@ main() {
     refactoring.newName = 'newName';
     // validate change
     return assertSuccessfulRefactoring('''
-myFunction({int newName}) {
+myFunction({required int newName}) {
   newName = 1;
   newName += 2;
   print(newName);
 }
-main() {
+void f() {
   myFunction(newName: 2);
 }
 ''');
   }
 
-  test_createChange_parameter_named_inOtherFile() async {
+  Future<void> test_createChange_parameter_named_anywhere() async {
     await indexTestUnit('''
+myFunction(int a, int b, {required int test}) {
+  test = 1;
+  test += 2;
+  print(test);
+}
+void f() {
+  myFunction(0, test: 2, 1);
+}
+''');
+    // configure refactoring
+    createRenameRefactoringAtString('test}) {');
+    expect(refactoring.refactoringName, 'Rename Parameter');
+    expect(refactoring.elementKindName, 'parameter');
+    refactoring.newName = 'newName';
+    // validate change
+    return assertSuccessfulRefactoring('''
+myFunction(int a, int b, {required int newName}) {
+  newName = 1;
+  newName += 2;
+  print(newName);
+}
+void f() {
+  myFunction(0, newName: 2, 1);
+}
+''');
+  }
+
+  Future<void> test_createChange_parameter_named_inOtherFile() async {
+    var a = convertPath('$testPackageLibPath/a.dart');
+    var b = convertPath('$testPackageLibPath/b.dart');
+
+    newFile(a, content: r'''
 class A {
   A({test});
 }
 ''');
-    await indexUnit(
-        '/test2.dart',
-        '''
-import 'test.dart';
-main() {
+    newFile(b, content: r'''
+import 'a.dart';
+
+void f() {
   new A(test: 2);
 }
 ''');
-    // configure refactoring
+    await analyzeTestPackageFiles();
+
+    testFile = a;
+    await resolveTestFile();
+
     createRenameRefactoringAtString('test});');
     expect(refactoring.refactoringName, 'Rename Parameter');
     refactoring.newName = 'newName';
-    // validate change
+
     await assertSuccessfulRefactoring('''
 class A {
   A({newName});
 }
 ''');
-    assertFileChangeResult(
-        '/test2.dart',
-        '''
-import 'test.dart';
-main() {
+    assertFileChangeResult(b, '''
+import 'a.dart';
+
+void f() {
   new A(newName: 2);
 }
 ''');
   }
 
-  test_createChange_parameter_named_updateHierarchy() async {
-    await indexUnit(
-        '/test2.dart',
-        '''
+  Future<void>
+      test_createChange_parameter_named_ofConstructor_genericClass() async {
+    await indexTestUnit('''
+class A<T> {
+  A({required T test});
+}
+
+void f() {
+  A(test: 0);
+}
+''');
+    // configure refactoring
+    createRenameRefactoringAtString('test}');
+    expect(refactoring.refactoringName, 'Rename Parameter');
+    expect(refactoring.elementKindName, 'parameter');
+    refactoring.newName = 'newName';
+    // validate change
+    return assertSuccessfulRefactoring('''
+class A<T> {
+  A({required T newName});
+}
+
+void f() {
+  A(newName: 0);
+}
+''');
+  }
+
+  Future<void> test_createChange_parameter_named_ofMethod_genericClass() async {
+    await indexTestUnit('''
+class A<T> {
+  void foo({required T test}) {}
+}
+
+void f(A<int> a) {
+  a.foo(test: 0);
+}
+''');
+    // configure refactoring
+    createRenameRefactoringAtString('test}');
+    expect(refactoring.refactoringName, 'Rename Parameter');
+    expect(refactoring.elementKindName, 'parameter');
+    refactoring.newName = 'newName';
+    // validate change
+    return assertSuccessfulRefactoring('''
+class A<T> {
+  void foo({required T newName}) {}
+}
+
+void f(A<int> a) {
+  a.foo(newName: 0);
+}
+''');
+  }
+
+  Future<void> test_createChange_parameter_named_super() async {
+    await indexTestUnit('''
+class A {
+  A({required int test}); // 0
+}
+class B extends A {
+  B({required super.test});
+}
+''');
+    // configure refactoring
+    createRenameRefactoringAtString('test}); // 0');
+    expect(refactoring.refactoringName, 'Rename Parameter');
+    expect(refactoring.elementKindName, 'parameter');
+    refactoring.newName = 'newName';
+    // validate change
+    return assertSuccessfulRefactoring('''
+class A {
+  A({required int newName}); // 0
+}
+class B extends A {
+  B({required super.newName});
+}
+''');
+  }
+
+  Future<void> test_createChange_parameter_named_updateHierarchy() async {
+    await indexUnit('$testPackageLibPath/test2.dart', '''
 library test2;
 class A {
-  void foo({int test: 1}) {
+  void foo({int? test}) {
     print(test);
   }
 }
 class B extends A {
-  void foo({int test: 2}) {
+  void foo({int? test}) {
     print(test);
   }
 }
 ''');
     await indexTestUnit('''
 import 'test2.dart';
-main() {
+void f() {
   new A().foo(test: 10);
   new B().foo(test: 20);
   new C().foo(test: 30);
 }
 class C extends A {
-  void foo({int test: 3}) {
+  void foo({int? test}) {
     print(test);
   }
 }
@@ -511,37 +624,91 @@ class C extends A {
     // validate change
     await assertSuccessfulRefactoring('''
 import 'test2.dart';
-main() {
+void f() {
   new A().foo(newName: 10);
   new B().foo(newName: 20);
   new C().foo(newName: 30);
 }
 class C extends A {
-  void foo({int newName: 3}) {
+  void foo({int? newName}) {
     print(newName);
   }
 }
 ''');
-    assertFileChangeResult(
-        '/test2.dart',
-        '''
+    assertFileChangeResult('$testPackageLibPath/test2.dart', '''
 library test2;
 class A {
-  void foo({int newName: 1}) {
+  void foo({int? newName}) {
     print(newName);
   }
 }
 class B extends A {
-  void foo({int newName: 2}) {
+  void foo({int? newName}) {
     print(newName);
   }
 }
 ''');
   }
 
-  test_oldName() async {
+  Future<void> test_createChange_parameter_optionalPositional() async {
     await indexTestUnit('''
-main() {
+myFunction([int? test]) {
+  test = 1;
+  test += 2;
+  print(test);
+}
+void f() {
+  myFunction(2);
+}
+''');
+    // configure refactoring
+    createRenameRefactoringAtString('test]) {');
+    expect(refactoring.refactoringName, 'Rename Parameter');
+    expect(refactoring.elementKindName, 'parameter');
+    refactoring.newName = 'newName';
+    // validate change
+    return assertSuccessfulRefactoring('''
+myFunction([int? newName]) {
+  newName = 1;
+  newName += 2;
+  print(newName);
+}
+void f() {
+  myFunction(2);
+}
+''');
+  }
+
+  Future<void> test_createChange_parameter_positional_super() async {
+    await indexTestUnit('''
+class A {
+  A(int test); // 0
+}
+class B extends A {
+  B(super.test);
+}
+''');
+
+    createRenameRefactoringAtString('test); // 0');
+    expect(refactoring.refactoringName, 'Rename Parameter');
+    expect(refactoring.elementKindName, 'parameter');
+    refactoring.newName = 'newName';
+
+    // The name of the super-formal parameter does not have to be the same.
+    // So, we don't rename it.
+    return assertSuccessfulRefactoring('''
+class A {
+  A(int newName); // 0
+}
+class B extends A {
+  B(super.test);
+}
+''');
+  }
+
+  Future<void> test_oldName() async {
+    await indexTestUnit('''
+void f() {
   int test = 0;
 }
 ''');
@@ -549,5 +716,31 @@ main() {
     createRenameRefactoringAtString('test = 0');
     // old name
     expect(refactoring.oldName, 'test');
+  }
+
+  Future<void> test_reuseNameOfCalledConstructor() async {
+    // https://github.com/dart-lang/sdk/issues/45105
+    await indexTestUnit('''
+class Foo {
+  Foo.now();
+}
+
+test() {
+  final foo = Foo.now();
+}
+''');
+    // configure refactoring
+    createRenameRefactoringAtString('foo =');
+    refactoring.newName = 'now';
+    // validate change
+    return assertSuccessfulRefactoring('''
+class Foo {
+  Foo.now();
+}
+
+test() {
+  final now = Foo.now();
+}
+''');
   }
 }

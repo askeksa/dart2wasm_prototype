@@ -9,8 +9,8 @@ import 'package:expect/expect.dart';
 
 import 'declarations_model_easier.dart' as declarations_model;
 
-selectKeys(map, predicate) {
-  return map.keys.where((key) => predicate(map[key]));
+selectKeys<K, V>(Map<K, V> map, bool Function(V) predicate) {
+  return map.keys.where((K key) => predicate(map[key] as V));
 }
 
 class EasierSuperclass {
@@ -54,15 +54,18 @@ main() {
     #==,
     #noSuchMethod,
     #toString
-  ], selectKeys(cm.instanceMembers, (dm) => !dm.isPrivate));
+  ], selectKeys(cm.instanceMembers, (dynamic dm) => !dm.isPrivate));
   // Filter out private to avoid implementation-specific members of Object.
 
-  Expect.setEquals([
-    #instanceVariable,
-    const Symbol('instanceVariable='),
-    #inheritedInstanceVariable,
-    const Symbol('inheritedInstanceVariable=')
-  ], selectKeys(cm.instanceMembers, (dm) => !dm.isPrivate && dm.isSynthetic));
+  Expect.setEquals(
+      [
+        #instanceVariable,
+        const Symbol('instanceVariable='),
+        #inheritedInstanceVariable,
+        const Symbol('inheritedInstanceVariable=')
+      ],
+      selectKeys(
+          cm.instanceMembers, (dynamic dm) => !dm.isPrivate && dm.isSynthetic));
 
   cm = reflectClass(Derived);
   Expect.setEquals([
@@ -75,7 +78,7 @@ main() {
     #==,
     #noSuchMethod,
     #toString
-  ], selectKeys(cm.instanceMembers, (dm) => !dm.isPrivate));
+  ], selectKeys(cm.instanceMembers, (dynamic dm) => !dm.isPrivate));
 
   cm = reflectClass(EasierMixinApplication);
   Expect.setEquals([
@@ -87,5 +90,5 @@ main() {
     #==,
     #noSuchMethod,
     #toString
-  ], selectKeys(cm.instanceMembers, (dm) => !dm.isPrivate));
+  ], selectKeys(cm.instanceMembers, (dynamic dm) => !dm.isPrivate));
 }

@@ -55,15 +55,27 @@ abstract class DebugEvent extends Event {
   IsolateRef get isolate;
 }
 
+abstract class BreakpointEvent extends DebugEvent {
+  /// [optional] The breakpoint associated with this event.
+  Breakpoint get breakpoint;
+}
+
+abstract class PauseEvent extends DebugEvent {}
+
+abstract class AsyncSuspensionEvent extends PauseEvent {
+  /// Is the isolate paused at an await, yield, or yield* statement?
+  bool get atAsyncSuspension;
+}
+
 abstract class DebuggerSettingsUpdateEvent extends DebugEvent {}
 
-abstract class PauseStartEvent extends DebugEvent {}
+abstract class PauseStartEvent extends PauseEvent {}
 
-abstract class PauseExitEvent extends DebugEvent {}
+abstract class PauseExitEvent extends PauseEvent {}
 
-abstract class PauseBreakpointEvent extends DebugEvent {
+abstract class PauseBreakpointEvent extends AsyncSuspensionEvent {
   /// [optional] The breakpoint at which we are currently paused.
-  Breakpoint get breakpoint;
+  Breakpoint? get breakpoint;
 
   /// The list of breakpoints at which we are currently paused
   /// for a PauseBreakpoint event.
@@ -77,28 +89,21 @@ abstract class PauseBreakpointEvent extends DebugEvent {
 
   /// The top stack frame associated with this event.
   Frame get topFrame;
-  bool get atAsyncSuspension;
 }
 
-abstract class PauseInterruptedEvent extends DebugEvent {
+abstract class PauseInterruptedEvent extends AsyncSuspensionEvent {
   /// [optional] The top stack frame associated with this event. There will be
   /// no top frame if the isolate is idle (waiting in the message loop).
-  Frame get topFrame;
-
-  /// Is the isolate paused at an await, yield, or yield* statement?
-  bool get atAsyncSuspension;
+  Frame? get topFrame;
 }
 
-abstract class PausePostRequestEvent extends DebugEvent {
+abstract class PausePostRequestEvent extends AsyncSuspensionEvent {
   /// [optional] The top stack frame associated with this event. There will be
   /// no top frame if the isolate is idle (waiting in the message loop).
-  Frame get topFrame;
-
-  /// Is the isolate paused at an await, yield, or yield* statement?
-  bool get atAsyncSuspension;
+  Frame? get topFrame;
 }
 
-abstract class PauseExceptionEvent extends DebugEvent {
+abstract class PauseExceptionEvent extends PauseEvent {
   /// The top stack frame associated with this event.
   Frame get topFrame;
 
@@ -110,30 +115,21 @@ abstract class ResumeEvent extends DebugEvent {
   /// [optional] The top stack frame associated with this event. It is provided
   /// at all times except for the initial resume event that is delivered when an
   /// isolate begins execution.
-  Frame get topFrame;
+  Frame? get topFrame;
 }
 
-abstract class BreakpointAddedEvent extends DebugEvent {
-  /// The breakpoint which was added.
-  Breakpoint get breakpoint;
-}
+abstract class BreakpointAddedEvent extends BreakpointEvent {}
 
-abstract class BreakpointResolvedEvent extends DebugEvent {
-  /// The breakpoint which was resolved.
-  Breakpoint get breakpoint;
-}
+abstract class BreakpointResolvedEvent extends BreakpointEvent {}
 
-abstract class BreakpointRemovedEvent extends DebugEvent {
-  /// The breakpoint which was removed.
-  Breakpoint get breakpoint;
-}
+abstract class BreakpointRemovedEvent extends BreakpointEvent {}
 
 abstract class InspectEvent extends DebugEvent {
   /// The argument passed to dart:developer.inspect.
   InstanceRef get inspectee;
 }
 
-abstract class NoneEvent extends DebugEvent {}
+abstract class NoneEvent extends PauseEvent {}
 
 abstract class GCEvent extends Event {
   /// The isolate with which this event is associated.
@@ -172,7 +168,7 @@ abstract class ConnectionClosedEvent extends Event {
   String get reason;
 }
 
-Frame topFrame(DebugEvent event) {
+Frame? topFrame(Event? event) {
   if (event is PauseBreakpointEvent) {
     return event.topFrame;
   }
@@ -188,7 +184,7 @@ Frame topFrame(DebugEvent event) {
   return null;
 }
 
-bool isAtAsyncSuspension(DebugEvent event) {
+bool isAtAsyncSuspension(DebugEvent? event) {
   if (event is PauseBreakpointEvent) {
     return event.atAsyncSuspension;
   }
@@ -197,3 +193,18 @@ bool isAtAsyncSuspension(DebugEvent event) {
   }
   return false;
 }
+
+abstract class ServiceEvent extends Event {
+  /// The identifier of the service
+  String get service;
+
+  /// The JSON-RPC 2.0 Method that identifes this instance
+  String get method;
+}
+
+abstract class ServiceRegisteredEvent extends ServiceEvent {
+  /// The alias associated with this new instance
+  String get alias;
+}
+
+abstract class ServiceUnregisteredEvent extends ServiceEvent {}

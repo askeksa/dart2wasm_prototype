@@ -5,10 +5,15 @@
 #ifndef RUNTIME_VM_RANDOM_H_
 #define RUNTIME_VM_RANDOM_H_
 
-#include "vm/globals.h"
+#include <atomic>
+
 #include "vm/allocation.h"
+#include "vm/flags.h"
+#include "vm/globals.h"
 
 namespace dart {
+
+DECLARE_FLAG(uint64_t, random_seed);
 
 class Random {
  public:
@@ -24,10 +29,10 @@ class Random {
   }
 
  private:
-  void NextState();
+  uint64_t NextState();
   void Initialize(uint64_t seed);
 
-  uint64_t _state;
+  std::atomic<uint64_t> _state;
 
   DISALLOW_COPY_AND_ASSIGN(Random);
 };

@@ -7,30 +7,30 @@ part of app;
 /// The observatory application. Instances of this are created and owned
 /// by the observatory_application custom element.
 class ObservatoryApplication {
-  static ObservatoryApplication app;
+  static late ObservatoryApplication app;
   final RenderingQueue queue = new RenderingQueue();
-  final TargetRepository targets = new TargetRepository();
+  final TargetRepository targets = new TargetRepository(isConnectedVMTarget);
   final EventRepository events = new EventRepository();
   final NotificationRepository notifications = new NotificationRepository();
-  final _pageRegistry = new List<Page>();
-  LocationManager _locationManager;
+  final _pageRegistry = <Page>[];
+  late LocationManager _locationManager;
   LocationManager get locationManager => _locationManager;
-  Page currentPage;
+  Page? currentPage;
   bool _vmConnected = false;
-  VM _vm;
-  VM get vm => _vm;
+  VM? _vm;
+  VM get vm => _vm!;
 
-  bool isConnectedVMTarget(WebSocketVMTarget target) {
-    if (_vm is CommonWebSocketVM) {
-      if ((_vm as CommonWebSocketVM).target == target) {
-        return _vm.isConnected;
+  static bool isConnectedVMTarget(M.Target target) {
+    if (app._vm is CommonWebSocketVM) {
+      if ((app._vm as CommonWebSocketVM).target == target) {
+        return app._vm!.isConnected;
       }
     }
     return false;
   }
 
-  _switchVM(VM newVM) {
-    final VM oldVM = _vm;
+  _switchVM(VM? newVM) {
+    final VM? oldVM = _vm;
 
     Logger.root.info('_switchVM from:${oldVM} to:${newVM}');
 
@@ -51,15 +51,21 @@ class ObservatoryApplication {
       // Mark that we haven't connected yet.
       _vmConnected = false;
       // On connect:
-      newVM.onConnect.then((_) {
+      newVM.onConnect.then((_) async {
         // We connected.
         _vmConnected = true;
         notifications.deleteDisconnectEvents();
+        await newVM.load();
+        // TODO(cbernaschina) smart connection of streams in the events object.
+        newVM.listenEventStream(VM.kVMStream, _onEvent);
+        newVM.listenEventStream(VM.kIsolateStream, _onEvent);
+        newVM.listenEventStream(VM.kDebugStream, _onEvent);
+        newVM.listenEventStream(VM.kServiceStream, _onEvent);
       });
       // On disconnect:
       newVM.onDisconnect.then((String reason) {
         if (this.vm != newVM) {
-          // This disconnect event occured *after* a new VM was installed.
+          // This disconnect event occurred *after* a new VM was installed.
           return;
         }
         // Let anyone looking at the targets know that we have disconnected
@@ -78,23 +84,19 @@ class ObservatoryApplication {
           events.add(new ConnectionClosedEvent(new DateTime.now(), reason));
         }
       });
-      // TODO(cbernaschina) smart connection of streams in the events object.
-      newVM.listenEventStream(VM.kVMStream, _onEvent);
-      newVM.listenEventStream(VM.kIsolateStream, _onEvent);
-      newVM.listenEventStream(VM.kDebugStream, _onEvent);
     }
 
     _vm = newVM;
   }
 
-  StreamSubscription _gcSubscription;
-  StreamSubscription _loggingSubscription;
+  StreamSubscription? _gcSubscription;
+  StreamSubscription? _loggingSubscription;
 
   Future startGCEventListener() async {
     if (_gcSubscription != null || _vm == null) {
       return;
     }
-    _gcSubscription = await _vm.listenEventStream(VM.kGCStream, _onEvent);
+    _gcSubscription = await _vm!.listenEventStream(VM.kGCStream, _onEvent);
   }
 
   Future startLoggingEventListener() async {
@@ -102,14 +104,14 @@ class ObservatoryApplication {
       return;
     }
     _loggingSubscription =
-        await _vm.listenEventStream(Isolate.kLoggingStream, _onEvent);
+        await _vm!.listenEventStream(Isolate.kLoggingStream, _onEvent);
   }
 
   Future stopGCEventListener() async {
     if (_gcSubscription == null) {
       return;
     }
-    _gcSubscription.cancel();
+    _gcSubscription!.cancel();
     _gcSubscription = null;
   }
 
@@ -117,19 +119,17 @@ class ObservatoryApplication {
     if (_loggingSubscription == null) {
       return;
     }
-    _loggingSubscription.cancel();
+    _loggingSubscription!.cancel();
     _loggingSubscription = null;
   }
 
   final ObservatoryApplicationElement rootElement;
 
-  ServiceObject lastErrorOrException;
+  ServiceObject? lastErrorOrException;
 
   void _initOnce() {
-    assert(app == null);
     app = this;
     _registerPages();
-    Analytics.initialize();
     // Visit the current page.
     locationManager._visit();
   }
@@ -144,7 +144,7 @@ class ObservatoryApplication {
 
   void _onEvent(ServiceEvent event) {
     assert(event.kind != ServiceEvent.kNone);
-    M.Event e = createEventFromServiceEvent(event);
+    M.Event? e = createEventFromServiceEvent(event);
     if (e != null) {
       events.add(e);
     }
@@ -171,12 +171,13 @@ class ObservatoryApplication {
     _pageRegistry.add(new PortsPage(this));
     _pageRegistry.add(new LoggingPage(this));
     _pageRegistry.add(new TimelinePage(this));
+    _pageRegistry.add(new ProcessSnapshotPage(this));
     // Note that ErrorPage must be the last entry in the list as it is
     // the catch all.
     _pageRegistry.add(new ErrorPage(this));
   }
 
-  void _visit(Uri uri, Map internalArguments) {
+  void _visit(Uri uri, Map<String, String> internalArguments) {
     if (internalArguments['trace'] != null) {
       var traceArg = internalArguments['trace'];
       if (traceArg == 'on') {
@@ -186,7 +187,7 @@ class ObservatoryApplication {
       }
     }
     if (Tracer.current != null) {
-      Tracer.current.reset();
+      Tracer.current!.reset();
     }
     for (var i = 0; i < _pageRegistry.length; i++) {
       var page = _pageRegistry[i];
@@ -196,7 +197,7 @@ class ObservatoryApplication {
         return;
       }
     }
-    throw new FallThroughError();
+    throw new ArgumentError.value(uri, 'uri');
   }
 
   /// Set the Observatory application page.
@@ -208,7 +209,7 @@ class ObservatoryApplication {
     }
     if (currentPage != null) {
       Logger.root.info('Uninstalling page: $currentPage');
-      currentPage.onUninstall();
+      currentPage!.onUninstall();
       // Clear children.
       rootElement.children.clear();
     }
@@ -219,7 +220,7 @@ class ObservatoryApplication {
       Logger.root.severe('Failed to install page: $e');
     }
     // Add new page.
-    rootElement.children.add(page.element);
+    rootElement.children.add(page.element!);
 
     // Remember page.
     currentPage = page;
@@ -234,18 +235,24 @@ class ObservatoryApplication {
       }
       if (targets.current == null) {
         _switchVM(null);
-      }
-      final bool currentTarget =
-          (_vm as WebSocketVM)?.target == targets.current;
-      final bool currentTargetConnected = (_vm != null) && !_vm.isDisconnected;
-      if (!currentTarget || !currentTargetConnected) {
-        _switchVM(new WebSocketVM(targets.current));
-        app.locationManager.go(Uris.vm());
+      } else {
+        final bool currentTarget =
+            (_vm as WebSocketVM?)?.target == targets.current;
+        final bool currentTargetConnected = (_vm != null) && _vm!.isConnected;
+        if (!currentTarget || !currentTargetConnected) {
+          _switchVM(new WebSocketVM(targets.current!));
+          _vm!.onConnect.then((_) {
+            app.locationManager.go(Uris.vm());
+          });
+          _vm!.load();
+        } else if (currentTargetConnected) {
+          app.locationManager.go(Uris.vm());
+        }
       }
     });
 
-    Logger.root.info('Setting initial target to ${targets.current.name}');
-    _switchVM(new WebSocketVM(targets.current));
+    Logger.root.info('Setting initial target to ${targets.current!.name}');
+    _switchVM(new WebSocketVM(targets.current!));
     _initOnce();
 
     // delete pause events.
@@ -265,11 +272,6 @@ class ObservatoryApplication {
     events.onPauseException.listen(_addNotification);
     events.onInspect.listen(_addNotification);
     events.onConnectionClosed.listen(_addNotification);
-  }
-
-  loadCrashDump(Map crashDump) {
-    _switchVM(new FakeVM(crashDump['result']));
-    app.locationManager.go(Uris.vm());
   }
 
   void handleException(e, st) {

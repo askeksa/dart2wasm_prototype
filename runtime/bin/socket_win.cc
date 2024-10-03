@@ -2,40 +2,45 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "platform/globals.h"
-#if defined(HOST_OS_WINDOWS)
+#if defined(DART_HOST_OS_WINDOWS)
 
 #include "bin/builtin.h"
 #include "bin/eventhandler.h"
 #include "bin/file.h"
 #include "bin/lockers.h"
-#include "bin/log.h"
 #include "bin/socket.h"
 #include "bin/socket_base_win.h"
 #include "bin/thread.h"
 #include "bin/utils.h"
 #include "bin/utils_win.h"
+#include "platform/syslog.h"
 
 namespace dart {
 namespace bin {
 
-Socket::Socket(intptr_t fd) : ReferenceCounted(), fd_(fd), port_(ILLEGAL_PORT) {
+Socket::Socket(intptr_t fd)
+    : ReferenceCounted(),
+      fd_(fd),
+      isolate_port_(Dart_GetMainPortId()),
+      port_(ILLEGAL_PORT),
+      udp_receive_buffer_(NULL) {
   ASSERT(fd_ != kClosedFd);
   Handle* handle = reinterpret_cast<Handle*>(fd_);
   ASSERT(handle != NULL);
 }
 
-
-void Socket::SetClosedFd() {
+void Socket::CloseFd() {
   ASSERT(fd_ != kClosedFd);
   Handle* handle = reinterpret_cast<Handle*>(fd_);
   ASSERT(handle != NULL);
   handle->Release();
-  fd_ = kClosedFd;
+  SetClosedFd();
 }
 
+void Socket::SetClosedFd() {
+  fd_ = kClosedFd;
+}
 
 static intptr_t Create(const RawAddr& addr) {
   SOCKET s = socket(addr.ss.ss_family, SOCK_STREAM, 0);
@@ -55,7 +60,6 @@ static intptr_t Create(const RawAddr& addr) {
   ClientSocket* client_socket = new ClientSocket(s);
   return reinterpret_cast<intptr_t>(client_socket);
 }
-
 
 static intptr_t Connect(intptr_t fd,
                         const RawAddr& addr,
@@ -90,7 +94,6 @@ static intptr_t Connect(intptr_t fd,
     status = connectEx(s, &addr.addr, SocketAddress::GetAddrLength(addr), NULL,
                        0, NULL, overlapped->GetCleanOverlapped());
 
-
     if (status == TRUE) {
       handle->ConnectComplete(overlapped);
       return fd;
@@ -110,7 +113,6 @@ static intptr_t Connect(intptr_t fd,
   return -1;
 }
 
-
 intptr_t Socket::CreateConnect(const RawAddr& addr) {
   intptr_t fd = Create(addr);
   if (fd < 0) {
@@ -129,6 +131,12 @@ intptr_t Socket::CreateConnect(const RawAddr& addr) {
   return Connect(fd, addr, bind_addr);
 }
 
+intptr_t Socket::CreateUnixDomainConnect(const RawAddr& addr) {
+  // TODO(21403): Support unix domain socket on Windows
+  // https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/
+  SetLastError(ERROR_NOT_SUPPORTED);
+  return -1;
+}
 
 intptr_t Socket::CreateBindConnect(const RawAddr& addr,
                                    const RawAddr& source_addr) {
@@ -140,6 +148,11 @@ intptr_t Socket::CreateBindConnect(const RawAddr& addr,
   return Connect(fd, addr, source_addr);
 }
 
+intptr_t Socket::CreateUnixDomainBindConnect(const RawAddr& addr,
+                                             const RawAddr& source_addr) {
+  SetLastError(ERROR_NOT_SUPPORTED);
+  return -1;
+}
 
 intptr_t ServerSocket::Accept(intptr_t fd) {
   ListenSocket* listen_socket = reinterpret_cast<ListenSocket*>(fd);
@@ -151,8 +164,10 @@ intptr_t ServerSocket::Accept(intptr_t fd) {
   }
 }
 
-
-intptr_t Socket::CreateBindDatagram(const RawAddr& addr, bool reuseAddress) {
+intptr_t Socket::CreateBindDatagram(const RawAddr& addr,
+                                    bool reuseAddress,
+                                    bool reusePort,
+                                    int ttl) {
   SOCKET s = socket(addr.ss.ss_family, SOCK_DGRAM, IPPROTO_UDP);
   if (s == INVALID_SOCKET) {
     return -1;
@@ -171,6 +186,29 @@ intptr_t Socket::CreateBindDatagram(const RawAddr& addr, bool reuseAddress) {
     }
   }
 
+  if (reusePort) {
+    // ignore reusePort - not supported on this platform.
+    Syslog::PrintErr(
+        "Dart Socket ERROR: %s:%d: `reusePort` not supported for "
+        "Windows.",
+        __FILE__, __LINE__);
+  }
+
+  // Can't use SocketBase::SetMulticastHops here - we'd need to create
+  // the DatagramSocket object and reinterpret_cast it here, just for that
+  // method to reinterpret_cast it again.
+  int ttlValue = ttl;
+  int ttlLevel = addr.addr.sa_family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
+  int ttlOptname =
+      addr.addr.sa_family == AF_INET ? IP_MULTICAST_TTL : IPV6_MULTICAST_HOPS;
+  if (setsockopt(s, ttlLevel, ttlOptname, reinterpret_cast<char*>(&ttlValue),
+                 sizeof(ttlValue)) != 0) {
+    DWORD rc = WSAGetLastError();
+    closesocket(s);
+    SetLastError(rc);
+    return -1;
+  }
+
   status = bind(s, &addr.addr, SocketAddress::GetAddrLength(addr));
   if (status == SOCKET_ERROR) {
     DWORD rc = WSAGetLastError();
@@ -181,9 +219,9 @@ intptr_t Socket::CreateBindDatagram(const RawAddr& addr, bool reuseAddress) {
 
   DatagramSocket* datagram_socket = new DatagramSocket(s);
   datagram_socket->EnsureInitialized(EventHandler::delegate());
+
   return reinterpret_cast<intptr_t>(datagram_socket);
 }
-
 
 intptr_t ServerSocket::CreateBindListen(const RawAddr& addr,
                                         intptr_t backlog,
@@ -246,6 +284,13 @@ intptr_t ServerSocket::CreateBindListen(const RawAddr& addr,
   return reinterpret_cast<intptr_t>(listen_socket);
 }
 
+intptr_t ServerSocket::CreateUnixDomainBindListen(const RawAddr& addr,
+                                                  intptr_t backlog) {
+  // TODO(21403): Support unix domain socket on Windows
+  // https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/
+  SetLastError(ERROR_NOT_SUPPORTED);
+  return -1;
+}
 
 bool ServerSocket::StartAccept(intptr_t fd) {
   ListenSocket* listen_socket = reinterpret_cast<ListenSocket*>(fd);
@@ -270,6 +315,4 @@ bool ServerSocket::StartAccept(intptr_t fd) {
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_WINDOWS)
-
-#endif  // !defined(DART_IO_DISABLED)
+#endif  // defined(DART_HOST_OS_WINDOWS)

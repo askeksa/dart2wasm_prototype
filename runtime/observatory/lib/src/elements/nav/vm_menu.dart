@@ -7,21 +7,18 @@ import 'dart:async';
 import 'package:observatory/models.dart' as M show VM, EventRepository;
 import 'package:observatory/src/elements/helpers/nav_menu.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 import 'package:observatory/src/elements/nav/menu_item.dart';
 
-class NavVMMenuElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<NavVMMenuElement>('nav-vm-menu',
-      dependencies: const [NavMenuItemElement.tag]);
-
-  RenderingScheduler _r;
+class NavVMMenuElement extends CustomElement implements Renderable {
+  late RenderingScheduler<NavVMMenuElement> _r;
 
   Stream<RenderedEvent<NavVMMenuElement>> get onRendered => _r.onRendered;
 
-  M.VM _vm;
-  M.EventRepository _events;
-  StreamSubscription _updatesSubscription;
+  late M.VM _vm;
+  late M.EventRepository _events;
+  late StreamSubscription _updatesSubscription;
   Iterable<Element> _content = const [];
 
   M.VM get vm => _vm;
@@ -33,23 +30,23 @@ class NavVMMenuElement extends HtmlElement implements Renderable {
   }
 
   factory NavVMMenuElement(M.VM vm, M.EventRepository events,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(vm != null);
     assert(events != null);
-    NavVMMenuElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    NavVMMenuElement e = new NavVMMenuElement.created();
+    e._r = new RenderingScheduler<NavVMMenuElement>(e, queue: queue);
     e._vm = vm;
     e._events = events;
     return e;
   }
 
-  NavVMMenuElement.created() : super.created();
+  NavVMMenuElement.created() : super.created('nav-vm-menu');
 
   @override
   void attached() {
     super.attached();
     _updatesSubscription = _events.onVMUpdate.listen((e) {
-      _vm = e.vm;
+      _vm = e.vm as M.VM;
       _r.dirty();
     });
     _r.enable();
@@ -58,17 +55,20 @@ class NavVMMenuElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
     _updatesSubscription.cancel();
   }
 
   void render() {
-    final content = (_vm.isolates.map((isolate) {
-      return new NavMenuItemElement(isolate.name,
-          queue: _r.queue, link: Uris.inspect(isolate));
+    final content = (_vm.isolates.map<Element>((isolate) {
+      return new NavMenuItemElement(isolate.name!,
+              queue: _r.queue, link: Uris.inspect(isolate))
+          .element;
     }).toList()
       ..addAll(_content));
-    children = [navMenu(vm.displayName, link: Uris.vm(), content: content)];
+    children = <Element>[
+      navMenu(vm.displayName!, link: Uris.vm(), content: content)
+    ];
   }
 }

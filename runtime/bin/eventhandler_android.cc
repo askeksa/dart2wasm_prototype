@@ -2,10 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "platform/globals.h"
-#if defined(HOST_OS_ANDROID)
+#if defined(DART_HOST_OS_ANDROID)
 
 #include "bin/eventhandler.h"
 #include "bin/eventhandler_android.h"
@@ -21,12 +19,13 @@
 
 #include "bin/dartutils.h"
 #include "bin/fdutils.h"
-#include "bin/log.h"
 #include "bin/lockers.h"
+#include "bin/process.h"
 #include "bin/socket.h"
 #include "bin/thread.h"
 #include "bin/utils.h"
 #include "platform/hashmap.h"
+#include "platform/syslog.h"
 #include "platform/utils.h"
 
 // Android doesn't define EPOLLRDHUP.
@@ -50,13 +49,11 @@ intptr_t DescriptorInfo::GetPollEvents() {
   return events;
 }
 
-
 // Unregister the file descriptor for a DescriptorInfo structure with
 // epoll.
 static void RemoveFromEpollInstance(intptr_t epoll_fd_, DescriptorInfo* di) {
   VOID_NO_RETRY_EXPECTED(epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, di->fd(), NULL));
 }
-
 
 static void AddToEpollInstance(intptr_t epoll_fd_, DescriptorInfo* di) {
   struct epoll_event event;
@@ -78,9 +75,8 @@ static void AddToEpollInstance(intptr_t epoll_fd_, DescriptorInfo* di) {
   }
 }
 
-
 EventHandlerImplementation::EventHandlerImplementation()
-    : socket_map_(&HashMap::SamePointerValue, 16) {
+    : socket_map_(&SimpleHashMap::SamePointerValue, 16) {
   intptr_t result;
   result = NO_RETRY_EXPECTED(pipe(interrupt_fds_));
   if (result != 0) {
@@ -117,21 +113,18 @@ EventHandlerImplementation::EventHandlerImplementation()
   }
 }
 
-
 static void DeleteDescriptorInfo(void* info) {
   DescriptorInfo* di = reinterpret_cast<DescriptorInfo*>(info);
   di->Close();
   delete di;
 }
 
-
 EventHandlerImplementation::~EventHandlerImplementation() {
   socket_map_.Clear(DeleteDescriptorInfo);
-  VOID_TEMP_FAILURE_RETRY(close(epoll_fd_));
-  VOID_TEMP_FAILURE_RETRY(close(interrupt_fds_[0]));
-  VOID_TEMP_FAILURE_RETRY(close(interrupt_fds_[1]));
+  close(epoll_fd_);
+  close(interrupt_fds_[0]);
+  close(interrupt_fds_[1]);
 }
-
 
 void EventHandlerImplementation::UpdateEpollInstance(intptr_t old_mask,
                                                      DescriptorInfo* di) {
@@ -147,13 +140,12 @@ void EventHandlerImplementation::UpdateEpollInstance(intptr_t old_mask,
   }
 }
 
-
 DescriptorInfo* EventHandlerImplementation::GetDescriptorInfo(
     intptr_t fd,
     bool is_listening) {
   ASSERT(fd >= 0);
-  HashMap::Entry* entry = socket_map_.Lookup(GetHashmapKeyFromFd(fd),
-                                             GetHashmapHashFromFd(fd), true);
+  SimpleHashMap::Entry* entry = socket_map_.Lookup(
+      GetHashmapKeyFromFd(fd), GetHashmapHashFromFd(fd), true);
   ASSERT(entry != NULL);
   DescriptorInfo* di = reinterpret_cast<DescriptorInfo*>(entry->value);
   if (di == NULL) {
@@ -169,7 +161,6 @@ DescriptorInfo* EventHandlerImplementation::GetDescriptorInfo(
   ASSERT(fd == di->fd());
   return di;
 }
-
 
 void EventHandlerImplementation::WakeupHandler(intptr_t id,
                                                Dart_Port dart_port,
@@ -191,7 +182,6 @@ void EventHandlerImplementation::WakeupHandler(intptr_t id,
     FATAL1("Interrupt message failure. Wrote %" Pd " bytes.", result);
   }
 }
-
 
 void EventHandlerImplementation::HandleInterruptFd() {
   const intptr_t MAX_MESSAGES = kInterruptMessageSize;
@@ -223,9 +213,14 @@ void EventHandlerImplementation::HandleInterruptFd() {
       } else if (IS_COMMAND(msg[i].data, kCloseCommand)) {
         // Close the socket and free system resources and move on to next
         // message.
+        if (IS_SIGNAL_SOCKET(msg[i].data)) {
+          Process::ClearSignalHandlerByFd(di->fd(), socket->isolate_port());
+        }
         intptr_t old_mask = di->Mask();
         Dart_Port port = msg[i].dart_port;
-        di->RemovePort(port);
+        if (port != ILLEGAL_PORT) {
+          di->RemovePort(port);
+        }
         intptr_t new_mask = di->Mask();
         UpdateEpollInstance(old_mask, di);
 
@@ -245,14 +240,14 @@ void EventHandlerImplementation::HandleInterruptFd() {
                                GetHashmapHashFromFd(fd));
             di->Close();
             delete di;
-            socket->SetClosedFd();
           }
+          socket->CloseFd();
         } else {
           ASSERT(new_mask == 0);
           socket_map_.Remove(GetHashmapKeyFromFd(fd), GetHashmapHashFromFd(fd));
           di->Close();
           delete di;
-          socket->SetClosedFd();
+          socket->CloseFd();
         }
 
         DartUtils::PostInt32(port, 1 << kDestroyedEvent);
@@ -276,39 +271,37 @@ void EventHandlerImplementation::HandleInterruptFd() {
   }
 }
 
-
 #ifdef DEBUG_POLL
 static void PrintEventMask(intptr_t fd, intptr_t events) {
-  Log::Print("%d ", fd);
+  Syslog::Print("%d ", fd);
   if ((events & EPOLLIN) != 0) {
-    Log::Print("EPOLLIN ");
+    Syslog::Print("EPOLLIN ");
   }
   if ((events & EPOLLPRI) != 0) {
-    Log::Print("EPOLLPRI ");
+    Syslog::Print("EPOLLPRI ");
   }
   if ((events & EPOLLOUT) != 0) {
-    Log::Print("EPOLLOUT ");
+    Syslog::Print("EPOLLOUT ");
   }
   if ((events & EPOLLERR) != 0) {
-    Log::Print("EPOLLERR ");
+    Syslog::Print("EPOLLERR ");
   }
   if ((events & EPOLLHUP) != 0) {
-    Log::Print("EPOLLHUP ");
+    Syslog::Print("EPOLLHUP ");
   }
   if ((events & EPOLLRDHUP) != 0) {
-    Log::Print("EPOLLRDHUP ");
+    Syslog::Print("EPOLLRDHUP ");
   }
   int all_events =
       EPOLLIN | EPOLLPRI | EPOLLOUT | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
   if ((events & ~all_events) != 0) {
-    Log::Print("(and %08x) ", events & ~all_events);
+    Syslog::Print("(and %08x) ", events & ~all_events);
   }
-  Log::Print("(available %d) ", FDUtils::AvailableBytes(fd));
+  Syslog::Print("(available %d) ", FDUtils::AvailableBytes(fd));
 
-  Log::Print("\n");
+  Syslog::Print("\n");
 }
 #endif
-
 
 intptr_t EventHandlerImplementation::GetPollEvents(intptr_t events,
                                                    DescriptorInfo* di) {
@@ -331,7 +324,6 @@ intptr_t EventHandlerImplementation::GetPollEvents(intptr_t events,
   }
   return event_mask;
 }
-
 
 void EventHandlerImplementation::HandleEvents(struct epoll_event* events,
                                               int size) {
@@ -362,7 +354,6 @@ void EventHandlerImplementation::HandleEvents(struct epoll_event* events,
   }
 }
 
-
 int64_t EventHandlerImplementation::GetTimeout() {
   if (!timeout_queue_.HasTimeout()) {
     return kInfinityTimeout;
@@ -371,7 +362,6 @@ int64_t EventHandlerImplementation::GetTimeout() {
       timeout_queue_.CurrentTimeout() - TimerUtils::GetCurrentMonotonicMillis();
   return (millis < 0) ? 0 : millis;
 }
-
 
 void EventHandlerImplementation::HandleTimeout() {
   if (timeout_queue_.HasTimeout()) {
@@ -383,7 +373,6 @@ void EventHandlerImplementation::HandleTimeout() {
     }
   }
 }
-
 
 void EventHandlerImplementation::Poll(uword args) {
   ThreadSignalBlocker signal_blocker(SIGPROF);
@@ -415,20 +404,18 @@ void EventHandlerImplementation::Poll(uword args) {
   handler->NotifyShutdownDone();
 }
 
-
 void EventHandlerImplementation::Start(EventHandler* handler) {
-  int result = Thread::Start(&EventHandlerImplementation::Poll,
-                             reinterpret_cast<uword>(handler));
+  int result =
+      Thread::Start("dart:io EventHandler", &EventHandlerImplementation::Poll,
+                    reinterpret_cast<uword>(handler));
   if (result != 0) {
     FATAL1("Failed to start event handler thread %d", result);
   }
 }
 
-
 void EventHandlerImplementation::Shutdown() {
   SendData(kShutdownId, 0, 0);
 }
-
 
 void EventHandlerImplementation::SendData(intptr_t id,
                                           Dart_Port dart_port,
@@ -436,12 +423,10 @@ void EventHandlerImplementation::SendData(intptr_t id,
   WakeupHandler(id, dart_port, data);
 }
 
-
 void* EventHandlerImplementation::GetHashmapKeyFromFd(intptr_t fd) {
   // The hashmap does not support keys with value 0.
   return reinterpret_cast<void*>(fd + 1);
 }
-
 
 uint32_t EventHandlerImplementation::GetHashmapHashFromFd(intptr_t fd) {
   // The hashmap does not support keys with value 0.
@@ -451,6 +436,4 @@ uint32_t EventHandlerImplementation::GetHashmapHashFromFd(intptr_t fd) {
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_ANDROID)
-
-#endif  // !defined(DART_IO_DISABLED)
+#endif  // defined(DART_HOST_OS_ANDROID)

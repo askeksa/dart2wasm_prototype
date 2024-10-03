@@ -12,11 +12,14 @@ not have a human-friendly user interface.
 
 Clients (typically tools, such as an editor) are expected to run the analysis
 server in a separate process and communicate with it using a JSON protocol. The
-protocol is specified in the file [`analysis_server/doc/api.html`][api].
+original protocol is specified in the file [`analysis_server/doc/api.html`][api]
+and [Language Server Protocol][lsp_spec] support is documented in
+[`tool/lsp_spec/README.md`](tool/lsp_spec/README.md).
 
 ## Features and bugs
 
 Please file feature requests and bugs at the [issue tracker][tracker].
 
-[tracker]: https://code.google.com/p/dart/issues
-[api]: https://htmlpreview.github.io/?https://github.com/dart-lang/sdk/blob/master/pkg/analysis_server/doc/api.html
+[tracker]: https://github.com/dart-lang/sdk/issues
+[api]: https://htmlpreview.github.io/?https://github.com/dart-lang/sdk/blob/main/pkg/analysis_server/doc/api.html
+[lsp_spec]: https://microsoft.github.io/language-server-protocol/

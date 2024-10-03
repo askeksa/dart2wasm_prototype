@@ -1,20 +1,19 @@
-// Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2017, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show exitCode, stdin;
 
 import 'package:analyzer/error/error.dart';
 
-typedef Future<ErrorSeverity> BatchRunnerHandler(List<String> args);
+typedef BatchRunnerHandler = Future<ErrorSeverity> Function(List<String> args);
 
 /// Provides a framework to read command line options from stdin and feed them
 /// to a callback.
 class BatchRunner {
-  final outSink;
-  final errorSink;
+  final StringSink outSink;
+  final StringSink errorSink;
 
   BatchRunner(this.outSink, this.errorSink);
 
@@ -23,14 +22,13 @@ class BatchRunner {
   /// use in unit testing.
   void runAsBatch(List<String> sharedArgs, BatchRunnerHandler handler) {
     outSink.writeln('>>> BATCH START');
-    Stopwatch stopwatch = new Stopwatch();
+    var stopwatch = Stopwatch();
     stopwatch.start();
-    int testsFailed = 0;
-    int totalTests = 0;
-    ErrorSeverity batchResult = ErrorSeverity.NONE;
+    var testsFailed = 0;
+    var totalTests = 0;
+    var batchResult = ErrorSeverity.NONE;
     // Read line from stdin.
-    Stream cmdLine =
-        stdin.transform(UTF8.decoder).transform(new LineSplitter());
+    var cmdLine = stdin.transform(utf8.decoder).transform(LineSplitter());
     cmdLine.listen((String line) async {
       // Maybe finish.
       if (line.isEmpty) {
@@ -40,8 +38,8 @@ class BatchRunner {
         exitCode = batchResult.ordinal;
       }
       // Prepare arguments.
-      var lineArgs = line.split(new RegExp('\\s+'));
-      var args = new List<String>();
+      var lineArgs = line.split(RegExp('\\s+'));
+      var args = <String>[];
       args.addAll(sharedArgs);
       args.addAll(lineArgs);
       args.remove('-b');
@@ -49,15 +47,15 @@ class BatchRunner {
       // Analyze single set of arguments.
       try {
         totalTests++;
-        ErrorSeverity result = await handler(args);
-        bool resultPass = result != ErrorSeverity.ERROR;
+        var result = await handler(args);
+        var resultPass = result != ErrorSeverity.ERROR;
         if (!resultPass) {
           testsFailed++;
         }
         batchResult = batchResult.max(result);
         // Write stderr end token and flush.
         errorSink.writeln('>>> EOF STDERR');
-        String resultPassString = resultPass ? 'PASS' : 'FAIL';
+        var resultPassString = resultPass ? 'PASS' : 'FAIL';
         outSink.writeln(
             '>>> TEST $resultPassString ${stopwatch.elapsedMilliseconds}ms');
       } catch (e, stackTrace) {

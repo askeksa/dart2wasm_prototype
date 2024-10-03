@@ -1,11 +1,13 @@
 #!/usr/bin/env dart
 
 /// Converts block-style Doc comments in Dart code to line style.
+
+// @dart = 2.9
 library line_doc_comments;
 
 import 'dart:io';
 
-import '../pkg/path/lib/path.dart' as path;
+import 'package:path/path.dart' as path;
 
 final oneLineBlock = new RegExp(r'^(\s*)/\*\*\s?(.*)\*/\s*$');
 final startBlock = new RegExp(r'^(\s*)/\*\*(.*)$');

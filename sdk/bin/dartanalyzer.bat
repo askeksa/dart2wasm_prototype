@@ -3,6 +3,8 @@ REM Copyright (c) 2013, the Dart project authors.  Please see the AUTHORS file
 REM for details. All rights reserved. Use of this source code is governed by a
 REM BSD-style license that can be found in the LICENSE file.
 
+echo Warning: 'dartanalyzer' is deprecated. Please use 'dart analyze'. 1>&2
+
 setlocal
 rem Handle the case where dart-sdk/bin has been symlinked to.
 set DIR_NAME_WITH_SLASH=%~dp0
@@ -24,7 +26,7 @@ set SDK_ARG=--dart-sdk=%SDK_DIR%
 set EXTRA_VM_OPTIONS=
 
 if _%DARTANALYZER_DEVELOPER_MODE%_ == _1_ (
-  set EXTRA_VM_OPTIONS=%EXTRA_VM_OPTIONS% --checked
+  set EXTRA_VM_OPTIONS=%EXTRA_VM_OPTIONS% --enable_asserts
 )
 
 rem We allow extra vm options to be passed in through an environment variable.

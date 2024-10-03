@@ -13,7 +13,7 @@ final a = init();
 main() {
   var s = 0;
   for (var i = 0; i < 10; i++) {
-    s += a;
+    s += a as int;
   }
   Expect.equals(10 * 123, s);
 }

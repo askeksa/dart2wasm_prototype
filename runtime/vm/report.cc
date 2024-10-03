@@ -17,11 +17,11 @@ namespace dart {
 DEFINE_FLAG(bool, silent_warnings, false, "Silence warnings.");
 DEFINE_FLAG(bool, warning_as_error, false, "Treat warnings as errors.");
 
-RawString* Report::PrependSnippet(Kind kind,
-                                  const Script& script,
-                                  TokenPosition token_pos,
-                                  bool report_after_token,
-                                  const String& message) {
+StringPtr Report::PrependSnippet(Kind kind,
+                                 const Script& script,
+                                 TokenPosition token_pos,
+                                 bool report_after_token,
+                                 const String& message) {
   const char* message_header;
   switch (kind) {
     case kWarning:
@@ -29,12 +29,6 @@ RawString* Report::PrependSnippet(Kind kind,
       break;
     case kError:
       message_header = "error";
-      break;
-    case kMalformedType:
-      message_header = "malformed type";
-      break;
-    case kMalboundedType:
-      message_header = "malbounded type";
       break;
     case kBailout:
       message_header = "bailout";
@@ -44,29 +38,20 @@ RawString* Report::PrependSnippet(Kind kind,
       UNREACHABLE();
   }
   String& result = String::Handle();
-  if (!script.IsNull()) {
+  if (!script.IsNull() && script.HasSource()) {
     const String& script_url = String::Handle(script.url());
-    if (token_pos.IsReal()) {
-      intptr_t line, column, token_len;
-      script.GetTokenLocation(token_pos, &line, &column, &token_len);
+    intptr_t line, column;
+    if (script.GetTokenLocation(token_pos, &line, &column)) {
+      const intptr_t token_len = script.GetTokenLength(token_pos);
       if (report_after_token) {
-        column += token_len;
+        column += token_len < 0 ? 1 : token_len;
       }
-      // Only report the line position if we have the original source. We still
-      // need to get a valid column so that we can report the ^ mark below the
-      // snippet.
       // Allocate formatted strings in old space as they may be created during
       // optimizing compilation. Those strings are created rarely and should not
       // polute old space.
-      if (script.HasSource()) {
-        result = String::NewFormatted(
-            Heap::kOld, "'%s': %s: line %" Pd " pos %" Pd ": ",
-            script_url.ToCString(), message_header, line, column);
-      } else {
-        result =
-            String::NewFormatted(Heap::kOld, "'%s': %s: line %" Pd ": ",
-                                 script_url.ToCString(), message_header, line);
-      }
+      result = String::NewFormatted(
+          Heap::kOld, "'%s': %s: line %" Pd " pos %" Pd ": ",
+          script_url.ToCString(), message_header, line, column);
       // Append the formatted error or warning message.
       const Array& strs = Array::Handle(Array::New(6, Heap::kOld));
       strs.SetAt(0, result);
@@ -85,8 +70,8 @@ RawString* Report::PrependSnippet(Kind kind,
       result = String::ConcatAll(strs, Heap::kOld);
     } else {
       // Token position is unknown.
-      result = String::NewFormatted(Heap::kOld, "'%s': %s: ",
-                                    script_url.ToCString(), message_header);
+      result = String::NewFormatted(
+          Heap::kOld, "'%s': %s: ", script_url.ToCString(), message_header);
       result = String::Concat(result, message, Heap::kOld);
     }
   } else {
@@ -95,15 +80,13 @@ RawString* Report::PrependSnippet(Kind kind,
     result = String::NewFormatted(Heap::kOld, "%s: ", message_header);
     result = String::Concat(result, message, Heap::kOld);
   }
-  return result.raw();
+  return result.ptr();
 }
-
 
 void Report::LongJump(const Error& error) {
   Thread::Current()->long_jump_base()->Jump(1, error);
   UNREACHABLE();
 }
-
 
 void Report::LongJumpF(const Error& prev_error,
                        const Script& script,
@@ -117,19 +100,25 @@ void Report::LongJumpF(const Error& prev_error,
   UNREACHABLE();
 }
 
-
 void Report::LongJumpV(const Error& prev_error,
                        const Script& script,
                        TokenPosition token_pos,
                        const char* format,
                        va_list args) {
+  // If an isolate is being killed a [UnwindError] will be propagated up the
+  // stack. In such a case we cannot wrap the unwind error in a new
+  // [LanguageError]. Instead we simply continue propagating the [UnwindError]
+  // upwards.
+  if (prev_error.IsUnwindError()) {
+    LongJump(prev_error);
+    UNREACHABLE();
+  }
   const Error& error = Error::Handle(LanguageError::NewFormattedV(
       prev_error, script, token_pos, Report::AtLocation, kError, Heap::kOld,
       format, args));
   LongJump(error);
   UNREACHABLE();
 }
-
 
 void Report::MessageF(Kind kind,
                       const Script& script,
@@ -142,7 +131,6 @@ void Report::MessageF(Kind kind,
   MessageV(kind, script, token_pos, report_after_token, format, args);
   va_end(args);
 }
-
 
 void Report::MessageV(Kind kind,
                       const Script& script,
@@ -159,7 +147,7 @@ void Report::MessageV(Kind kind,
       const String& msg = String::Handle(String::NewFormattedV(format, args));
       const String& snippet_msg = String::Handle(
           PrependSnippet(kind, script, token_pos, report_after_token, msg));
-      OS::Print("%s", snippet_msg.ToCString());
+      OS::PrintErr("%s", snippet_msg.ToCString());
       return;
     }
   }

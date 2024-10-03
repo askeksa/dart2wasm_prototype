@@ -8,9 +8,8 @@
 #include "platform/utils.h"
 #include "vm/allocation.h"
 #include "vm/handles.h"
-#include "vm/json_stream.h"
-#include "vm/thread.h"
 #include "vm/memory_region.h"
+#include "vm/thread_state.h"
 
 namespace dart {
 
@@ -42,7 +41,6 @@ class Zone {
   // responsible for avoiding integer overflow yourself.
   inline uword AllocUnsafe(intptr_t size);
 
-
   // Make a copy of the string in the zone allocated area.
   char* MakeCopyOfString(const char* str);
 
@@ -62,12 +60,14 @@ class Zone {
   char* PrintToString(const char* format, ...) PRINTF_ATTRIBUTE(2, 3);
   char* VPrint(const char* format, va_list args);
 
-  // Compute the total size of this zone. This includes wasted space that is
-  // due to internal fragmentation in the segments.
+  // Compute the total size of allocations in this zone.
   uintptr_t SizeInBytes() const;
 
-  // Computes the amount of space used in the zone.
+  // Computes the amount of space used by the zone.
   uintptr_t CapacityInBytes() const;
+
+  // Dump the current allocated sizes in the zone object.
+  void Print() const;
 
   // Structure for managing handles allocation.
   VMHandles* handles() { return &handles_; }
@@ -76,15 +76,28 @@ class Zone {
 
   Zone* previous() const { return previous_; }
 
- private:
-  Zone();
-  ~Zone();  // Delete all memory associated with the zone.
+  bool ContainsNestedZone(Zone* other) const {
+    while (other != NULL) {
+      if (this == other) return true;
+      other = other->previous_;
+    }
+    return false;
+  }
 
   // All pointers returned from AllocateUnsafe() and New() have this alignment.
   static const intptr_t kAlignment = kDoubleSize;
 
+  static void Init();
+  static void Cleanup();
+
+  static intptr_t Size() { return total_size_; }
+
+ private:
+  Zone();
+  ~Zone();  // Delete all memory associated with the zone.
+
   // Default initial chunk size.
-  static const intptr_t kInitialChunkSize = 1 * KB;
+  static const intptr_t kInitialChunkSize = 128;
 
   // Default segment size.
   static const intptr_t kSegmentSize = 64 * KB;
@@ -94,6 +107,9 @@ class Zone {
 
   // Zap value used to indicate uninitialized zone area (debug purposes).
   static const unsigned char kZapUninitializedByte = 0xab;
+
+  // Total size of current zone segments.
+  static RelaxedAtomic<intptr_t> total_size_;
 
   // Expand the zone to accommodate an allocation of 'size' bytes.
   uword AllocateExpand(intptr_t size);
@@ -105,7 +121,7 @@ class Zone {
   void Link(Zone* current_zone) { previous_ = current_zone; }
 
   // Delete all objects and free all memory allocated in the zone.
-  void DeleteAll();
+  void Reset();
 
   // Does not actually free any memory. Enables templated containers like
   // BaseGrowableArray to use different allocators.
@@ -113,25 +129,16 @@ class Zone {
   void Free(ElementType* old_array, intptr_t len) {
 #ifdef DEBUG
     if (len > 0) {
-      memset(old_array, kZapUninitializedByte, len * sizeof(ElementType));
+      ASSERT(old_array != nullptr);
+      memset(static_cast<void*>(old_array), kZapUninitializedByte,
+             len * sizeof(ElementType));
     }
 #endif
   }
 
-  // Dump the current allocated sizes in the zone object.
-  void DumpZoneSizes();
-
   // Overflow check (FATAL) for array length.
   template <class ElementType>
   static inline void CheckLength(intptr_t len);
-
-  // This buffer is used for allocation before any segments.
-  // This would act as the initial stack allocated chunk so that we don't
-  // end up calling malloc/free on zone scopes that allocate less than
-  // kChunkSize
-  COMPILE_ASSERT(kAlignment <= 8);
-  ALIGN8 uint8_t buffer_[kInitialChunkSize];
-  MemoryRegion initial_buffer_;
 
   // The free region in the current (head) segment or the initial buffer is
   // represented as the half-open interval [position, limit). The 'position'
@@ -144,20 +151,31 @@ class Zone {
   // implementation is in zone.cc.
   class Segment;
 
-  // The current head segment; may be NULL.
-  Segment* head_;
+  // Total size of all allocations in this zone.
+  intptr_t size_ = 0;
 
-  // List of large segments allocated in this zone; may be NULL.
-  Segment* large_segments_;
+  // Total size of all segments in [head_].
+  intptr_t small_segment_capacity_ = 0;
 
-  // Structure for managing handles allocation.
-  VMHandles handles_;
+  // List of all segments allocated in this zone; may be NULL.
+  Segment* segments_;
 
   // Used for chaining zones in order to allow unwinding of stacks.
   Zone* previous_;
 
+  // Structure for managing handles allocation.
+  VMHandles handles_;
+
+  // This buffer is used for allocation before any segments.
+  // This would act as the initial stack allocated chunk so that we don't
+  // end up calling malloc/free on zone scopes that allocate less than
+  // kChunkSize
+  COMPILE_ASSERT(kAlignment <= 8);
+  ALIGN8 uint8_t buffer_[kInitialChunkSize];
+
   friend class StackZone;
   friend class ApiZone;
+  friend class AllocOnlyStackZone;
   template <typename T, typename B, typename Allocator>
   friend class BaseGrowableArray;
   template <typename T, typename B, typename Allocator>
@@ -165,26 +183,25 @@ class Zone {
   DISALLOW_COPY_AND_ASSIGN(Zone);
 };
 
-
 class StackZone : public StackResource {
  public:
   // Create an empty zone and set is at the current zone for the Thread.
-  explicit StackZone(Thread* thread);
+  explicit StackZone(ThreadState* thread);
 
   // Delete all memory associated with the zone.
-  ~StackZone();
+  virtual ~StackZone();
 
   // Compute the total size of this zone. This includes wasted space that is
   // due to internal fragmentation in the segments.
-  uintptr_t SizeInBytes() const { return zone_.SizeInBytes(); }
+  uintptr_t SizeInBytes() const { return zone_->SizeInBytes(); }
 
   // Computes the used space in the zone.
-  intptr_t CapacityInBytes() const { return zone_.CapacityInBytes(); }
+  intptr_t CapacityInBytes() const { return zone_->CapacityInBytes(); }
 
-  Zone* GetZone() { return &zone_; }
+  Zone* GetZone() { return zone_; }
 
  private:
-  Zone zone_;
+  Zone* zone_;
 
   template <typename T>
   friend class GrowableArray;
@@ -192,6 +209,23 @@ class StackZone : public StackResource {
   friend class ZoneGrowableArray;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(StackZone);
+};
+
+class AllocOnlyStackZone : public ValueObject {
+ public:
+  AllocOnlyStackZone() : zone_() {}
+  ~AllocOnlyStackZone() {
+    // This zone is not linked into the thread, so any handles would not be
+    // visited.
+    ASSERT(zone_.handles()->IsEmpty());
+  }
+
+  Zone* GetZone() { return &zone_; }
+
+ private:
+  Zone zone_;
+
+  DISALLOW_COPY_AND_ASSIGN(AllocOnlyStackZone);
 };
 
 inline uword Zone::AllocUnsafe(intptr_t size) {
@@ -208,6 +242,7 @@ inline uword Zone::AllocUnsafe(intptr_t size) {
   if (free_size >= size) {
     result = position_;
     position_ += size;
+    size_ += size;
   } else {
     result = AllocateExpand(size);
   }
@@ -217,7 +252,6 @@ inline uword Zone::AllocUnsafe(intptr_t size) {
   return result;
 }
 
-
 template <class ElementType>
 inline void Zone::CheckLength(intptr_t len) {
   const intptr_t kElementSize = sizeof(ElementType);
@@ -226,7 +260,6 @@ inline void Zone::CheckLength(intptr_t len) {
            len, kElementSize);
   }
 }
-
 
 template <class ElementType>
 inline ElementType* Zone::Alloc(intptr_t len) {
@@ -240,23 +273,27 @@ inline ElementType* Zone::Realloc(ElementType* old_data,
                                   intptr_t new_len) {
   CheckLength<ElementType>(new_len);
   const intptr_t kElementSize = sizeof(ElementType);
-  uword old_end = reinterpret_cast<uword>(old_data) + (old_len * kElementSize);
-  // Resize existing allocation if nothing was allocated in between...
-  if (Utils::RoundUp(old_end, kAlignment) == position_) {
-    uword new_end =
-        reinterpret_cast<uword>(old_data) + (new_len * kElementSize);
-    // ...and there is sufficient space.
-    if (new_end <= limit_) {
-      ASSERT(new_len >= old_len);
-      position_ = Utils::RoundUp(new_end, kAlignment);
+  if (old_data != nullptr) {
+    uword old_end =
+        reinterpret_cast<uword>(old_data) + (old_len * kElementSize);
+    // Resize existing allocation if nothing was allocated in between...
+    if (Utils::RoundUp(old_end, kAlignment) == position_) {
+      uword new_end =
+          reinterpret_cast<uword>(old_data) + (new_len * kElementSize);
+      // ...and there is sufficient space.
+      if (new_end <= limit_) {
+        ASSERT(new_len >= old_len);
+        position_ = Utils::RoundUp(new_end, kAlignment);
+        size_ += (new_end - old_end);
+        return old_data;
+      }
+    }
+    if (new_len <= old_len) {
       return old_data;
     }
   }
-  if (new_len <= old_len) {
-    return old_data;
-  }
   ElementType* new_data = Alloc<ElementType>(new_len);
-  if (old_data != 0) {
+  if (old_data != nullptr) {
     memmove(reinterpret_cast<void*>(new_data),
             reinterpret_cast<void*>(old_data), old_len * kElementSize);
   }

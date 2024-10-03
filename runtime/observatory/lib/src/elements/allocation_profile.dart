@@ -4,15 +4,13 @@
 
 import 'dart:async';
 import 'dart:html';
-import 'package:charted/charted.dart';
-import "package:charted/charts/charts.dart";
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/class_ref.dart';
 import 'package:observatory/src/elements/containers/virtual_collection.dart';
 import 'package:observatory/src/elements/helpers/nav_bar.dart';
 import 'package:observatory/src/elements/helpers/nav_menu.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/nav/isolate_menu.dart';
 import 'package:observatory/src/elements/nav/notify.dart';
 import 'package:observatory/src/elements/nav/refresh.dart';
@@ -21,51 +19,40 @@ import 'package:observatory/src/elements/nav/vm_menu.dart';
 import 'package:observatory/utils.dart';
 
 enum _SortingField {
-  accumulatedSize,
-  accumulatedInstances,
-  currentSize,
-  currentInstances,
-  newAccumulatedSize,
-  newAccumulatedInstances,
-  newCurrentSize,
-  newCurrentInstances,
-  oldAccumulatedSize,
-  oldAccumulatedInstances,
-  oldCurrentSize,
-  oldCurrentInstances,
+  newInstances,
+  newInternalSize,
+  newExternalSize,
+  newSize,
+  oldInstances,
+  oldInternalSize,
+  oldExternalSize,
+  oldSize,
+  instances,
+  internalSize,
+  externalSize,
+  size,
   className,
 }
 
 enum _SortingDirection { ascending, descending }
 
-class AllocationProfileElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<AllocationProfileElement>('allocation-profile',
-      dependencies: const [
-        ClassRefElement.tag,
-        NavTopMenuElement.tag,
-        NavVMMenuElement.tag,
-        NavIsolateMenuElement.tag,
-        NavRefreshElement.tag,
-        NavNotifyElement.tag,
-        VirtualCollectionElement.tag
-      ]);
-
-  RenderingScheduler<AllocationProfileElement> _r;
+class AllocationProfileElement extends CustomElement implements Renderable {
+  late RenderingScheduler<AllocationProfileElement> _r;
 
   Stream<RenderedEvent<AllocationProfileElement>> get onRendered =>
       _r.onRendered;
 
-  M.VM _vm;
-  M.IsolateRef _isolate;
-  M.EventRepository _events;
-  M.NotificationRepository _notifications;
-  M.AllocationProfileRepository _repository;
-  M.AllocationProfile _profile;
+  late M.VM _vm;
+  late M.IsolateRef _isolate;
+  late M.EventRepository _events;
+  late M.NotificationRepository _notifications;
+  late M.AllocationProfileRepository _repository;
+  M.AllocationProfile? _profile;
   bool _autoRefresh = false;
   bool _isCompacted = false;
-  StreamSubscription _gcSubscription;
-  _SortingField _sortingField = _SortingField.className;
-  _SortingDirection _sortingDirection = _SortingDirection.ascending;
+  late StreamSubscription _gcSubscription;
+  _SortingField _sortingField = _SortingField.size;
+  _SortingDirection _sortingDirection = _SortingDirection.descending;
 
   M.VMRef get vm => _vm;
   M.IsolateRef get isolate => _isolate;
@@ -77,14 +64,14 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
       M.EventRepository events,
       M.NotificationRepository notifications,
       M.AllocationProfileRepository repository,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(vm != null);
     assert(isolate != null);
     assert(events != null);
     assert(notifications != null);
     assert(repository != null);
-    AllocationProfileElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    AllocationProfileElement e = new AllocationProfileElement.created();
+    e._r = new RenderingScheduler<AllocationProfileElement>(e, queue: queue);
     e._vm = vm;
     e._isolate = isolate;
     e._events = events;
@@ -93,7 +80,7 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
     return e;
   }
 
-  AllocationProfileElement.created() : super.created();
+  AllocationProfileElement.created() : super.created('allocation-profile');
 
   @override
   attached() {
@@ -111,29 +98,30 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
   detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
     _gcSubscription.cancel();
   }
 
   void render() {
-    children = [
-      navBar([
-        new NavTopMenuElement(queue: _r.queue),
-        new NavVMMenuElement(_vm, _events, queue: _r.queue),
-        new NavIsolateMenuElement(_isolate, _events, queue: _r.queue),
+    children = <Element>[
+      navBar(<Element>[
+        new NavTopMenuElement(queue: _r.queue).element,
+        new NavVMMenuElement(_vm, _events, queue: _r.queue).element,
+        new NavIsolateMenuElement(_isolate, _events, queue: _r.queue).element,
         navMenu('allocation profile'),
-        new NavRefreshElement(
-            label: 'Download', disabled: _profile == null, queue: _r.queue)
-          ..onRefresh.listen((_) => _downloadCSV()),
-        new NavRefreshElement(label: 'Reset Accumulator', queue: _r.queue)
-          ..onRefresh.listen((_) => _refresh(reset: true)),
-        new NavRefreshElement(label: 'GC', queue: _r.queue)
-          ..onRefresh.listen((_) => _refresh(gc: true)),
-        new NavRefreshElement(queue: _r.queue)
-          ..onRefresh.listen((_) => _refresh()),
+        (new NavRefreshElement(
+                label: 'Download', disabled: _profile == null, queue: _r.queue)
+              ..onRefresh.listen((_) => _downloadCSV()))
+            .element,
+        (new NavRefreshElement(label: 'GC', queue: _r.queue)
+              ..onRefresh.listen((_) => _refresh(gc: true)))
+            .element,
+        (new NavRefreshElement(queue: _r.queue)
+              ..onRefresh.listen((_) => _refresh()))
+            .element,
         new DivElement()
           ..classes = ['nav-option']
-          ..children = [
+          ..children = <Element>[
             new CheckboxInputElement()
               ..id = 'allocation-profile-auto-refresh'
               ..checked = _autoRefresh
@@ -142,11 +130,11 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
               ..htmlFor = 'allocation-profile-auto-refresh'
               ..text = 'Auto-refresh on GC'
           ],
-        new NavNotifyElement(_notifications, queue: _r.queue)
+        new NavNotifyElement(_notifications, queue: _r.queue).element
       ]),
       new DivElement()
         ..classes = ['content-centered-big']
-        ..children = [
+        ..children = <Element>[
           new HeadingElement.h2()..text = 'Allocation Profile',
           new HRElement()
         ]
@@ -155,13 +143,9 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
       children.addAll([
         new DivElement()
           ..classes = ['content-centered-big']
-          ..children = [new HeadingElement.h2()..text = 'Loading...']
+          ..children = <Element>[new HeadingElement.h2()..text = 'Loading...']
       ]);
     } else {
-      final newChartHost = new DivElement()..classes = ['host'];
-      final newChartLegend = new DivElement()..classes = ['legend'];
-      final oldChartHost = new DivElement()..classes = ['host'];
-      final oldChartLegend = new DivElement()..classes = ['legend'];
       children.addAll([
         new DivElement()
           ..classes = ['content-centered-big']
@@ -170,74 +154,69 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
               : [
                   new DivElement()
                     ..classes = ['memberList']
-                    ..children = [
+                    ..children = <Element>[
                       new DivElement()
                         ..classes = ['memberItem']
-                        ..children = [
+                        ..children = <Element>[
                           new DivElement()
                             ..classes = ['memberName']
                             ..text = 'last forced GC at',
                           new DivElement()
                             ..classes = ['memberValue']
-                            ..text = _profile.lastServiceGC == null
+                            ..text = _profile!.lastServiceGC == null
                                 ? '---'
-                                : '${_profile.lastServiceGC}',
+                                : '${_profile!.lastServiceGC}',
                         ],
-                      new DivElement()
-                        ..classes = ['memberItem']
-                        ..children = [
-                          new DivElement()
-                            ..classes = ['memberName']
-                            ..text = 'last accumulator reset at',
-                          new DivElement()
-                            ..classes = ['memberValue']
-                            ..text = _profile.lastAccumulatorReset == null
-                                ? '---'
-                                : '${_profile.lastAccumulatorReset}',
-                        ]
                     ],
                   new HRElement(),
                 ],
         new DivElement()
           ..classes = ['content-centered-big', 'compactable']
-          ..children = [
+          ..children = <Element>[
             new DivElement()
               ..classes = ['heap-space', 'left']
               ..children = _isCompacted
                   ? [
                       new HeadingElement.h2()
                         ..text = 'New Generation '
-                            '(${_usedCaption(_profile.newSpace)})',
+                            '(${_usedCaption(_profile!.newSpace)})',
                     ]
                   : [
                       new HeadingElement.h2()..text = 'New Generation',
                       new BRElement(),
                       new DivElement()
                         ..classes = ['memberList']
-                        ..children = _createSpaceMembers(_profile.newSpace),
-                      new BRElement(),
-                      new DivElement()
-                        ..classes = ['chart']
-                        ..children = [newChartLegend, newChartHost]
+                        ..children = _createSpaceMembers(_profile!.newSpace),
                     ],
             new DivElement()
-              ..classes = ['heap-space', 'right']
+              ..classes = ['heap-space', 'left']
               ..children = _isCompacted
                   ? [
                       new HeadingElement.h2()
-                        ..text = '(${_usedCaption(_profile.oldSpace)}) '
-                            'Old Generation',
+                        ..text = 'Old Generation '
+                            '(${_usedCaption(_profile!.oldSpace)})',
                     ]
                   : [
                       new HeadingElement.h2()..text = 'Old Generation',
                       new BRElement(),
                       new DivElement()
                         ..classes = ['memberList']
-                        ..children = _createSpaceMembers(_profile.oldSpace),
+                        ..children = _createSpaceMembers(_profile!.oldSpace),
+                    ],
+            new DivElement()
+              ..classes = ['heap-space', 'left']
+              ..children = _isCompacted
+                  ? [
+                      new HeadingElement.h2()
+                        ..text = 'Total '
+                            '(${_usedCaption(_profile!.totalSpace)})',
+                    ]
+                  : [
+                      new HeadingElement.h2()..text = 'Total',
                       new BRElement(),
                       new DivElement()
-                        ..classes = ['chart']
-                        ..children = [oldChartLegend, oldChartHost]
+                        ..classes = ['memberList']
+                        ..children = _createSpaceMembers(_profile!.totalSpace),
                     ],
             new ButtonElement()
               ..classes = ['compact']
@@ -250,73 +229,85 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
           ],
         new DivElement()
           ..classes = _isCompacted ? ['collection', 'expanded'] : ['collection']
-          ..children = [
+          ..children = <Element>[
             new VirtualCollectionElement(
-                _createCollectionLine, _updateCollectionLine,
-                createHeader: _createCollectionHeader,
-                items: _profile.members.toList()..sort(_createSorter()),
-                queue: _r.queue)
+                    _createCollectionLine, _updateCollectionLine,
+                    createHeader: _createCollectionHeader,
+                    search: _search,
+                    items: _profile!.members.toList()..sort(_createSorter()),
+                    queue: _r.queue)
+                .element
           ]
       ]);
-      _renderGraph(newChartHost, newChartLegend, _profile.newSpace);
-      _renderGraph(oldChartHost, oldChartLegend, _profile.oldSpace);
     }
   }
 
   _createSorter() {
     var getter;
     switch (_sortingField) {
-      case _SortingField.accumulatedSize:
-        getter = _getAccumulatedSize;
+      case _SortingField.newInternalSize:
+        getter = _getNewInternalSize;
         break;
-      case _SortingField.accumulatedInstances:
-        getter = _getAccumulatedInstances;
+      case _SortingField.newExternalSize:
+        getter = _getNewExternalSize;
         break;
-      case _SortingField.currentSize:
-        getter = _getCurrentSize;
+      case _SortingField.newSize:
+        getter = _getNewSize;
         break;
-      case _SortingField.currentInstances:
-        getter = _getCurrentInstances;
+      case _SortingField.newInstances:
+        getter = _getNewInstances;
         break;
-      case _SortingField.newAccumulatedSize:
-        getter = _getNewAccumulatedSize;
+      case _SortingField.oldInternalSize:
+        getter = _getOldInternalSize;
         break;
-      case _SortingField.newAccumulatedInstances:
-        getter = _getNewAccumulatedInstances;
+      case _SortingField.oldExternalSize:
+        getter = _getOldExternalSize;
         break;
-      case _SortingField.newCurrentSize:
-        getter = _getNewCurrentSize;
+      case _SortingField.oldSize:
+        getter = _getOldSize;
         break;
-      case _SortingField.newCurrentInstances:
-        getter = _getNewCurrentInstances;
+      case _SortingField.oldInstances:
+        getter = _getOldInstances;
         break;
-      case _SortingField.oldAccumulatedSize:
-        getter = _getOldAccumulatedSize;
+      case _SortingField.internalSize:
+        getter = _getInternalSize;
         break;
-      case _SortingField.oldAccumulatedInstances:
-        getter = _getOldAccumulatedInstances;
+      case _SortingField.externalSize:
+        getter = _getExternalSize;
         break;
-      case _SortingField.oldCurrentSize:
-        getter = _getOldCurrentSize;
+      case _SortingField.size:
+        getter = _getSize;
         break;
-      case _SortingField.oldCurrentInstances:
-        getter = _getOldCurrentInstances;
+      case _SortingField.instances:
+        getter = _getInstances;
         break;
       case _SortingField.className:
-        getter = (M.ClassHeapStats s) => s.clazz.name;
+        getter = (M.ClassHeapStats s) => s.clazz!.name;
         break;
     }
     switch (_sortingDirection) {
       case _SortingDirection.ascending:
-        return (a, b) => getter(a).compareTo(getter(b));
+        int sort(M.ClassHeapStats a, M.ClassHeapStats b) {
+          return getter(a).compareTo(getter(b));
+        }
+        return sort;
       case _SortingDirection.descending:
-        return (a, b) => getter(b).compareTo(getter(a));
+        int sort(M.ClassHeapStats a, M.ClassHeapStats b) {
+          return getter(b).compareTo(getter(a));
+        }
+        return sort;
     }
   }
 
-  static Element _createCollectionLine() => new DivElement()
+  static HtmlElement _createCollectionLine() => new DivElement()
     ..classes = ['collection-item']
-    ..children = [
+    ..children = <Element>[
+      new SpanElement()
+        ..classes = ['bytes']
+        ..text = '0B',
+      new SpanElement()
+        ..classes = ['bytes']
+        ..text = '0B',
       new SpanElement()
         ..classes = ['bytes']
         ..text = '0B',
@@ -327,8 +318,8 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
         ..classes = ['bytes']
         ..text = '0B',
       new SpanElement()
-        ..classes = ['instances']
-        ..text = '0',
+        ..classes = ['bytes']
+        ..text = '0B',
       new SpanElement()
         ..classes = ['bytes']
         ..text = '0B',
@@ -339,14 +330,8 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
         ..classes = ['bytes']
         ..text = '0B',
       new SpanElement()
-        ..classes = ['instances']
-        ..text = '0',
-      new SpanElement()
         ..classes = ['bytes']
         ..text = '0B',
-      new SpanElement()
-        ..classes = ['instances']
-        ..text = '0',
       new SpanElement()
         ..classes = ['bytes']
         ..text = '0B',
@@ -356,67 +341,54 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
       new SpanElement()..classes = ['name']
     ];
 
-  Element _createCollectionHeader() => new DivElement()
-    ..children = [
-      new DivElement()
-        ..classes = ['collection-item']
-        ..children = [
-          new SpanElement()
-            ..classes = ['group']
-            ..text = 'Accumulated',
-          new SpanElement()
-            ..classes = ['group']
-            ..text = 'Current',
-          new SpanElement()
-            ..classes = ['group']
-            ..text = '(NEW) Accumulated',
-          new SpanElement()
-            ..classes = ['group']
-            ..text = '(NEW) Current',
-          new SpanElement()
-            ..classes = ['group']
-            ..text = '(OLD) Accumulated',
-          new SpanElement()
-            ..classes = ['group']
-            ..text = '(OLD) Current',
-        ],
-      new DivElement()
-        ..classes = ['collection-item']
-        ..children = [
-          _createHeaderButton(const ['bytes'], 'Size',
-              _SortingField.accumulatedSize, _SortingDirection.descending),
-          _createHeaderButton(const ['instances'], 'Instances',
-              _SortingField.accumulatedInstances, _SortingDirection.descending),
-          _createHeaderButton(const ['bytes'], 'Size',
-              _SortingField.currentSize, _SortingDirection.descending),
-          _createHeaderButton(const ['instances'], 'Instances',
-              _SortingField.currentInstances, _SortingDirection.descending),
-          _createHeaderButton(const ['bytes'], 'Size',
-              _SortingField.newAccumulatedSize, _SortingDirection.descending),
-          _createHeaderButton(
-              const ['instances'],
-              'Instances',
-              _SortingField.newAccumulatedInstances,
-              _SortingDirection.descending),
-          _createHeaderButton(const ['bytes'], 'Size',
-              _SortingField.newCurrentSize, _SortingDirection.descending),
-          _createHeaderButton(const ['instances'], 'Instances',
-              _SortingField.newCurrentInstances, _SortingDirection.descending),
-          _createHeaderButton(const ['bytes'], 'Size',
-              _SortingField.oldAccumulatedSize, _SortingDirection.descending),
-          _createHeaderButton(
-              const ['instances'],
-              'Instances',
-              _SortingField.oldAccumulatedInstances,
-              _SortingDirection.descending),
-          _createHeaderButton(const ['bytes'], 'Size',
-              _SortingField.oldCurrentSize, _SortingDirection.descending),
-          _createHeaderButton(const ['instances'], 'Instances',
-              _SortingField.oldCurrentInstances, _SortingDirection.descending),
-          _createHeaderButton(const ['name'], 'Class', _SortingField.className,
-              _SortingDirection.ascending)
-        ],
-    ];
+  List<HtmlElement> _createCollectionHeader() => [
+        new DivElement()
+          ..classes = ['collection-item']
+          ..children = <Element>[
+            new SpanElement()
+              ..classes = ['group']
+              ..text = 'New Generation',
+            new SpanElement()
+              ..classes = ['group']
+              ..text = 'Old Generation',
+            new SpanElement()
+              ..classes = ['group']
+              ..text = 'Total',
+            new SpanElement()
+              ..classes = ['group']
+              ..text = '',
+          ],
+        new DivElement()
+          ..classes = ['collection-item']
+          ..children = <Element>[
+            _createHeaderButton(const ['bytes'], 'Internal',
+                _SortingField.newInternalSize, _SortingDirection.descending),
+            _createHeaderButton(const ['bytes'], 'External',
+                _SortingField.newExternalSize, _SortingDirection.descending),
+            _createHeaderButton(const ['bytes'], 'Size', _SortingField.newSize,
+                _SortingDirection.descending),
+            _createHeaderButton(const ['instances'], 'Instances',
+                _SortingField.newInstances, _SortingDirection.descending),
+            _createHeaderButton(const ['bytes'], 'Internal',
+                _SortingField.oldInternalSize, _SortingDirection.descending),
+            _createHeaderButton(const ['bytes'], 'External',
+                _SortingField.oldExternalSize, _SortingDirection.descending),
+            _createHeaderButton(const ['bytes'], 'Size', _SortingField.oldSize,
+                _SortingDirection.descending),
+            _createHeaderButton(const ['instances'], 'Instances',
+                _SortingField.oldInstances, _SortingDirection.descending),
+            _createHeaderButton(const ['bytes'], 'Internal',
+                _SortingField.internalSize, _SortingDirection.descending),
+            _createHeaderButton(const ['bytes'], 'External',
+                _SortingField.externalSize, _SortingDirection.descending),
+            _createHeaderButton(const ['bytes'], 'Size', _SortingField.size,
+                _SortingDirection.descending),
+            _createHeaderButton(const ['instances'], 'Instances',
+                _SortingField.instances, _SortingDirection.descending),
+            _createHeaderButton(const ['name'], 'Class',
+                _SortingField.className, _SortingDirection.ascending)
+          ],
+      ];
 
   ButtonElement _createHeaderButton(List<String> classes, String text,
           _SortingField field, _SortingDirection direction) =>
@@ -446,21 +418,28 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
     _r.dirty();
   }
 
-  void _updateCollectionLine(Element e, M.ClassHeapStats item, index) {
-    e.children[0].text = Utils.formatSize(_getAccumulatedSize(item));
-    e.children[1].text = '${_getAccumulatedInstances(item)}';
-    e.children[2].text = Utils.formatSize(_getCurrentSize(item));
-    e.children[3].text = '${_getCurrentInstances(item)}';
-    e.children[4].text = Utils.formatSize(_getNewAccumulatedSize(item));
-    e.children[5].text = '${_getNewAccumulatedInstances(item)}';
-    e.children[6].text = Utils.formatSize(_getNewCurrentSize(item));
-    e.children[7].text = '${_getNewCurrentInstances(item)}';
-    e.children[8].text = Utils.formatSize(_getOldAccumulatedSize(item));
-    e.children[9].text = '${_getOldAccumulatedInstances(item)}';
-    e.children[10].text = Utils.formatSize(_getOldCurrentSize(item));
-    e.children[11].text = '${_getOldCurrentInstances(item)}';
-    e.children[12] = new ClassRefElement(_isolate, item.clazz, queue: _r.queue)
+  void _updateCollectionLine(Element e, itemDynamic, index) {
+    M.ClassHeapStats item = itemDynamic;
+    e.children[0].text = Utils.formatSize(_getNewInternalSize(item));
+    e.children[1].text = Utils.formatSize(_getNewExternalSize(item));
+    e.children[2].text = Utils.formatSize(_getNewSize(item));
+    e.children[3].text = '${_getNewInstances(item)}';
+    e.children[4].text = Utils.formatSize(_getOldInternalSize(item));
+    e.children[5].text = Utils.formatSize(_getOldExternalSize(item));
+    e.children[6].text = Utils.formatSize(_getOldSize(item));
+    e.children[7].text = '${_getOldInstances(item)}';
+    e.children[8].text = Utils.formatSize(_getInternalSize(item));
+    e.children[9].text = Utils.formatSize(_getExternalSize(item));
+    e.children[10].text = Utils.formatSize(_getSize(item));
+    e.children[11].text = '${_getInstances(item)}';
+    e.children[12] = new ClassRefElement(_isolate, item.clazz!, queue: _r.queue)
+        .element
       ..classes = ['name'];
+  }
+
+  bool _search(Pattern pattern, itemDynamic) {
+    M.ClassHeapStats item = itemDynamic;
+    return item.clazz!.name!.contains(pattern);
   }
 
   static String _usedCaption(M.HeapSpace space) =>
@@ -481,7 +460,7 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
     return [
       new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'used',
@@ -491,7 +470,7 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
         ],
       new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'external',
@@ -501,7 +480,7 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
         ],
       new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'collections',
@@ -511,7 +490,7 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
         ],
       new DivElement()
         ..classes = ['memberItem']
-        ..children = [
+        ..children = <Element>[
           new DivElement()
             ..classes = ['memberName']
             ..text = 'average collection time',
@@ -519,52 +498,7 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
             ..classes = ['memberValue']
             ..text = avgCollectionTime
         ],
-      new DivElement()
-        ..classes = ['memberItem']
-        ..children = [
-          new DivElement()
-            ..classes = ['memberName']
-            ..text = 'cumulative collection time',
-          new DivElement()
-            ..classes = ['memberValue']
-            ..text = totalCollectionTime
-        ],
-      new DivElement()
-        ..classes = ['memberItem']
-        ..children = [
-          new DivElement()
-            ..classes = ['memberName']
-            ..text = 'average time between collections',
-          new DivElement()
-            ..classes = ['memberValue']
-            ..text = avgCollectionPeriod
-        ]
     ];
-  }
-
-  static final _columns = [
-    new ChartColumnSpec(label: 'Type', type: ChartColumnSpec.TYPE_STRING),
-    new ChartColumnSpec(label: 'Size', formatter: (v) => v.toString())
-  ];
-
-  static void _renderGraph(Element host, Element legend, M.HeapSpace space) {
-    final series = [
-      new ChartSeries("Work", [1], new PieChartRenderer(sortDataByValue: false))
-    ];
-    final rect = host.getBoundingClientRect();
-    final minSize = new Rect.size(rect.width, rect.height);
-    final config = new ChartConfig(series, [0])
-      ..minimumSize = minSize
-      ..legend = new ChartLegend(legend, showValues: true);
-    final data = new ChartData(_columns, [
-      ['Used', space.used],
-      ['Free', space.capacity - space.used],
-      ['External', space.external]
-    ]);
-
-    new LayoutArea(host, data, config,
-        state: new ChartState(), autoUpdate: true)
-      ..draw();
   }
 
   Future _refresh({bool gc: false, bool reset: false}) async {
@@ -577,26 +511,26 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
   void _downloadCSV() {
     assert(_profile != null);
     final header = [
-          '"Accumulator Size"',
-          '"Accumulator Instances"',
-          '"Current Size"',
-          '"Current Instances"',
-          '"(NEW) Accumulator Size"',
-          '"(NEW) Accumulator Instances"',
-          '"(NEW) Current Size"',
-          '"(NEW) Current Instances"',
-          '"(OLD) Accumulator Size"',
-          '"(OLD) Accumulator Instances"',
-          '"(OLD) Current Size"',
-          '"(OLD) Current Instances"',
+          '"New Internal"',
+          '"New External"',
+          '"New Size"',
+          '"New Instances"',
+          '"Old Internal"',
+          '"Old External"',
+          '"Old Size"',
+          '"Old Instances"',
+          '"Internal"',
+          '"External"',
+          '"Size"',
+          '"Instances"',
           'Class'
         ].join(',') +
         '\n';
-    AnchorElement tl = document.createElement('a');
+    AnchorElement tl = document.createElement('a') as AnchorElement;
     tl
       ..attributes['href'] = 'data:text/plain;charset=utf-8,' +
           Uri.encodeComponent(header +
-              (_profile.members.toList()..sort(_createSorter()))
+              (_profile!.members.toList()..sort(_createSorter()))
                   .map(_csvOut)
                   .join('\n'))
       ..attributes['download'] = 'heap-profile.csv'
@@ -605,42 +539,35 @@ class AllocationProfileElement extends HtmlElement implements Renderable {
 
   static _csvOut(M.ClassHeapStats s) {
     return [
-      _getAccumulatedSize(s),
-      _getAccumulatedInstances(s),
-      _getCurrentSize(s),
-      _getCurrentInstances(s),
-      _getNewAccumulatedSize(s),
-      _getNewAccumulatedInstances(s),
-      _getNewCurrentSize(s),
-      _getNewCurrentInstances(s),
-      _getOldAccumulatedSize(s),
-      _getOldAccumulatedInstances(s),
-      _getOldCurrentSize(s),
-      _getOldCurrentInstances(s),
-      s.clazz.name
+      _getNewInternalSize(s),
+      _getNewExternalSize(s),
+      _getNewSize(s),
+      _getNewInstances(s),
+      _getOldInternalSize(s),
+      _getOldExternalSize(s),
+      _getOldSize(s),
+      _getOldInstances(s),
+      _getInternalSize(s),
+      _getExternalSize(s),
+      _getSize(s),
+      _getInstances(s),
+      s.clazz!.name
     ].join(',');
   }
 
-  static int _getAccumulatedSize(M.ClassHeapStats s) =>
-      s.newSpace.accumulated.bytes + s.oldSpace.accumulated.bytes;
-  static int _getAccumulatedInstances(M.ClassHeapStats s) =>
-      s.newSpace.accumulated.instances + s.oldSpace.accumulated.instances;
-  static int _getCurrentSize(M.ClassHeapStats s) =>
-      s.newSpace.current.bytes + s.oldSpace.current.bytes;
-  static int _getCurrentInstances(M.ClassHeapStats s) =>
-      s.newSpace.current.instances + s.oldSpace.current.instances;
-  static int _getNewAccumulatedSize(M.ClassHeapStats s) =>
-      s.newSpace.accumulated.bytes;
-  static int _getNewAccumulatedInstances(M.ClassHeapStats s) =>
-      s.newSpace.accumulated.instances;
-  static int _getNewCurrentSize(M.ClassHeapStats s) => s.newSpace.current.bytes;
-  static int _getNewCurrentInstances(M.ClassHeapStats s) =>
-      s.newSpace.current.instances;
-  static int _getOldAccumulatedSize(M.ClassHeapStats s) =>
-      s.oldSpace.accumulated.bytes;
-  static int _getOldAccumulatedInstances(M.ClassHeapStats s) =>
-      s.oldSpace.accumulated.instances;
-  static int _getOldCurrentSize(M.ClassHeapStats s) => s.oldSpace.current.bytes;
-  static int _getOldCurrentInstances(M.ClassHeapStats s) =>
-      s.oldSpace.current.instances;
+  static int _getNewInstances(M.ClassHeapStats s) => s.newSpace.instances;
+  static int _getNewInternalSize(M.ClassHeapStats s) => s.newSpace.internalSize;
+  static int _getNewExternalSize(M.ClassHeapStats s) => s.newSpace.externalSize;
+  static int _getNewSize(M.ClassHeapStats s) => s.newSpace.size;
+  static int _getOldInstances(M.ClassHeapStats s) => s.oldSpace.instances;
+  static int _getOldInternalSize(M.ClassHeapStats s) => s.oldSpace.internalSize;
+  static int _getOldExternalSize(M.ClassHeapStats s) => s.oldSpace.externalSize;
+  static int _getOldSize(M.ClassHeapStats s) => s.oldSpace.size;
+  static int _getInstances(M.ClassHeapStats s) =>
+      s.newSpace.instances + s.oldSpace.instances;
+  static int _getInternalSize(M.ClassHeapStats s) =>
+      s.newSpace.internalSize + s.oldSpace.internalSize;
+  static int _getExternalSize(M.ClassHeapStats s) =>
+      s.newSpace.externalSize + s.oldSpace.externalSize;
+  static int _getSize(M.ClassHeapStats s) => s.newSpace.size + s.oldSpace.size;
 }

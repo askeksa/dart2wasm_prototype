@@ -1,15 +1,17 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:analysis_server/src/provisional/completion/dart/completion_dart.dart';
+import 'package:analysis_server/src/services/completion/dart/completion_manager.dart';
 import 'package:analysis_server/src/services/completion/dart/static_member_contributor.dart';
+import 'package:analysis_server/src/services/completion/dart/suggestion_builder.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'completion_contributor_util.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(StaticMemberContributorTest);
   });
@@ -18,23 +20,38 @@ main() {
 @reflectiveTest
 class StaticMemberContributorTest extends DartCompletionContributorTest {
   @override
-  DartCompletionContributor createContributor() {
-    return new StaticMemberContributor();
+  DartCompletionContributor createContributor(
+    DartCompletionRequest request,
+    SuggestionBuilder builder,
+  ) {
+    return StaticMemberContributor(request, builder);
   }
 
-  fail_enumConst_deprecated() async {
-    addTestSource('@deprecated enum E { one, two } main() {E.^}');
+  Future<void> test_class_static_notPrivate() async {
+    addSource('$testPackageLibPath/a.dart', '''
+class A {
+  static int _f;
+  static String get _g => '';
+  static int _m() {}
+  static set _s(v) {}
+  A._();
+}
+''');
+    addTestSource('''
+import 'a.dart';
+void f() {
+  A.^;
+}
+''');
     await computeSuggestions();
-    assertNotSuggested('E');
-    // TODO(danrubel) Investigate why enum suggestion is not marked
-    // as deprecated if enum ast element is deprecated
-    assertSuggestEnumConst('one', isDeprecated: true);
-    assertSuggestEnumConst('two', isDeprecated: true);
-    assertNotSuggested('index');
-    assertSuggestField('values', 'List<E>', isDeprecated: true);
+    assertNotSuggested('_f');
+    assertNotSuggested('_g');
+    assertNotSuggested('_m');
+    assertNotSuggested('_s');
+    assertNotSuggested('A._');
   }
 
-  test_enumConst() async {
+  Future<void> test_enumConst() async {
     addTestSource('enum E { one, two } main() {E.^}');
     await computeSuggestions();
     assertNotSuggested('E');
@@ -44,7 +61,7 @@ class StaticMemberContributorTest extends DartCompletionContributorTest {
     assertSuggestField('values', 'List<E>');
   }
 
-  test_enumConst2() async {
+  Future<void> test_enumConst2() async {
     addTestSource('enum E { one, two } main() {E.o^}');
     await computeSuggestions();
     assertNotSuggested('E');
@@ -54,7 +71,7 @@ class StaticMemberContributorTest extends DartCompletionContributorTest {
     assertSuggestField('values', 'List<E>');
   }
 
-  test_enumConst3() async {
+  Future<void> test_enumConst3() async {
     addTestSource('enum E { one, two } main() {E.^ int g;}');
     await computeSuggestions();
     assertNotSuggested('E');
@@ -64,13 +81,13 @@ class StaticMemberContributorTest extends DartCompletionContributorTest {
     assertSuggestField('values', 'List<E>');
   }
 
-  test_enumConst_cascade1() async {
+  Future<void> test_enumConst_cascade1() async {
     addTestSource('enum E { one, two } main() {E..^}');
     await computeSuggestions();
     assertNoSuggestions();
   }
 
-  test_enumConst_cascade2() async {
+  Future<void> test_enumConst_cascade2() async {
     addTestSource('enum E { one, two } main() {E.^.}');
     await computeSuggestions();
     assertNotSuggested('E');
@@ -80,13 +97,13 @@ class StaticMemberContributorTest extends DartCompletionContributorTest {
     assertSuggestField('values', 'List<E>');
   }
 
-  test_enumConst_cascade3() async {
+  Future<void> test_enumConst_cascade3() async {
     addTestSource('enum E { one, two } main() {E..o^}');
     await computeSuggestions();
     assertNoSuggestions();
   }
 
-  test_enumConst_cascade4() async {
+  Future<void> test_enumConst_cascade4() async {
     addTestSource('enum E { one, two } main() {E.^.o}');
     await computeSuggestions();
     assertNotSuggested('E');
@@ -96,13 +113,121 @@ class StaticMemberContributorTest extends DartCompletionContributorTest {
     assertSuggestField('values', 'List<E>');
   }
 
-  test_keyword() async {
+  Future<void> test_enumConst_deprecated() async {
+    addTestSource('@deprecated enum E { one, two } main() {E.^}');
+    await computeSuggestions();
+    assertNotSuggested('E');
+    assertSuggestEnumConst('one', isDeprecated: true);
+    assertSuggestEnumConst('two', isDeprecated: true);
+    assertNotSuggested('index');
+    assertSuggestField('values', 'List<E>', isDeprecated: true);
+  }
+
+  Future<void> test_extension() async {
+    addTestSource('''
+extension E on Object {
+  static int i;
+  static String s;
+}
+main() {E.^}
+''');
+    await computeSuggestions();
+    assertNotSuggested('E');
+    assertSuggestField('i', 'int');
+    assertSuggestField('s', 'String');
+  }
+
+  Future<void> test_extension_static_notPrivate() async {
+    addSource('$testPackageLibPath/a.dart', '''
+extension E {
+  static int _f;
+  static String get _g => '';
+  static int _m() {}
+  static set _s(v) {}
+}
+''');
+    addTestSource('''
+import 'a.dart';
+void f() {
+  E.^;
+}
+''');
+    await computeSuggestions();
+    assertNotSuggested('_f');
+    assertNotSuggested('_g');
+    assertNotSuggested('_m');
+    assertNotSuggested('_s');
+  }
+
+  Future<void> test_implicitCreation() async {
+    addSource('$testPackageLibPath/a.dart', '''
+class A {
+  A.foo();
+  A.bar();
+}
+''');
+    addTestSource('''
+import 'a.dart';
+
+main() {
+  A.^;
+}
+''');
+    await computeSuggestions();
+
+    assertSuggestConstructor('foo', elementName: 'A.foo');
+    assertSuggestConstructor('bar', elementName: 'A.bar');
+  }
+
+  Future<void>
+      test_implicitCreation_functionContextType_matchingReturnType() async {
+    addSource('$testPackageLibPath/a.dart', '''
+class A {
+  A.foo();
+  A.bar();
+}
+''');
+    addTestSource('''
+import 'a.dart';
+
+main() {
+  A Function() v = A.^;
+}
+''');
+    await computeSuggestions();
+
+    assertNotSuggested('foo');
+    assertNotSuggested('bar');
+  }
+
+  Future<void>
+      test_implicitCreation_functionContextType_notMatchingReturnType() async {
+    addSource('$testPackageLibPath/a.dart', '''
+class A {
+  A.foo();
+  A.bar();
+}
+''');
+    addTestSource('''
+import 'a.dart';
+
+main() {
+  int Function() v = A.^;
+}
+''');
+    await computeSuggestions();
+
+    assertSuggestConstructor('foo', elementName: 'A.foo');
+    assertSuggestConstructor('bar', elementName: 'A.bar');
+  }
+
+  Future<void> test_keyword() async {
     addTestSource('class C { static C get instance => null; } main() {C.in^}');
     await computeSuggestions();
     assertSuggestGetter('instance', 'C');
   }
 
-  test_only_static() async {
+  Future<void> test_only_static() async {
     // SimpleIdentifier  PrefixedIdentifier  ExpressionStatement
     addTestSource('''
 class B {
@@ -123,7 +248,7 @@ void main() {C.^}''');
     assertSuggestMethod('m2', 'C', null);
   }
 
-  test_only_static2() async {
+  Future<void> test_only_static2() async {
     // SimpleIdentifier  MethodInvocation  ExpressionStatement
     addTestSource('''
 class B {
@@ -144,7 +269,7 @@ void main() {C.^ print("something");}''');
     assertSuggestMethod('m2', 'C', null);
   }
 
-  test_only_static_cascade1() async {
+  Future<void> test_only_static_cascade1() async {
     // SimpleIdentifier  PrefixedIdentifier  ExpressionStatement
     addTestSource('''
 class B {
@@ -161,7 +286,7 @@ void main() {C..^}''');
     assertNoSuggestions();
   }
 
-  test_only_static_cascade2() async {
+  Future<void> test_only_static_cascade2() async {
     // SimpleIdentifier  PrefixedIdentifier  ExpressionStatement
     addTestSource('''
 class B {
@@ -182,7 +307,7 @@ void main() {C.^.}''');
     assertSuggestMethod('m2', 'C', null);
   }
 
-  test_only_static_cascade3() async {
+  Future<void> test_only_static_cascade3() async {
     // SimpleIdentifier  PrefixedIdentifier  ExpressionStatement
     addTestSource('''
 class B {
@@ -199,7 +324,7 @@ void main() {C..m^()}''');
     assertNoSuggestions();
   }
 
-  test_only_static_cascade4() async {
+  Future<void> test_only_static_cascade4() async {
     // SimpleIdentifier  PrefixedIdentifier  ExpressionStatement
     addTestSource('''
 class B {
@@ -220,7 +345,7 @@ void main() {C.^.m()}''');
     assertSuggestMethod('m2', 'C', null);
   }
 
-  test_only_static_cascade_prefixed1() async {
+  Future<void> test_only_static_cascade_prefixed1() async {
     // SimpleIdentifier  PrefixedIdentifier  ExpressionStatement
     addTestSource('''
 import "dart:async" as async;
@@ -229,20 +354,18 @@ void main() {async.Future..w^()}''');
     assertNoSuggestions();
   }
 
-  test_only_static_cascade_prefixed2() async {
+  Future<void> test_only_static_cascade_prefixed2() async {
     // SimpleIdentifier  PrefixedIdentifier  ExpressionStatement
     addTestSource('''
 import "dart:async" as async;
 void main() {async.Future.^.w()}''');
     await computeSuggestions();
-    assertSuggestMethod('wait', 'Future', 'Future<dynamic>');
+    assertSuggestMethod('wait', 'Future', 'Future<List<T>>');
   }
 
-  test_PrefixedIdentifier_class_const() async {
+  Future<void> test_PrefixedIdentifier_class_const() async {
     // SimpleIdentifier PrefixedIdentifier ExpressionStatement Block
-    addSource(
-        '/testB.dart',
-        '''
+    addSource('$testPackageLibPath/b.dart', '''
         lib B;
         class I {
           static const scI = 'boo';
@@ -256,7 +379,7 @@ void main() {async.Future.^.w()}''');
           m(X x) {} I _n(X x) {}}
         class X{}''');
     addTestSource('''
-        import "/testB.dart";
+        import "b.dart";
         class A extends B {
           static const String scA = 'foo';
           w() { }}
@@ -283,5 +406,73 @@ void main() {async.Future.^.w()}''');
     assertNotSuggested('w');
     assertNotSuggested('Object');
     assertNotSuggested('==');
+  }
+
+  Future<void> test_simpleIdentifier_typeAlias_interfaceType_class() async {
+    addSource('$testPackageLibPath/a.dart', '''
+class A {
+  static int _privateField = 0;
+  static int get _privateGetter => 0;
+  static void _privateMethod() {}
+  static set _privateSetter(int _) {}
+  A._privateConstructor();
+
+  static int publicField = 0;
+  static int get publicGetter => 0;
+  static void publicMethod() {}
+  static set publicSetter(int _) {}
+  A.publicConstructor();
+}
+''');
+    addTestSource('''
+import 'a.dart';
+
+typedef B = A;
+
+void f() {
+  B.^;
+}
+''');
+    await computeSuggestions();
+    assertNotSuggested('_privateField');
+    assertNotSuggested('_privateGetter');
+    assertNotSuggested('_privateMethod');
+    assertNotSuggested('_privateSetter');
+    assertNotSuggested('A._privateConstructor');
+
+    assertSuggestField('publicField', 'int');
+    assertSuggestGetter('publicGetter', 'int');
+    assertSuggestMethod('publicMethod', 'A', 'void');
+    assertSuggestSetter('publicSetter');
+    assertSuggestConstructor(
+      'publicConstructor',
+      elementName: 'A.publicConstructor',
+    );
+  }
+
+  Future<void> test_simpleIdentifier_typeAlias_interfaceType_enum() async {
+    addSource('$testPackageLibPath/a.dart', '''
+enum E {
+  aaa,
+  _bbb,
+  ccc
+}
+''');
+    addTestSource('''
+import 'a.dart';
+
+typedef A = E;
+
+void f() {
+  A.^;
+}
+''');
+    await computeSuggestions();
+    assertNotSuggested('E');
+    assertSuggestEnumConst('aaa');
+    assertNotSuggested('_bbb');
+    assertSuggestEnumConst('ccc');
+    assertNotSuggested('index');
+    assertSuggestField('values', 'List<E>');
   }
 }

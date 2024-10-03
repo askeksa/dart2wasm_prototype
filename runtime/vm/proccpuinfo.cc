@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_LINUX) || defined(HOST_OS_ANDROID)
+#if defined(DART_HOST_OS_LINUX) || defined(DART_HOST_OS_ANDROID)
 
 #include "vm/proccpuinfo.h"
 
@@ -14,12 +14,10 @@
 
 namespace dart {
 
-
 char* ProcCpuInfo::data_ = NULL;
 intptr_t ProcCpuInfo::datalen_ = 0;
 
-
-void ProcCpuInfo::InitOnce() {
+void ProcCpuInfo::Init() {
   // Get the size of the cpuinfo file by reading it until the end. This is
   // required because files under /proc do not always return a valid size
   // when using fseek(0, SEEK_END) + ftell(). Nor can they be mmap()-ed.
@@ -55,13 +53,11 @@ void ProcCpuInfo::InitOnce() {
   data_[datalen_] = '\0';
 }
 
-
 void ProcCpuInfo::Cleanup() {
   ASSERT(data_);
   free(data_);
   data_ = NULL;
 }
-
 
 char* ProcCpuInfo::FieldStart(const char* field) {
   // Look for first field occurrence, and ensure it starts the line.
@@ -80,14 +76,13 @@ char* ProcCpuInfo::FieldStart(const char* field) {
 
   // Skip to the first colon followed by a space.
   p = strchr(p + fieldlen, ':');
-  if (p == NULL || !isspace(p[1])) {
+  if (p == NULL || (isspace(p[1]) == 0)) {
     return NULL;
   }
   p += 2;
 
   return p;
 }
-
 
 bool ProcCpuInfo::FieldContains(const char* field, const char* search_string) {
   ASSERT(data_ != NULL);
@@ -111,7 +106,6 @@ bool ProcCpuInfo::FieldContains(const char* field, const char* search_string) {
 
   return ret;
 }
-
 
 // Extract the content of a the first occurrence of a given field in
 // the content of the cpuinfo file and return it as a heap-allocated
@@ -144,7 +138,6 @@ const char* ProcCpuInfo::ExtractField(const char* field) {
   return result;
 }
 
-
 bool ProcCpuInfo::HasField(const char* field) {
   ASSERT(field != NULL);
   ASSERT(data_ != NULL);
@@ -153,4 +146,4 @@ bool ProcCpuInfo::HasField(const char* field) {
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_LINUX) || defined(HOST_OS_ANDROID)
+#endif  // defined(DART_HOST_OS_LINUX) || defined(DART_HOST_OS_ANDROID)

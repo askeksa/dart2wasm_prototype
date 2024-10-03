@@ -3,13 +3,13 @@
 // BSD-style license that can be found in the LICENSE file.
 
 #include "vm/globals.h"
-#if defined(HOST_OS_MACOS)
+#if defined(DART_HOST_OS_MACOS)
 
 #include "vm/cpuinfo.h"
 
 #include <errno.h>       // NOLINT
-#include <sys/types.h>   // NOLINT
 #include <sys/sysctl.h>  // NOLINT
+#include <sys/types.h>   // NOLINT
 
 #include "platform/assert.h"
 
@@ -18,7 +18,7 @@ namespace dart {
 CpuInfoMethod CpuInfo::method_ = kCpuInfoDefault;
 const char* CpuInfo::fields_[kCpuInfoMax] = {0};
 
-void CpuInfo::InitOnce() {
+void CpuInfo::Init() {
   method_ = kCpuInfoSystem;
 
   fields_[kCpuInfoProcessor] = "machdep.cpu.vendor";
@@ -28,9 +28,7 @@ void CpuInfo::InitOnce() {
   fields_[kCpuInfoArchitecture] = NULL;
 }
 
-
 void CpuInfo::Cleanup() {}
-
 
 bool CpuInfo::FieldContains(CpuInfoIndices idx, const char* search_string) {
   ASSERT(method_ != kCpuInfoDefault);
@@ -47,7 +45,6 @@ bool CpuInfo::FieldContains(CpuInfoIndices idx, const char* search_string) {
 
   return (strcasestr(dest, search_string) != NULL);
 }
-
 
 const char* CpuInfo::ExtractField(CpuInfoIndices idx) {
   ASSERT(method_ != kCpuInfoDefault);
@@ -70,7 +67,6 @@ const char* CpuInfo::ExtractField(CpuInfoIndices idx) {
   return result;
 }
 
-
 bool CpuInfo::HasField(const char* field) {
   ASSERT(method_ != kCpuInfoDefault);
   ASSERT(field != NULL);
@@ -80,4 +76,4 @@ bool CpuInfo::HasField(const char* field) {
 
 }  // namespace dart
 
-#endif  // defined(HOST_OS_MACOS)
+#endif  // defined(DART_HOST_OS_MACOS)

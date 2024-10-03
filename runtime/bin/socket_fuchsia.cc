@@ -2,17 +2,17 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(DART_IO_DISABLED)
-
 #include "platform/globals.h"
-#if defined(HOST_OS_FUCHSIA)
+#if defined(DART_HOST_OS_FUCHSIA)
 
 #include "bin/socket.h"
 
-#include <errno.h>        // NOLINT
+#include <errno.h>  // NOLINT
 
+#include "bin/eventhandler.h"
 #include "bin/fdutils.h"
 #include "platform/signal_blocker.h"
+#include "platform/syslog.h"
 
 // #define SOCKET_LOG_INFO 1
 // #define SOCKET_LOG_ERROR 1
@@ -20,16 +20,18 @@
 // define SOCKET_LOG_ERROR to get log messages only for errors.
 // define SOCKET_LOG_INFO to get log messages for both information and errors.
 #if defined(SOCKET_LOG_INFO) || defined(SOCKET_LOG_ERROR)
+
 #define LOG_ERR(msg, ...)                                                      \
   {                                                                            \
     int err = errno;                                                           \
-    Log::PrintErr("Dart Socket ERROR: %s:%d: " msg, __FILE__, __LINE__,        \
-                  ##__VA_ARGS__);                                              \
+    Syslog::PrintErr("Dart Socket ERROR: %s:%d: " msg, __FILE__, __LINE__,     \
+                     ##__VA_ARGS__);                                           \
     errno = err;                                                               \
   }
 #if defined(SOCKET_LOG_INFO)
 #define LOG_INFO(msg, ...)                                                     \
-  Log::Print("Dart Socket INFO: %s:%d: " msg, __FILE__, __LINE__, ##__VA_ARGS__)
+  Syslog::Print("Dart Socket INFO: %s:%d: " msg, __FILE__, __LINE__,           \
+                ##__VA_ARGS__)
 #else
 #define LOG_INFO(msg, ...)
 #endif  // defined(SOCKET_LOG_INFO)
@@ -42,13 +44,23 @@ namespace dart {
 namespace bin {
 
 Socket::Socket(intptr_t fd)
-    : ReferenceCounted(), fd_(fd), port_(ILLEGAL_PORT) {}
-
+    : ReferenceCounted(),
+      fd_(fd),
+      isolate_port_(Dart_GetMainPortId()),
+      port_(ILLEGAL_PORT),
+      udp_receive_buffer_(NULL) {}
 
 void Socket::SetClosedFd() {
   fd_ = kClosedFd;
 }
 
+void Socket::CloseFd() {
+  ASSERT(fd_ != kClosedFd);
+  IOHandle* handle = reinterpret_cast<IOHandle*>(fd_);
+  ASSERT(handle != NULL);
+  handle->Release();
+  SetClosedFd();
+}
 
 static intptr_t Create(const RawAddr& addr) {
   LOG_INFO("Create: calling socket(SOCK_STREAM)\n");
@@ -63,51 +75,66 @@ static intptr_t Create(const RawAddr& addr) {
     FDUtils::SaveErrorAndClose(fd);
     return -1;
   }
-  return fd;
+  IOHandle* io_handle = new IOHandle(fd);
+  return reinterpret_cast<intptr_t>(io_handle);
 }
-
 
 static intptr_t Connect(intptr_t fd, const RawAddr& addr) {
-  LOG_INFO("Connect: calling connect(%ld)\n", fd);
+  IOHandle* handle = reinterpret_cast<IOHandle*>(fd);
+  LOG_INFO("Connect: calling connect(%ld)\n", handle->fd());
   intptr_t result = NO_RETRY_EXPECTED(
-      connect(fd, &addr.addr, SocketAddress::GetAddrLength(addr)));
+      connect(handle->fd(), &addr.addr, SocketAddress::GetAddrLength(addr)));
   if ((result == 0) || (errno == EINPROGRESS)) {
-    return fd;
+    return reinterpret_cast<intptr_t>(handle);
   }
-  LOG_ERR("Connect: connect(%ld) failed\n", fd);
-  FDUtils::SaveErrorAndClose(fd);
+  LOG_ERR("Connect: connect(%ld) failed\n", handle->fd());
+  FDUtils::SaveErrorAndClose(handle->fd());
+  handle->Release();
   return -1;
 }
-
 
 intptr_t Socket::CreateConnect(const RawAddr& addr) {
   intptr_t fd = Create(addr);
   if (fd < 0) {
     return fd;
   }
-  if (!FDUtils::SetNonBlocking(fd)) {
-    LOG_ERR("CreateConnect: FDUtils::SetNonBlocking(%ld) failed\n", fd);
-    FDUtils::SaveErrorAndClose(fd);
+  IOHandle* handle = reinterpret_cast<IOHandle*>(fd);
+  if (!FDUtils::SetNonBlocking(handle->fd())) {
+    LOG_ERR("CreateConnect: FDUtils::SetNonBlocking(%ld) failed\n",
+            handle->fd());
+    FDUtils::SaveErrorAndClose(handle->fd());
+    handle->Release();
     return -1;
   }
   return Connect(fd, addr);
 }
 
+intptr_t Socket::CreateUnixDomainConnect(const RawAddr& addr) {
+  // Fuchsia does not support unix domain socket
+  errno = ENOSYS;
+  return -1;
+}
 
 intptr_t Socket::CreateBindConnect(const RawAddr& addr,
                                    const RawAddr& source_addr) {
-  LOG_ERR("SocketBase::CreateBindConnect is unimplemented\n");
-  UNIMPLEMENTED();
+  errno = ENOSYS;
   return -1;
 }
 
-
-intptr_t Socket::CreateBindDatagram(const RawAddr& addr, bool reuseAddress) {
-  LOG_ERR("SocketBase::CreateBindDatagram is unimplemented\n");
-  UNIMPLEMENTED();
+intptr_t Socket::CreateUnixDomainBindConnect(const RawAddr& addr,
+                                             const RawAddr& source_addr) {
+  // Fuchsia does not support unix domain socket
+  errno = ENOSYS;
   return -1;
 }
 
+intptr_t Socket::CreateBindDatagram(const RawAddr& addr,
+                                    bool reuseAddress,
+                                    bool reusePort,
+                                    int ttl) {
+  errno = ENOSYS;
+  return -1;
+}
 
 intptr_t ServerSocket::CreateBindListen(const RawAddr& addr,
                                         intptr_t backlog,
@@ -147,13 +174,16 @@ intptr_t ServerSocket::CreateBindListen(const RawAddr& addr,
   }
   LOG_INFO("ServerSocket::CreateBindListen: bind(%ld) succeeded\n", fd);
 
+  IOHandle* io_handle = new IOHandle(fd);
+
   // Test for invalid socket port 65535 (some browsers disallow it).
   if ((SocketAddress::GetAddrPort(addr) == 0) &&
-      (SocketBase::GetPort(fd) == 65535)) {
+      (SocketBase::GetPort(reinterpret_cast<intptr_t>(io_handle)) == 65535)) {
     // Don't close the socket until we have created a new socket, ensuring
     // that we do not get the bad port number again.
     intptr_t new_fd = CreateBindListen(addr, backlog, v6_only);
     FDUtils::SaveErrorAndClose(fd);
+    io_handle->Release();
     return new_fd;
   }
 
@@ -161,6 +191,7 @@ intptr_t ServerSocket::CreateBindListen(const RawAddr& addr,
   if (NO_RETRY_EXPECTED(listen(fd, backlog > 0 ? backlog : SOMAXCONN)) != 0) {
     LOG_ERR("ServerSocket::CreateBindListen: listen failed(%ld)\n", fd);
     FDUtils::SaveErrorAndClose(fd);
+    io_handle->Release();
     return -1;
   }
   LOG_INFO("ServerSocket::CreateBindListen: listen(%ld) succeeded\n", fd);
@@ -168,17 +199,23 @@ intptr_t ServerSocket::CreateBindListen(const RawAddr& addr,
   if (!FDUtils::SetNonBlocking(fd)) {
     LOG_ERR("CreateBindListen: FDUtils::SetNonBlocking(%ld) failed\n", fd);
     FDUtils::SaveErrorAndClose(fd);
+    io_handle->Release();
     return -1;
   }
-  return fd;
+  return reinterpret_cast<intptr_t>(io_handle);
 }
 
+intptr_t ServerSocket::CreateUnixDomainBindListen(const RawAddr& addr,
+                                                  intptr_t backlog) {
+  // Fuchsia does not support unix domain socket.
+  errno = ENOSYS;
+  return -1;
+}
 
 bool ServerSocket::StartAccept(intptr_t fd) {
   USE(fd);
   return true;
 }
-
 
 static bool IsTemporaryAcceptError(int error) {
   // On Linux a number of protocol errors should be treated as EAGAIN.
@@ -189,13 +226,13 @@ static bool IsTemporaryAcceptError(int error) {
          (error == ENETUNREACH);
 }
 
-
 intptr_t ServerSocket::Accept(intptr_t fd) {
+  IOHandle* listen_handle = reinterpret_cast<IOHandle*>(fd);
   intptr_t socket;
   struct sockaddr clientaddr;
   socklen_t addrlen = sizeof(clientaddr);
   LOG_INFO("ServerSocket::Accept: calling accept(%ld)\n", fd);
-  socket = NO_RETRY_EXPECTED(accept(fd, &clientaddr, &addrlen));
+  socket = listen_handle->Accept(&clientaddr, &addrlen);
   if (socket == -1) {
     if (IsTemporaryAcceptError(errno)) {
       // We need to signal to the caller that this is actually not an
@@ -207,17 +244,21 @@ intptr_t ServerSocket::Accept(intptr_t fd) {
       LOG_ERR("ServerSocket::Accept: accept(%ld) failed\n", fd);
     }
   } else {
+    IOHandle* io_handle = new IOHandle(socket);
     LOG_INFO("ServerSocket::Accept: accept(%ld) -> socket %ld\n", fd, socket);
     if (!FDUtils::SetCloseOnExec(socket)) {
       LOG_ERR("FDUtils::SetCloseOnExec(%ld) failed\n", socket);
       FDUtils::SaveErrorAndClose(socket);
+      io_handle->Release();
       return -1;
     }
     if (!FDUtils::SetNonBlocking(socket)) {
       LOG_ERR("FDUtils::SetNonBlocking(%ld) failed\n", socket);
       FDUtils::SaveErrorAndClose(socket);
+      io_handle->Release();
       return -1;
     }
+    socket = reinterpret_cast<intptr_t>(io_handle);
   }
   return socket;
 }
@@ -225,6 +266,4 @@ intptr_t ServerSocket::Accept(intptr_t fd) {
 }  // namespace bin
 }  // namespace dart
 
-#endif  // defined(HOST_OS_FUCHSIA)
-
-#endif  // !defined(DART_IO_DISABLED)
+#endif  // defined(DART_HOST_OS_FUCHSIA)

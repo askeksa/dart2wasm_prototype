@@ -38,28 +38,22 @@ getPropertyFromPrototype(var object, String name) {
   return JS('var', 'Object.getPrototypeOf(#)[#]', object, name);
 }
 
-/**
- * Returns a String tag identifying the type of the native object, or `null`.
- * The tag is not the name of the type, but usually the name of the JavaScript
- * constructor function.  Initialized by [initHooks].
- */
-Function getTagFunction;
+/// Returns a String tag identifying the type of the native object, or `null`.
+/// The tag is not the name of the type, but usually the name of the JavaScript
+/// constructor function.  Initialized by [initHooks].
+Function? getTagFunction;
 
-/**
- * If a lookup via [getTagFunction] on an object [object] that has [tag] fails,
- * this function is called to provide an alternate tag.  This allows us to fail
- * gracefully if we can make a good guess, for example, when browsers add novel
- * kinds of HTMLElement that we have never heard of.  Initialized by
- * [initHooks].
- */
-Function alternateTagFunction;
+/// If a lookup via [getTagFunction] on an object [object] that has [tag] fails,
+/// this function is called to provide an alternate tag.  This allows us to fail
+/// gracefully if we can make a good guess, for example, when browsers add novel
+/// kinds of HTMLElement that we have never heard of.  Initialized by
+/// [initHooks].
+Function? alternateTagFunction;
 
-/**
- * Returns the prototype for the JavaScript constructor named by an input tag.
- * Returns `null` if there is no such constructor, or if pre-patching of the
- * constructor is to be avoided.  Initialized by [initHooks].
- */
-Function prototypeForTagFunction;
+/// Returns the prototype for the JavaScript constructor named by an input tag.
+/// Returns `null` if there is no such constructor, or if pre-patching of the
+/// constructor is to be avoided.  Initialized by [initHooks].
+Function? prototypeForTagFunction;
 
 String toStringForNativeObject(var obj) {
   // TODO(sra): Is this code dead?
@@ -67,20 +61,18 @@ String toStringForNativeObject(var obj) {
   // been called via an interceptor and initialized it.
   String name = getTagFunction == null
       ? '<Unknown>'
-      : JS('String', '#', getTagFunction(obj));
+      : JS('String', '#', getTagFunction!(obj));
   return 'Instance of $name';
 }
 
 int hashCodeForNativeObject(object) => Primitives.objectHashCode(object);
 
-/**
- * Sets a JavaScript property on an object.
- */
+/// Sets a JavaScript property on an object.
 void defineProperty(var obj, String property, var value) {
   JS(
       'void',
       'Object.defineProperty(#, #, '
-      '{value: #, enumerable: false, writable: true, configurable: true})',
+          '{value: #, enumerable: false, writable: true, configurable: true})',
       obj,
       property,
       value);
@@ -97,20 +89,16 @@ bool isDartObject(obj) {
           'depends:none;effects:none;', JsBuiltin.dartObjectConstructor));
 }
 
-/**
- * A JavaScript object mapping tags to the constructors of interceptors.
- * This is a JavaScript object with no prototype.
- *
- * Example: 'HTMLImageElement' maps to the ImageElement class constructor.
- */
+/// A JavaScript object mapping tags to the constructors of interceptors.
+/// This is a JavaScript object with no prototype.
+///
+/// Example: 'HTMLImageElement' maps to the ImageElement class constructor.
 get interceptorsByTag => JS_EMBEDDED_GLOBAL('=Object', INTERCEPTORS_BY_TAG);
 
-/**
- * A JavaScript object mapping tags to `true` or `false`.
- *
- * Example: 'HTMLImageElement' maps to `true` since, as there are no subclasses
- * of ImageElement, it is a leaf class in the native class hierarchy.
- */
+/// A JavaScript object mapping tags to `true` or `false`.
+///
+/// Example: 'HTMLImageElement' maps to `true` since, as there are no subclasses
+/// of ImageElement, it is a leaf class in the native class hierarchy.
 get leafTags => JS_EMBEDDED_GLOBAL('=Object', LEAF_TAGS);
 
 String findDispatchTagForInterceptorClass(interceptorClassConstructor) {
@@ -118,17 +106,13 @@ String findDispatchTagForInterceptorClass(interceptorClassConstructor) {
       '', r'#.#', interceptorClassConstructor, NATIVE_SUPERCLASS_TAG_NAME);
 }
 
-/**
- * Cache of dispatch records for instances.  This is a JavaScript object used as
- * a map.  Keys are instance tags, e.g. "!SomeThing".  The cache permits the
- * sharing of one dispatch record between multiple instances.
- */
+/// Cache of dispatch records for instances.  This is a JavaScript object used
+/// as a map.  Keys are instance tags, e.g. "!SomeThing".  The cache permits the
+/// sharing of one dispatch record between multiple instances.
 var dispatchRecordsForInstanceTags;
 
-/**
- * Cache of interceptors indexed by uncacheable tags, e.g. "~SomeThing".
- * This is a JavaScript object used as a map.
- */
+/// Cache of interceptors indexed by uncacheable tags, e.g. "~SomeThing".
+/// This is a JavaScript object used as a map.
 var interceptorsForUncacheableTags;
 
 lookupInterceptor(String tag) {
@@ -155,16 +139,14 @@ const INTERIOR_MARK = '+';
 /// A 'discriminator' function is to be used. TBD.
 const DISCRIMINATED_MARK = '*';
 
-/**
- * Returns the interceptor for a native object, or returns `null` if not found.
- *
- * A dispatch record is cached according to the specification of the dispatch
- * tag for [obj].
- */
-@NoInline()
+/// Returns the interceptor for a native object, or returns `null` if not found.
+///
+/// A dispatch record is cached according to the specification of the dispatch
+/// tag for [obj].
+@pragma('dart2js:noInline')
 lookupAndCacheInterceptor(obj) {
   assert(!isDartObject(obj));
-  String tag = getTagFunction(obj);
+  String tag = getTagFunction!(obj);
 
   // Fast path for instance (and uncached) tags because the lookup is repeated
   // for each instance (or getInterceptor call).
@@ -177,8 +159,9 @@ lookupAndCacheInterceptor(obj) {
   // [initNativeDispatch].
   var interceptorClass = lookupInterceptor(tag);
   if (interceptorClass == null) {
-    tag = alternateTagFunction(obj, tag);
-    if (tag != null) {
+    String? altTag = alternateTagFunction!(obj, tag);
+    if (altTag != null) {
+      tag = altTag;
       // Fast path for instance and uncached tags again.
       record = propertyGet(dispatchRecordsForInstanceTags, tag);
       if (record != null) return patchInstance(obj, record);
@@ -270,28 +253,27 @@ makeDefaultDispatchRecord(tag, interceptorClass, proto) {
   }
 }
 
-/**
- * [proto] should have no shadowing prototypes that are not also assigned a
- * dispatch rescord.
- */
+/// [proto] should have no shadowing prototypes that are not also assigned a
+/// dispatch rescord.
 setNativeSubclassDispatchRecord(proto, interceptor) {
   setDispatchProperty(proto, makeLeafDispatchRecord(interceptor));
 }
 
 String constructorNameFallback(object) {
-  return JS('String', '#(#)', _constructorNameFallback, object);
+  return JS('returns:String;effects:none;depends:none', '#(#)',
+      _constructorNameFallback, object);
 }
 
 var initNativeDispatchFlag; // null or true
 
-@NoInline()
+@pragma('dart2js:noInline')
 void initNativeDispatch() {
   if (true == initNativeDispatchFlag) return;
   initNativeDispatchFlag = true;
   initNativeDispatchContinue();
 }
 
-@NoInline()
+@pragma('dart2js:noInline')
 void initNativeDispatchContinue() {
   dispatchRecordsForInstanceTags = JS('', 'Object.create(null)');
   interceptorsForUncacheableTags = JS('', 'Object.create(null)');
@@ -302,14 +284,14 @@ void initNativeDispatchContinue() {
   // tags `TAG`, if `window.TAG` is a (constructor) function, set the dispatch
   // property if the function's prototype to a dispatch record.
   var map = interceptorsByTag;
-  var tags = JS('JSMutableArray', 'Object.getOwnPropertyNames(#)', map);
+  JSArray tags = JS('JSMutableArray', 'Object.getOwnPropertyNames(#)', map);
 
   if (JS('bool', 'typeof window != "undefined"')) {
     var context = JS('=Object', 'window');
     var fun = JS('=Object', 'function () {}');
     for (int i = 0; i < tags.length; i++) {
       var tag = tags[i];
-      var proto = prototypeForTagFunction(tag);
+      var proto = prototypeForTagFunction!(tag);
       if (proto != null) {
         var interceptorClass = JS('', '#[#]', map, tag);
         var record = makeDefaultDispatchRecord(tag, interceptorClass, proto);
@@ -338,41 +320,39 @@ void initNativeDispatchContinue() {
   }
 }
 
-/**
- * Initializes [getTagFunction] and [alternateTagFunction].
- *
- * These functions are 'hook functions', collectively 'hooks'.  They initialized
- * by applying a series of hooks transformers.  Built-in hooks transformers deal
- * with various known browser behaviours.
- *
- * Each hook tranformer takes a 'hooks' input which is a JavaScript object
- * containing the hook functions, and returns the same or a new object with
- * replacements.  The replacements can wrap the originals to provide alternate
- * or modified behaviour.
- *
- *     { getTag: function(obj) {...},
- *       getUnknownTag: function(obj, tag) {...},
- *       prototypeForTag: function(tag) {...},
- *       discriminator: function(tag) {...},
- *      }
- *
- * * getTag(obj) returns the dispatch tag, or `null`.
- * * getUnknownTag(obj, tag) returns a tag when [getTag] fails.
- * * prototypeForTag(tag) returns the prototype of the constructor for tag,
- *   or `null` if not available or prepatching is undesirable.
- * * discriminator(tag) returns a function TBD.
- *
- * The web site can adapt a dart2js application by loading code ahead of the
- * dart2js application that defines hook transformers to be after the built in
- * ones.  Code defining a transformer HT should use the following pattern to
- * ensure multiple transformers can be composed:
- *
- *     (dartNativeDispatchHooksTransformer =
- *      window.dartNativeDispatchHooksTransformer || []).push(HT);
- *
- *
- * TODO: Implement and describe dispatch tags and their caching methods.
- */
+/// Initializes [getTagFunction] and [alternateTagFunction].
+///
+/// These functions are 'hook functions', collectively 'hooks'.  They
+/// initialized by applying a series of hooks transformers.  Built-in hooks
+/// transformers deal with various known browser behaviours.
+///
+/// Each hook tranformer takes a 'hooks' input which is a JavaScript object
+/// containing the hook functions, and returns the same or a new object with
+/// replacements.  The replacements can wrap the originals to provide alternate
+/// or modified behaviour.
+///
+///     { getTag: function(obj) {...},
+///       getUnknownTag: function(obj, tag) {...},
+///       prototypeForTag: function(tag) {...},
+///       discriminator: function(tag) {...},
+///      }
+///
+/// * getTag(obj) returns the dispatch tag, or `null`.
+/// * getUnknownTag(obj, tag) returns a tag when [getTag] fails.
+/// * prototypeForTag(tag) returns the prototype of the constructor for tag,
+///   or `null` if not available or prepatching is undesirable.
+/// * discriminator(tag) returns a function TBD.
+///
+/// The web site can adapt a dart2js application by loading code ahead of the
+/// dart2js application that defines hook transformers to be after the built in
+/// ones.  Code defining a transformer HT should use the following pattern to
+/// ensure multiple transformers can be composed:
+///
+///     (dartNativeDispatchHooksTransformer =
+///      window.dartNativeDispatchHooksTransformer || []).push(HT);
+///
+///
+/// TODO: Implement and describe dispatch tags and their caching methods.
 void initHooks() {
   // The initial simple hooks:
   var hooks = JS('', '#()', _baseHooks);
@@ -478,14 +458,12 @@ function() {
     discriminator: discriminator };
 }''');
 
-/**
- * Returns the name of the constructor function for browsers where
- * `object.constructor.name` is not reliable.
- *
- * This function is split out of [_fallbackConstructorHooksTransformerGenerator]
- * as it is called from both the dispatch hooks and via
- * [constructorNameFallback] from objectToString.
- */
+/// Returns the name of the constructor function for browsers where
+/// `object.constructor.name` is not reliable.
+///
+/// This function is split out of
+/// [_fallbackConstructorHooksTransformerGenerator] as it is called from both
+/// the dispatch hooks and via [constructorNameFallback] from objectToString.
 const _constructorNameFallback = const JS_CONST(r'''
 function getTagFallback(o) {
   var s = Object.prototype.toString.call(o);

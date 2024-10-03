@@ -18,7 +18,6 @@ import 'package:observatory/repositories.dart';
 import 'package:observatory/tracer.dart';
 import 'package:observatory/utils.dart';
 import 'package:stack_trace/stack_trace.dart';
-import 'package:usage/usage_html.dart';
 
 export 'package:observatory/utils.dart';
 
@@ -28,4 +27,3 @@ part 'src/app/notification.dart';
 part 'src/app/page.dart';
 part 'src/app/settings.dart';
 part 'src/app/view_model.dart';
-part 'src/app/analytics.dart';

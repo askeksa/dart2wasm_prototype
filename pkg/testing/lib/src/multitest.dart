@@ -4,13 +4,13 @@
 
 library testing.multitest;
 
-import 'dart:async' show Stream, StreamTransformer;
+import 'dart:async' show Stream, StreamTransformerBase;
 
 import 'dart:io' show Directory, File;
 
 import 'log.dart' show splitLines;
 
-import 'test_description.dart' show TestDescription;
+import 'test_description.dart' show FileBasedTestDescription, TestDescription;
 
 bool isError(Set<String> expectations) {
   if (expectations.contains("compile-time error")) return true;
@@ -25,12 +25,13 @@ bool isCheckedModeError(Set<String> expectations) {
 }
 
 class MultitestTransformer
-    implements StreamTransformer<TestDescription, TestDescription> {
+    extends StreamTransformerBase<TestDescription, TestDescription> {
   static RegExp multitestMarker = new RegExp(r"//[#/]");
   static int _multitestMarkerLength = 3;
 
   static const List<String> validOutcomesList = const <String>[
     "ok",
+    "syntax error",
     "compile-time error",
     "runtime error",
     "static type warning",
@@ -50,8 +51,16 @@ class MultitestTransformer
 
     nextTest:
     await for (TestDescription test in stream) {
-      String contents = await test.file.readAsString();
-      if (!contents.contains(multitestMarker)) {
+      FileBasedTestDescription? multitest;
+      String? contents;
+      if (test is FileBasedTestDescription) {
+        contents = await test.file.readAsString();
+        if (contents.contains(multitestMarker)) {
+          multitest = test;
+        }
+      }
+
+      if (multitest == null) {
         yield test;
         continue nextTest;
       }
@@ -64,11 +73,11 @@ class MultitestTransformer
         "none": new Set<String>(),
       };
       int lineNumber = 0;
-      for (String line in splitLines(contents)) {
+      for (String line in splitLines(contents!)) {
         lineNumber++;
         int index = line.indexOf(multitestMarker);
-        String subtestName;
-        List<String> subtestOutcomesList;
+        String? subtestName;
+        List<String>? subtestOutcomesList;
         if (index != -1) {
           String annotationText =
               line.substring(index + _multitestMarkerLength).trim();
@@ -80,13 +89,8 @@ class MultitestTransformer
                 .split(",")
                 .map((s) => s.trim())
                 .toList();
-            if (subtestName == "none") {
-              reportError(test.formatError(
-                  "$lineNumber: $subtestName can't be used as test name."));
-              continue nextTest;
-            }
             if (subtestOutcomesList.isEmpty) {
-              reportError(test
+              reportError(multitest
                   .formatError("$lineNumber: Expected <testname>:<outcomes>"));
               continue nextTest;
             }
@@ -98,13 +102,13 @@ class MultitestTransformer
           lines.add(line);
           Set<String> subtestOutcomes =
               outcomes.putIfAbsent(subtestName, () => new Set<String>());
-          if (subtestOutcomesList.length != 1 ||
+          if (subtestOutcomesList!.length != 1 ||
               subtestOutcomesList.single != "continued") {
             for (String outcome in subtestOutcomesList) {
               if (validOutcomes.contains(outcome)) {
                 subtestOutcomes.add(outcome);
               } else {
-                reportError(test.formatError(
+                reportError(multitest.formatError(
                     "$lineNumber: '$outcome' isn't a recognized outcome."));
                 continue nextTest;
               }
@@ -118,13 +122,15 @@ class MultitestTransformer
         }
       }
       Uri root = Uri.base.resolve("generated/");
-      Directory generated = new Directory.fromUri(root.resolve(test.shortName));
+      Directory generated =
+          new Directory.fromUri(root.resolve(multitest.shortName));
       generated = await generated.create(recursive: true);
-      for (String name in testsAsLines.keys) {
-        List<String> lines = testsAsLines[name];
+      for (MapEntry<String, List<String>> entry in testsAsLines.entries) {
+        String name = entry.key;
+        List<String> lines = entry.value;
         Uri uri = generated.uri.resolve("${name}_generated.dart");
-        TestDescription subtest =
-            new TestDescription(root, new File.fromUri(uri));
+        FileBasedTestDescription subtest =
+            new FileBasedTestDescription(root, new File.fromUri(uri));
         subtest.multitestExpectations = outcomes[name];
         await subtest.file.writeAsString(lines.join(""));
         yield subtest;

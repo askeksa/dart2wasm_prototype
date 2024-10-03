@@ -8,19 +8,34 @@ part of dart.convert;
 const int _LF = 10;
 const int _CR = 13;
 
-/**
- * A [StreamTransformer] that splits a [String] into individual lines.
- *
- * A line is terminated by either a CR (U+000D), a LF (U+000A), a
- * CR+LF sequence (DOS line ending),
- * and a final non-empty line can be ended by the end of the string.
- *
- * The returned lines do not contain the line terminators.
- */
-
-class LineSplitter extends Converter<String, List<String>> /*=Object*/
-    implements
-        Object/*=StreamTransformer<String, String>*/ {
+/// A [StreamTransformer] that splits a [String] into individual lines.
+///
+/// A line is terminated by either:
+/// * a CR, carriage return: U+000D ('\r')
+/// * a LF, line feed (Unix line break): U+000A ('\n') or
+/// * a CR+LF sequence (DOS/Windows line break), and
+/// * a final non-empty line can be ended by the end of the input.
+///
+/// The resulting lines do not contain the line terminators.
+///
+/// Example:
+/// ```dart
+/// const splitter = LineSplitter();
+/// const sampleText =
+///     'Dart is: \r an object-oriented \n class-based \n garbage-collected '
+///     '\r\n language with C-style syntax \r\n';
+///
+/// final sampleTextLines = splitter.convert(sampleText);
+/// for (var i = 0; i < sampleTextLines.length; i++) {
+///   print('$i: ${sampleTextLines[i]}');
+/// }
+/// // 0: Dart is:
+/// // 1:  an object-oriented
+/// // 2:  class-based
+/// // 3:  garbage-collected
+/// // 4:  language with C-style syntax
+/// ```
+class LineSplitter extends StreamTransformerBase<String, String> {
   const LineSplitter();
 
   /// Split [lines] into individual lines.
@@ -29,12 +44,12 @@ class LineSplitter extends Converter<String, List<String>> /*=Object*/
   /// `lines.substring(start, end)`. The [start] and [end] values must
   /// specify a valid sub-range of [lines]
   /// (`0 <= start <= end <= lines.length`).
-  static Iterable<String> split(String lines, [int start = 0, int end]) sync* {
+  static Iterable<String> split(String lines, [int start = 0, int? end]) sync* {
     end = RangeError.checkValidRange(start, end, lines.length);
-    int sliceStart = start;
-    int char = 0;
-    for (int i = start; i < end; i++) {
-      int previousChar = char;
+    var sliceStart = start;
+    var char = 0;
+    for (var i = start; i < end; i++) {
+      var previousChar = char;
       char = lines.codeUnitAt(i);
       if (char != _CR) {
         if (char != _LF) continue;
@@ -52,12 +67,12 @@ class LineSplitter extends Converter<String, List<String>> /*=Object*/
   }
 
   List<String> convert(String data) {
-    List<String> lines = <String>[];
-    int end = data.length;
-    int sliceStart = 0;
-    int char = 0;
-    for (int i = 0; i < end; i++) {
-      int previousChar = char;
+    var lines = <String>[];
+    var end = data.length;
+    var sliceStart = 0;
+    var char = 0;
+    for (var i = 0; i < end; i++) {
+      var previousChar = char;
       char = data.codeUnitAt(i);
       if (char != _CR) {
         if (char != _LF) continue;
@@ -76,15 +91,13 @@ class LineSplitter extends Converter<String, List<String>> /*=Object*/
   }
 
   StringConversionSink startChunkedConversion(Sink<String> sink) {
-    if (sink is! StringConversionSink) {
-      sink = new StringConversionSink.from(sink);
-    }
-    return new _LineSplitterSink(sink);
+    return _LineSplitterSink(
+        sink is StringConversionSink ? sink : StringConversionSink.from(sink));
   }
 
-  Stream/*<String>*/ bind(Stream<String> stream) {
-    return new Stream<String>.eventTransformed(
-        stream, (EventSink<String> sink) => new _LineSplitterEventSink(sink));
+  Stream<String> bind(Stream<String> stream) {
+    return Stream<String>.eventTransformed(
+        stream, (EventSink<String> sink) => _LineSplitterEventSink(sink));
   }
 }
 
@@ -96,7 +109,7 @@ class _LineSplitterSink extends StringConversionSinkBase {
   ///
   /// If the previous slice ended in a line without a line terminator,
   /// then the next slice may continue the line.
-  String _carry;
+  String? _carry;
 
   /// Whether to skip a leading LF character from the next slice.
   ///
@@ -116,9 +129,10 @@ class _LineSplitterSink extends StringConversionSinkBase {
       if (isLast) close();
       return;
     }
-    if (_carry != null) {
+    String? carry = _carry;
+    if (carry != null) {
       assert(!_skipLeadingLF);
-      chunk = _carry + chunk.substring(start, end);
+      chunk = carry + chunk.substring(start, end);
       start = 0;
       end = chunk.length;
       _carry = null;
@@ -134,17 +148,17 @@ class _LineSplitterSink extends StringConversionSinkBase {
 
   void close() {
     if (_carry != null) {
-      _sink.add(_carry);
+      _sink.add(_carry!);
       _carry = null;
     }
     _sink.close();
   }
 
   void _addLines(String lines, int start, int end) {
-    int sliceStart = start;
-    int char = 0;
-    for (int i = start; i < end; i++) {
-      int previousChar = char;
+    var sliceStart = start;
+    var char = 0;
+    for (var i = start; i < end; i++) {
+      var previousChar = char;
       char = lines.codeUnitAt(i);
       if (char != _CR) {
         if (char != _LF) continue;
@@ -170,9 +184,9 @@ class _LineSplitterEventSink extends _LineSplitterSink
 
   _LineSplitterEventSink(EventSink<String> eventSink)
       : _eventSink = eventSink,
-        super(new StringConversionSink.from(eventSink));
+        super(StringConversionSink.from(eventSink));
 
-  void addError(Object o, [StackTrace stackTrace]) {
+  void addError(Object o, [StackTrace? stackTrace]) {
     _eventSink.addError(o, stackTrace);
   }
 }

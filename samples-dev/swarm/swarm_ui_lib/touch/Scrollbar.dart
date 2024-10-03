@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// @dart = 2.9
+
 part of touch;
 
 /**
@@ -131,7 +133,7 @@ class Scrollbar implements ScrollListener {
       _frame.onMouseOver.listen((Event e) {
         final activeElement = document.activeElement;
         // TODO(jacobr): don't steal focus from a child element or a truly
-        // focusable element. Only support stealing focus ffrom another
+        // focusable element. Only support stealing focus from another
         // element that was given fake focus.
         if (activeElement is BodyElement ||
             (!_frame.contains(activeElement) && activeElement is DivElement)) {
@@ -148,7 +150,7 @@ class Scrollbar implements ScrollListener {
         _hovering = false;
         // Start hiding immediately if we aren't
         // scrolling or already in the process of
-        // hidng the scrollbar
+        // hiding the scrollbar
         if (!_scrollInProgress && _timer == null) {
           _boundHideFn();
         }
@@ -218,7 +220,7 @@ class Scrollbar implements ScrollListener {
     _currentScrollStartMouse = coordinate;
   }
 
-  void _onEnd(UIEvent e) {
+  void _onEnd(Event e) {
     _scrollBarDragInProgress = false;
     // TODO(jacobr): make scrollbar less tightly coupled to the scroller.
     _scroller._onScrollerDragEnd.add(new Event(ScrollerEventType.DRAG_END));

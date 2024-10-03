@@ -2,20 +2,29 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of dart2js.kernel.element_map;
+import 'package:kernel/ast.dart' as ir;
 
-class KernelNoSuchMethodResolver implements NoSuchMethodResolver {
+import '../common/elements.dart';
+import '../common/names.dart';
+import '../elements/entities.dart';
+
+import 'element_map_impl.dart';
+import 'kelements.dart';
+
+/// Interface for determining the form of a `noSuchMethod` implementation.
+class NoSuchMethodResolver {
   final KernelToElementMapImpl elementMap;
 
-  KernelNoSuchMethodResolver(this.elementMap);
-
-  ElementEnvironment get _elementEnvironment => elementMap.elementEnvironment;
+  NoSuchMethodResolver(this.elementMap);
 
   CommonElements get _commonElements => elementMap.commonElements;
 
-  @override
+  /// Computes whether [method] is of the form
+  ///
+  ///     noSuchMethod(i) => super.noSuchMethod(i);
+  ///
   bool hasForwardingSyntax(KFunction method) {
-    ir.Procedure node = elementMap._lookupProcedure(method);
+    ir.Procedure node = elementMap.lookupProcedure(method);
     if (node.function.positionalParameters.isEmpty) return false;
     ir.VariableDeclaration firstParameter =
         node.function.positionalParameters.first;
@@ -34,7 +43,7 @@ class KernelNoSuchMethodResolver implements NoSuchMethodResolver {
       expr = asExpression.operand;
     }
     if (expr is ir.SuperMethodInvocation &&
-        expr.name.name == Identifiers.noSuchMethod_) {
+        expr.name.text == Identifiers.noSuchMethod_) {
       ir.Arguments arguments = expr.arguments;
       if (arguments.positional.length == 1 &&
           arguments.named.isEmpty &&
@@ -46,9 +55,12 @@ class KernelNoSuchMethodResolver implements NoSuchMethodResolver {
     return false;
   }
 
-  @override
+  /// Computes whether [method] is of the form
+  ///
+  ///     noSuchMethod(i) => throw new Error();
+  ///
   bool hasThrowingSyntax(KFunction method) {
-    ir.Procedure node = elementMap._lookupProcedure(method);
+    ir.Procedure node = elementMap.lookupProcedure(method);
     ir.Statement body = node.function.body;
     if (body is ir.Block && body.statements.isNotEmpty) {
       ir.Block block = body;
@@ -63,29 +75,8 @@ class KernelNoSuchMethodResolver implements NoSuchMethodResolver {
     return expr is ir.Throw;
   }
 
-  @override
+  /// Returns the `noSuchMethod` that [method] overrides.
   FunctionEntity getSuperNoSuchMethod(FunctionEntity method) {
-    ClassEntity cls = method.enclosingClass;
-    while (cls != null) {
-      cls = _elementEnvironment.getSuperClass(cls);
-      MemberEntity member =
-          _elementEnvironment.lookupClassMember(cls, Identifiers.noSuchMethod_);
-      if (member != null) {
-        if (member.isFunction) {
-          FunctionEntity function = member;
-          if (function.parameterStructure.positionalParameters >= 1) {
-            return function;
-          }
-        }
-        // If [member] is not a valid `noSuchMethod` the target is
-        // `Object.superNoSuchMethod`.
-        break;
-      }
-    }
-    FunctionEntity function = _elementEnvironment.lookupClassMember(
-        _commonElements.objectClass, Identifiers.noSuchMethod_);
-    assert(invariant(method, function != null,
-        message: "No super noSuchMethod found for $method."));
-    return function;
+    return elementMap.getSuperNoSuchMethod(method.enclosingClass);
   }
 }

@@ -2,9 +2,15 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// This tests uses the multi-test "ok" feature:
+// none: Trimmed behaviour. Passing on the VM.
+// 01: Trimmed version for dart2js.
+// 02: Full version passing in the VM.
+//
+// TODO(rmacnak,ahe): Remove multi-test when VM and dart2js are on par.
+
 library test.class_equality_test;
 
-@MirrorsUsed(targets: "test.class_equality_test")
 import 'dart:mirrors';
 
 import 'package:expect/expect.dart';
@@ -20,9 +26,9 @@ class BadEqualityHash {
 }
 
 typedef bool Predicate(Object o);
-Predicate somePredicate;
+Predicate somePredicate = (Object o) => false;
 
-checkEquality(List<Map> equivalenceClasses) {
+checkEquality(List<Map<String, Object?>> equivalenceClasses) {
   for (var equivalenceClass in equivalenceClasses) {
     equivalenceClass.forEach((name, member) {
       equivalenceClass.forEach((otherName, otherMember) {
@@ -55,7 +61,7 @@ main() {
   var badEqualityHash1 = new BadEqualityHash();
   var badEqualityHash2 = new BadEqualityHash();
 
-  checkEquality([
+  checkEquality(<Map<String, Object?>>[
     {'reflect(o1)': reflect(o1), 'reflect(o1), again': reflect(o1)},
     {'reflect(o2)': reflect(o2), 'reflect(o2), again': reflect(o2)},
     {

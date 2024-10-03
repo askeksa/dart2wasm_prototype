@@ -6,6 +6,8 @@
 # Run dartanalyzer.dart on the Dart VM. This script assumes the Dart repo's
 # directory structure.
 
+echo "Warning: 'dartanalyzer' is deprecated. Please use 'dart analyze'." 1>&2
+
 function follow_links() {
   file="$1"
   while [ -h "$file" ]; do
@@ -28,10 +30,11 @@ DART="$BIN_DIR/dart"
 
 unset EXTRA_VM_OPTIONS
 declare -a EXTRA_VM_OPTIONS
+EXTRA_VM_OPTIONS+=("--enable_experiment=non-nullable")
 
 case $0 in
   *_developer)
-    EXTRA_VM_OPTIONS+=('--checked')
+    EXTRA_VM_OPTIONS+=('--enable-asserts')
     ;;
 esac
 

@@ -1,42 +1,73 @@
 // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-// VMOptions=--error_on_bad_type --error_on_bad_override
 
 library get_object_rpc_test;
 
 import 'dart:typed_data';
-import 'dart:convert' show BASE64;
+import 'dart:convert' show base64Decode;
 import 'package:observatory/service_io.dart';
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'service_test_common.dart';
 import 'test_helper.dart';
 
 class _DummyClass {
   static var dummyVar = 11;
-  void dummyFunction() {}
+  final List<String> dummyList = new List<String>.filled(20, '');
+  static var dummyVarWithInit = foo();
+  late String dummyLateVarWithInit = 'bar';
+  late String dummyLateVar;
+  void dummyFunction(int a, [bool b = false]) {}
+  void dummyGenericFunction<K, V>(K a, {required V param}) {}
+  static List foo() => List<String>.filled(20, '');
 }
 
 class _DummySubClass extends _DummyClass {}
 
+class _DummyGenericSubClass<T> extends _DummyClass {}
+
 void warmup() {
   // Silence analyzer.
   new _DummySubClass();
-  new _DummyClass().dummyFunction();
+  new _DummyGenericSubClass<Object>();
+  new _DummyClass().dummyFunction(0);
+  new _DummyClass().dummyGenericFunction<Object, dynamic>(0, param: 0);
 }
 
-eval(Isolate isolate, String expression) async {
+@pragma("vm:entry-point")
+getChattanooga() => "Chattanooga";
+
+@pragma("vm:entry-point")
+getList() => [3, 2, 1];
+
+@pragma("vm:entry-point")
+getMap() => {"x": 3, "y": 4, "z": 5};
+
+@pragma("vm:entry-point")
+getUint8List() => uint8List;
+
+@pragma("vm:entry-point")
+getUint64List() => uint64List;
+
+@pragma("vm:entry-point")
+getDummyClass() => new _DummyClass();
+
+@pragma("vm:entry-point")
+getDummyGenericSubClass() => new _DummyGenericSubClass<Object>();
+
+invoke(Isolate isolate, String selector) async {
   Map params = {
     'targetId': isolate.rootLibrary.id,
-    'expression': expression,
+    'selector': selector,
+    'argumentIds': <String>[],
   };
-  return await isolate.invokeRpcNoUpgrade('evaluate', params);
+  return await isolate.invokeRpcNoUpgrade('invoke', params);
 }
 
 var uint8List = new Uint8List.fromList([3, 2, 1]);
 var uint64List = new Uint64List.fromList([3, 2, 1]);
 
-var tests = [
+var tests = <IsolateTest>[
   // null object.
   (Isolate isolate) async {
     var params = {
@@ -88,7 +119,7 @@ var tests = [
   // A string
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, '"Chattanooga"');
+    var evalResult = await invoke(isolate, 'getChattanooga');
     var params = {
       'objectId': evalResult['id'],
     };
@@ -110,7 +141,7 @@ var tests = [
   // String prefix.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, '"Chattanooga"');
+    var evalResult = await invoke(isolate, 'getChattanooga');
     var params = {
       'objectId': evalResult['id'],
       'count': 4,
@@ -133,7 +164,7 @@ var tests = [
   // String subrange.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, '"Chattanooga"');
+    var evalResult = await invoke(isolate, 'getChattanooga');
     var params = {
       'objectId': evalResult['id'],
       'offset': 4,
@@ -157,7 +188,7 @@ var tests = [
   // String with wacky offset.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, '"Chattanooga"');
+    var evalResult = await invoke(isolate, 'getChattanooga');
     var params = {
       'objectId': evalResult['id'],
       'offset': 100,
@@ -181,7 +212,7 @@ var tests = [
   // A built-in List.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, '[3, 2, 1]');
+    var evalResult = await invoke(isolate, 'getList');
     var params = {
       'objectId': evalResult['id'],
     };
@@ -213,7 +244,7 @@ var tests = [
   // List prefix.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, '[3, 2, 1]');
+    var evalResult = await invoke(isolate, 'getList');
     var params = {
       'objectId': evalResult['id'],
       'count': 2,
@@ -243,7 +274,7 @@ var tests = [
   // List suffix.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, '[3, 2, 1]');
+    var evalResult = await invoke(isolate, 'getList');
     var params = {
       'objectId': evalResult['id'],
       'offset': 2,
@@ -271,7 +302,7 @@ var tests = [
   // List with wacky offset.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, '[3, 2, 1]');
+    var evalResult = await invoke(isolate, 'getList');
     var params = {
       'objectId': evalResult['id'],
       'offset': 100,
@@ -296,7 +327,7 @@ var tests = [
   // A built-in Map.
   (Isolate isolate) async {
     // Call eval to get a Dart map.
-    var evalResult = await eval(isolate, '{"x": 3, "y": 4, "z": 5}');
+    var evalResult = await invoke(isolate, 'getMap');
     var params = {
       'objectId': evalResult['id'],
     };
@@ -337,7 +368,7 @@ var tests = [
   // Map prefix.
   (Isolate isolate) async {
     // Call eval to get a Dart map.
-    var evalResult = await eval(isolate, '{"x": 3, "y": 4, "z": 5}');
+    var evalResult = await invoke(isolate, 'getMap');
     var params = {
       'objectId': evalResult['id'],
       'count': 2,
@@ -373,7 +404,7 @@ var tests = [
   // Map suffix.
   (Isolate isolate) async {
     // Call eval to get a Dart map.
-    var evalResult = await eval(isolate, '{"x": 3, "y": 4, "z": 5}');
+    var evalResult = await invoke(isolate, 'getMap');
     var params = {
       'objectId': evalResult['id'],
       'offset': 2,
@@ -404,7 +435,7 @@ var tests = [
   // Map with wacky offset
   (Isolate isolate) async {
     // Call eval to get a Dart map.
-    var evalResult = await eval(isolate, '{"x": 3, "y": 4, "z": 5}');
+    var evalResult = await invoke(isolate, 'getMap');
     var params = {
       'objectId': evalResult['id'],
       'offset': 100,
@@ -429,7 +460,7 @@ var tests = [
   // Uint8List.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, 'uint8List');
+    var evalResult = await invoke(isolate, 'getUint8List');
     var params = {
       'objectId': evalResult['id'],
     };
@@ -447,14 +478,14 @@ var tests = [
     expect(result['offset'], isNull);
     expect(result['count'], isNull);
     expect(result['bytes'], equals('AwIB'));
-    Uint8List bytes = BASE64.decode(result['bytes']);
+    Uint8List bytes = base64Decode(result['bytes']);
     expect(bytes.buffer.asUint8List().toString(), equals('[3, 2, 1]'));
   },
 
   // Uint8List prefix.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, 'uint8List');
+    var evalResult = await invoke(isolate, 'getUint8List');
     var params = {
       'objectId': evalResult['id'],
       'count': 2,
@@ -473,14 +504,14 @@ var tests = [
     expect(result['offset'], isNull);
     expect(result['count'], equals(2));
     expect(result['bytes'], equals('AwI='));
-    Uint8List bytes = BASE64.decode(result['bytes']);
+    Uint8List bytes = base64Decode(result['bytes']);
     expect(bytes.buffer.asUint8List().toString(), equals('[3, 2]'));
   },
 
   // Uint8List suffix.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, 'uint8List');
+    var evalResult = await invoke(isolate, 'getUint8List');
     var params = {
       'objectId': evalResult['id'],
       'offset': 2,
@@ -500,14 +531,14 @@ var tests = [
     expect(result['offset'], equals(2));
     expect(result['count'], equals(1));
     expect(result['bytes'], equals('AQ=='));
-    Uint8List bytes = BASE64.decode(result['bytes']);
+    Uint8List bytes = base64Decode(result['bytes']);
     expect(bytes.buffer.asUint8List().toString(), equals('[1]'));
   },
 
   // Uint8List with wacky offset.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, 'uint8List');
+    var evalResult = await invoke(isolate, 'getUint8List');
     var params = {
       'objectId': evalResult['id'],
       'offset': 100,
@@ -532,7 +563,7 @@ var tests = [
   // Uint64List.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, 'uint64List');
+    var evalResult = await invoke(isolate, 'getUint64List');
     var params = {
       'objectId': evalResult['id'],
     };
@@ -550,14 +581,14 @@ var tests = [
     expect(result['offset'], isNull);
     expect(result['count'], isNull);
     expect(result['bytes'], equals('AwAAAAAAAAACAAAAAAAAAAEAAAAAAAAA'));
-    Uint8List bytes = BASE64.decode(result['bytes']);
+    Uint8List bytes = base64Decode(result['bytes']);
     expect(bytes.buffer.asUint64List().toString(), equals('[3, 2, 1]'));
   },
 
   // Uint64List prefix.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, 'uint64List');
+    var evalResult = await invoke(isolate, 'getUint64List');
     var params = {
       'objectId': evalResult['id'],
       'count': 2,
@@ -576,14 +607,14 @@ var tests = [
     expect(result['offset'], isNull);
     expect(result['count'], equals(2));
     expect(result['bytes'], equals('AwAAAAAAAAACAAAAAAAAAA=='));
-    Uint8List bytes = BASE64.decode(result['bytes']);
+    Uint8List bytes = base64Decode(result['bytes']);
     expect(bytes.buffer.asUint64List().toString(), equals('[3, 2]'));
   },
 
   // Uint64List suffix.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, 'uint64List');
+    var evalResult = await invoke(isolate, 'getUint64List');
     var params = {
       'objectId': evalResult['id'],
       'offset': 2,
@@ -603,14 +634,14 @@ var tests = [
     expect(result['offset'], equals(2));
     expect(result['count'], equals(1));
     expect(result['bytes'], equals('AQAAAAAAAAA='));
-    Uint8List bytes = BASE64.decode(result['bytes']);
+    Uint8List bytes = base64Decode(result['bytes']);
     expect(bytes.buffer.asUint64List().toString(), equals('[1]'));
   },
 
   // Uint64List with wacky offset.
   (Isolate isolate) async {
     // Call eval to get a Dart list.
-    var evalResult = await eval(isolate, 'uint64List');
+    var evalResult = await invoke(isolate, 'getUint64List');
     var params = {
       'objectId': evalResult['id'],
       'offset': 100,
@@ -657,9 +688,8 @@ var tests = [
     expect(result['uri'], startsWith('file:'));
     expect(result['uri'], endsWith('get_object_rpc_test.dart'));
     expect(result['debuggable'], equals(true));
-    expect(result['dependencies'].length, ifKernel(isZero, isPositive));
-    nonKernelExecute(() => expect(
-        result['dependencies'][0]['target']['type'], equals('@Library')));
+    expect(result['dependencies'].length, isPositive);
+    expect(result['dependencies'][0]['target']['type'], equals('@Library'));
     expect(result['scripts'].length, isPositive);
     expect(result['scripts'][0]['type'], equals('@Script'));
     expect(result['variables'].length, isPositive);
@@ -675,7 +705,7 @@ var tests = [
     var params = {
       'objectId': 'libraries/9999999',
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await isolate.invokeRpcNoUpgrade('getObject', params);
       expect(false, isTrue, reason: 'Unreachable');
@@ -704,13 +734,13 @@ var tests = [
     expect(result['id'], startsWith('libraries/'));
     expect(result['uri'], startsWith('file:'));
     expect(result['uri'], endsWith('get_object_rpc_test.dart'));
-    expect(result['_kind'], equals(ifKernel('kernel', 'script')));
+    expect(result['_kind'], equals('kernel'));
     expect(result['library']['type'], equals('@Library'));
     expect(result['source'], startsWith('// Copyright (c)'));
     expect(result['tokenPosTable'].length, isPositive);
-    expect(result['tokenPosTable'][0], new isInstanceOf<List>());
+    expect(result['tokenPosTable'][0], isA<List>());
     expect(result['tokenPosTable'][0].length, isPositive);
-    expect(result['tokenPosTable'][0][0], new isInstanceOf<int>());
+    expect(result['tokenPosTable'][0][0], isA<int>());
   },
 
   // invalid script.
@@ -718,7 +748,7 @@ var tests = [
     var params = {
       'objectId': 'scripts/9999999',
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await isolate.invokeRpcNoUpgrade('getObject', params);
       expect(false, isTrue, reason: 'Unreachable');
@@ -734,7 +764,7 @@ var tests = [
   // class
   (Isolate isolate) async {
     // Call eval to get a class id.
-    var evalResult = await eval(isolate, 'new _DummyClass()');
+    var evalResult = await invoke(isolate, 'getDummyClass');
     var params = {
       'objectId': evalResult['class']['id'],
     };
@@ -748,6 +778,7 @@ var tests = [
     expect(result['_finalized'], equals(true));
     expect(result['_implemented'], equals(false));
     expect(result['_patch'], equals(false));
+    expect(result['typeParameters'], isNull);
     expect(result['library']['type'], equals('@Library'));
     expect(result['location']['type'], equals('SourceLocation'));
     expect(result['super']['type'], equals('@Class'));
@@ -760,12 +791,36 @@ var tests = [
     expect(result['subclasses'][0]['type'], equals('@Class'));
   },
 
+  // generic class
+  (Isolate isolate) async {
+    // Call eval to get a class id.
+    var evalResult = await invoke(isolate, 'getDummyGenericSubClass');
+    var params = {
+      'objectId': evalResult['class']['id'],
+    };
+    var result = await isolate.invokeRpcNoUpgrade('getObject', params);
+    expect(result['type'], equals('Class'));
+    expect(result['id'], startsWith('classes/'));
+    expect(result['name'], equals('_DummyGenericSubClass'));
+    expect(result['_vmName'], startsWith('_DummyGenericSubClass@'));
+    expect(result['abstract'], equals(false));
+    expect(result['const'], equals(false));
+    expect(result['_finalized'], equals(true));
+    expect(result['_implemented'], equals(false));
+    expect(result['_patch'], equals(false));
+    expect(result['typeParameters'].length, equals(1));
+    expect(result['library']['type'], equals('@Library'));
+    expect(result['location']['type'], equals('SourceLocation'));
+    expect(result['super']['type'], equals('@Class'));
+    expect(result['interfaces'].length, isZero);
+  },
+
   // invalid class.
   (Isolate isolate) async {
     var params = {
       'objectId': 'classes/9999999',
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await isolate.invokeRpcNoUpgrade('getObject', params);
       expect(false, isTrue, reason: 'Unreachable');
@@ -781,7 +836,7 @@ var tests = [
   // type.
   (Isolate isolate) async {
     // Call eval to get a class id.
-    var evalResult = await eval(isolate, 'new _DummyClass()');
+    var evalResult = await invoke(isolate, 'getDummyClass');
     var id = "${evalResult['class']['id']}/types/0";
     var params = {
       'objectId': id,
@@ -800,12 +855,12 @@ var tests = [
 
   // invalid type.
   (Isolate isolate) async {
-    var evalResult = await eval(isolate, 'new _DummyClass()');
+    var evalResult = await invoke(isolate, 'getDummyClass');
     var id = "${evalResult['class']['id']}/types/9999999";
     var params = {
       'objectId': id,
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await isolate.invokeRpcNoUpgrade('getObject', params);
       expect(false, isTrue, reason: 'Unreachable');
@@ -821,7 +876,7 @@ var tests = [
   // function.
   (Isolate isolate) async {
     // Call eval to get a class id.
-    var evalResult = await eval(isolate, 'new _DummyClass()');
+    var evalResult = await invoke(isolate, 'getDummyClass');
     var id = "${evalResult['class']['id']}/functions/dummyFunction";
     var params = {
       'objectId': id,
@@ -833,6 +888,52 @@ var tests = [
     expect(result['_kind'], equals('RegularFunction'));
     expect(result['static'], equals(false));
     expect(result['const'], equals(false));
+    expect(result['implicit'], equals(false));
+    expect(result['signature']['typeParameters'], isNull);
+    expect(result['signature']['returnType'], isNotNull);
+    expect(result['signature']['parameters'].length, 3);
+    expect(result['signature']['parameters'][1]['parameterType']['name'],
+        equals('int'));
+    expect(result['signature']['parameters'][1]['fixed'], isTrue);
+    expect(result['signature']['parameters'][2]['parameterType']['name'],
+        equals('bool'));
+    expect(result['signature']['parameters'][2]['fixed'], isFalse);
+    expect(result['location']['type'], equals('SourceLocation'));
+    expect(result['code']['type'], equals('@Code'));
+    expect(result['_optimizable'], equals(true));
+    expect(result['_inlinable'], equals(true));
+    expect(result['_usageCounter'], isPositive);
+    expect(result['_optimizedCallSiteCount'], isZero);
+    expect(result['_deoptimizations'], isZero);
+  },
+
+  // generic function.
+  (Isolate isolate) async {
+    // Call eval to get a class id.
+    var evalResult = await invoke(isolate, 'getDummyClass');
+    var id = "${evalResult['class']['id']}/functions/dummyGenericFunction";
+    var params = {
+      'objectId': id,
+    };
+    var result = await isolate.invokeRpcNoUpgrade('getObject', params);
+    expect(result['type'], equals('Function'));
+    expect(result['id'], equals(id));
+    expect(result['name'], equals('dummyGenericFunction'));
+    expect(result['_kind'], equals('RegularFunction'));
+    expect(result['static'], equals(false));
+    expect(result['const'], equals(false));
+    expect(result['implicit'], equals(false));
+    expect(result['signature']['typeParameters'].length, 2);
+    expect(result['signature']['returnType'], isNotNull);
+    expect(result['signature']['parameters'].length, 3);
+    expect(result['signature']['parameters'][1]['parameterType']['name'],
+        isNotNull);
+    expect(result['signature']['parameters'][1]['fixed'], isTrue);
+    expect(result['signature']['parameters'][2]['parameterType']['name'],
+        isNotNull);
+    expect(result['signature']['parameters'][2]['name'], 'param');
+    expect(result['signature']['parameters'][2]['fixed'], isFalse);
+    expect(result['signature']['parameters'][2]['required'], isTrue);
     expect(result['location']['type'], equals('SourceLocation'));
     expect(result['code']['type'], equals('@Code'));
     expect(result['_optimizable'], equals(true));
@@ -845,12 +946,12 @@ var tests = [
   // invalid function.
   (Isolate isolate) async {
     // Call eval to get a class id.
-    var evalResult = await eval(isolate, 'new _DummyClass()');
+    var evalResult = await invoke(isolate, 'getDummyClass');
     var id = "${evalResult['class']['id']}/functions/invalid";
     var params = {
       'objectId': id,
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await isolate.invokeRpcNoUpgrade('getObject', params);
       expect(false, isTrue, reason: 'Unreachable');
@@ -866,7 +967,7 @@ var tests = [
   // field
   (Isolate isolate) async {
     // Call eval to get a class id.
-    var evalResult = await eval(isolate, 'new _DummyClass()');
+    var evalResult = await invoke(isolate, 'getDummyClass');
     var id = "${evalResult['class']['id']}/fields/dummyVar";
     var params = {
       'objectId': id,
@@ -885,15 +986,125 @@ var tests = [
     expect(result['_guardLength'], isNotNull);
   },
 
+  // static field initializer
+  (Isolate isolate) async {
+    // Call eval to get a class id.
+    var evalResult = await invoke(isolate, 'getDummyClass');
+    var id = "${evalResult['class']['id']}/field_inits/dummyVarWithInit";
+    var params = {
+      'objectId': id,
+    };
+    var result = await isolate.invokeRpcNoUpgrade('getObject', params);
+    expect(result['type'], equals('Function'));
+    expect(result['id'], equals(id));
+    expect(result['name'], equals('dummyVarWithInit'));
+    expect(result['_kind'], equals('FieldInitializer'));
+    expect(result['static'], equals(true));
+    expect(result['const'], equals(false));
+    expect(result['implicit'], equals(false));
+    expect(result['signature']['typeParameters'], isNull);
+    expect(result['signature']['returnType'], isNotNull);
+    expect(result['signature']['parameters'].length, 0);
+    expect(result['location']['type'], equals('SourceLocation'));
+    expect(result['code']['type'], equals('@Code'));
+    expect(result['_optimizable'], equals(true));
+    expect(result['_inlinable'], equals(false));
+    expect(result['_usageCounter'], isZero);
+    expect(result['_optimizedCallSiteCount'], isZero);
+    expect(result['_deoptimizations'], isZero);
+  },
+
+  // late field initializer
+  (Isolate isolate) async {
+    // Call eval to get a class id.
+    var evalResult = await invoke(isolate, 'getDummyClass');
+    var id = "${evalResult['class']['id']}/field_inits/dummyLateVarWithInit";
+    var params = {
+      'objectId': id,
+    };
+    var result = await isolate.invokeRpcNoUpgrade('getObject', params);
+    expect(result['type'], equals('Function'));
+    expect(result['id'], equals(id));
+    expect(result['name'], equals('dummyLateVarWithInit'));
+    expect(result['_kind'], equals('FieldInitializer'));
+    expect(result['static'], equals(false));
+    expect(result['const'], equals(false));
+    expect(result['implicit'], equals(false));
+    expect(result['signature']['typeParameters'], isNull);
+    expect(result['signature']['returnType'], isNotNull);
+    expect(result['signature']['parameters'].length, 1);
+    expect(result['location']['type'], equals('SourceLocation'));
+    expect(result['code']['type'], equals('@Code'));
+    expect(result['_optimizable'], equals(true));
+    expect(result['_inlinable'], equals(false));
+    expect(result['_usageCounter'], isZero);
+    expect(result['_optimizedCallSiteCount'], isZero);
+    expect(result['_deoptimizations'], isZero);
+  },
+
+  // invalid late field initialize.
+  (Isolate isolate) async {
+    // Call eval to get a class id.
+    var evalResult = await invoke(isolate, 'getDummyClass');
+    var id = "${evalResult['class']['id']}/field_inits/dummyLateVar";
+    var params = {
+      'objectId': id,
+    };
+    bool caughtException = false;
+    try {
+      await isolate.invokeRpcNoUpgrade('getObject', params);
+      expect(false, isTrue, reason: 'Unreachable');
+    } on ServerRpcException catch (e) {
+      caughtException = true;
+      expect(e.code, equals(ServerRpcException.kInvalidParams));
+      expect(
+          e.message, startsWith("getObject: invalid 'objectId' parameter: "));
+    }
+    expect(caughtException, isTrue);
+  },
+
+  // field with guards
+  (Isolate isolate) async {
+    var result = await isolate.vm.invokeRpcNoUpgrade('getFlagList', {});
+    var use_field_guards = false;
+    for (var flag in result['flags']) {
+      if (flag['name'] == 'use_field_guards') {
+        use_field_guards = flag['valueAsString'] == 'true';
+        break;
+      }
+    }
+    if (!use_field_guards) {
+      return; // skip the test if guards are not enabled
+    }
+
+    // Call eval to get a class id.
+    var evalResult = await invoke(isolate, 'getDummyClass');
+    var id = "${evalResult['class']['id']}/fields/dummyList";
+    var params = {
+      'objectId': id,
+    };
+    result = await isolate.invokeRpcNoUpgrade('getObject', params);
+    expect(result['type'], equals('Field'));
+    expect(result['id'], equals(id));
+    expect(result['name'], equals('dummyList'));
+    expect(result['const'], equals(false));
+    expect(result['static'], equals(false));
+    expect(result['final'], equals(true));
+    expect(result['location']['type'], equals('SourceLocation'));
+    expect(result['_guardNullable'], isNotNull);
+    expect(result['_guardClass'], isNotNull);
+    expect(result['_guardLength'], equals('20'));
+  },
+
   // invalid field.
   (Isolate isolate) async {
     // Call eval to get a class id.
-    var evalResult = await eval(isolate, 'new _DummyClass()');
+    var evalResult = await invoke(isolate, 'getDummyClass');
     var id = "${evalResult['class']['id']}/fields/mythicalField";
     var params = {
       'objectId': id,
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await isolate.invokeRpcNoUpgrade('getObject', params);
       expect(false, isTrue, reason: 'Unreachable');
@@ -909,7 +1120,7 @@ var tests = [
   // code.
   (Isolate isolate) async {
     // Call eval to get a class id.
-    var evalResult = await eval(isolate, 'new _DummyClass()');
+    var evalResult = await invoke(isolate, 'getDummyClass');
     var funcId = "${evalResult['class']['id']}/functions/dummyFunction";
     var params = {
       'objectId': funcId,
@@ -920,20 +1131,18 @@ var tests = [
     };
     var result = await isolate.invokeRpcNoUpgrade('getObject', params);
     expect(result['type'], equals('Code'));
-    expect(result['name'], equals('_DummyClass.dummyFunction'));
-    expect(result['_vmName'], equals('dummyFunction'));
+    expect(result['name'], endsWith('_DummyClass.dummyFunction'));
+    expect(result['_vmName'], endsWith('dummyFunction'));
     expect(result['kind'], equals('Dart'));
-    expect(result['_optimized'], new isInstanceOf<bool>());
+    expect(result['_optimized'], isA<bool>());
     expect(result['function']['type'], equals('@Function'));
-    expect(result['_startAddress'], new isInstanceOf<String>());
-    expect(result['_endAddress'], new isInstanceOf<String>());
+    expect(result['_startAddress'], isA<String>());
+    expect(result['_endAddress'], isA<String>());
     expect(result['_objectPool'], isNotNull);
     expect(result['_disassembly'], isNotNull);
     expect(result['_descriptors'], isNotNull);
-    expect(
-        result['_inlinedFunctions'], anyOf([isNull, new isInstanceOf<List>()]));
-    expect(
-        result['_inlinedIntervals'], anyOf([isNull, new isInstanceOf<List>()]));
+    expect(result['_inlinedFunctions'], anyOf([isNull, isA<List>()]));
+    expect(result['_inlinedIntervals'], anyOf([isNull, isA<List>()]));
   },
 
   // invalid code.
@@ -941,7 +1150,7 @@ var tests = [
     var params = {
       'objectId': 'code/0',
     };
-    bool caughtException;
+    bool caughtException = false;
     try {
       await isolate.invokeRpcNoUpgrade('getObject', params);
       expect(false, isTrue, reason: 'Unreachable');

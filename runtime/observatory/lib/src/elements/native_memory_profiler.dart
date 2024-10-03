@@ -11,7 +11,7 @@ import 'package:observatory/src/elements/cpu_profile/virtual_tree.dart';
 import 'package:observatory/src/elements/helpers/nav_bar.dart';
 import 'package:observatory/src/elements/helpers/nav_menu.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 import 'package:observatory/src/elements/nav/notify.dart';
 import 'package:observatory/src/elements/nav/refresh.dart';
@@ -20,52 +20,38 @@ import 'package:observatory/src/elements/nav/vm_menu.dart';
 import 'package:observatory/src/elements/sample_buffer_control.dart';
 import 'package:observatory/src/elements/stack_trace_tree_config.dart';
 
-class NativeMemoryProfileElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<NativeMemoryProfileElement>(
-      'native-memory-profile',
-      dependencies: const [
-        NavTopMenuElement.tag,
-        NavVMMenuElement.tag,
-        NavRefreshElement.tag,
-        NavNotifyElement.tag,
-        SampleBufferControlElement.tag,
-        StackTraceTreeConfigElement.tag,
-        CpuProfileVirtualTreeElement.tag,
-      ]);
-
-  RenderingScheduler<NativeMemoryProfileElement> _r;
+class NativeMemoryProfileElement extends CustomElement implements Renderable {
+  late RenderingScheduler<NativeMemoryProfileElement> _r;
 
   Stream<RenderedEvent<NativeMemoryProfileElement>> get onRendered =>
       _r.onRendered;
 
-  M.VM _vm;
-  M.EventRepository _events;
-  M.NotificationRepository _notifications;
-  M.NativeMemorySampleProfileRepository _profiles;
-  Stream<M.SampleProfileLoadingProgressEvent> _progressStream;
-  M.SampleProfileLoadingProgress _progress;
-  M.SampleProfileTag _tag = M.SampleProfileTag.none;
-  ProfileTreeMode _mode = ProfileTreeMode.function;
-  M.ProfileTreeDirection _direction = M.ProfileTreeDirection.exclusive;
-  String _filter = '';
+  late M.VM _vm;
+  late M.EventRepository _events;
+  late M.NotificationRepository _notifications;
+  late M.NativeMemorySampleProfileRepository _profiles;
+  Stream<M.SampleProfileLoadingProgressEvent>? _progressStream;
+  M.SampleProfileLoadingProgress? _progress;
+  late M.SampleProfileTag _tag = M.SampleProfileTag.none;
+  late ProfileTreeMode _mode = ProfileTreeMode.function;
+  late M.ProfileTreeDirection _direction = M.ProfileTreeDirection.exclusive;
+  late String _filter = '';
 
   M.NotificationRepository get notifications => _notifications;
   M.NativeMemorySampleProfileRepository get profiles => _profiles;
-  // With non-isolate version.
-  M.VMRef get vm => _vm;
 
   factory NativeMemoryProfileElement(
       M.VM vm,
       M.EventRepository events,
       M.NotificationRepository notifications,
       M.NativeMemorySampleProfileRepository profiles,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(vm != null);
     assert(events != null);
     assert(notifications != null);
     assert(profiles != null);
-    NativeMemoryProfileElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    NativeMemoryProfileElement e = new NativeMemoryProfileElement.created();
+    e._r = new RenderingScheduler<NativeMemoryProfileElement>(e, queue: queue);
     e._vm = vm;
     e._events = events;
     e._notifications = notifications;
@@ -73,7 +59,7 @@ class NativeMemoryProfileElement extends HtmlElement implements Renderable {
     return e;
   }
 
-  NativeMemoryProfileElement.created() : super.created();
+  NativeMemoryProfileElement.created() : super.created('native-memory-profile');
 
   @override
   attached() {
@@ -86,73 +72,80 @@ class NativeMemoryProfileElement extends HtmlElement implements Renderable {
   detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
   }
 
   void render() {
-    var content = [
-      navBar([
-        new NavTopMenuElement(queue: _r.queue),
-        new NavVMMenuElement(_vm, _events, queue: _r.queue),
+    var content = <Element>[
+      navBar(<Element>[
+        new NavTopMenuElement(queue: _r.queue).element,
+        new NavVMMenuElement(_vm, _events, queue: _r.queue).element,
         navMenu('native memory profile', link: Uris.nativeMemory()),
-        new NavRefreshElement(queue: _r.queue)..onRefresh.listen(_refresh),
-        new NavNotifyElement(_notifications, queue: _r.queue)
+        (new NavRefreshElement(queue: _r.queue)..onRefresh.listen(_refresh))
+            .element,
+        new NavNotifyElement(_notifications, queue: _r.queue).element
       ]),
     ];
     if (_progress == null) {
       children = content;
       return;
     }
-    content.add(new SampleBufferControlElement(_progress, _progressStream,
-        selectedTag: _tag, queue: _r.queue)
-      ..onTagChange.listen((e) {
-        _tag = e.element.selectedTag;
-        _request();
-      }));
-    if (_progress.status == M.SampleProfileLoadingStatus.loaded) {
-      CpuProfileVirtualTreeElement tree;
+    content.add((new SampleBufferControlElement(
+            _vm, _progress!, _progressStream!,
+            selectedTag: _tag, queue: _r.queue)
+          ..onTagChange.listen((e) {
+            _tag = e.element.selectedTag;
+            _request();
+          }))
+        .element);
+    if (_progress!.status == M.SampleProfileLoadingStatus.loaded) {
+      late CpuProfileVirtualTreeElement tree;
       content.addAll([
         new BRElement(),
-        new StackTraceTreeConfigElement(
-            mode: _mode,
-            direction: _direction,
-            filter: _filter,
-            queue: _r.queue)
-          ..onModeChange.listen((e) {
-            _mode = tree.mode = e.element.mode;
-          })
-          ..onFilterChange.listen((e) {
-            _filter = e.element.filter.trim();
-            tree.filters = _filter.isNotEmpty
-                ? [
-                    (node) {
-                      return node.name.contains(_filter);
-                    }
-                  ]
-                : const [];
-          })
-          ..onDirectionChange.listen((e) {
-            _direction = tree.direction = e.element.direction;
-          }),
+        (new StackTraceTreeConfigElement(
+                mode: _mode,
+                direction: _direction,
+                filter: _filter,
+                queue: _r.queue)
+              ..onModeChange.listen((e) {
+                _mode = tree.mode = e.element.mode;
+              })
+              ..onFilterChange.listen((e) {
+                _filter = e.element.filter.trim();
+                tree.filters = _filter.isNotEmpty
+                    ? [
+                        (node) {
+                          return node.name.contains(_filter);
+                        }
+                      ]
+                    : const [];
+              })
+              ..onDirectionChange.listen((e) {
+                _direction = tree.direction = e.element.direction;
+              }))
+            .element,
         new BRElement(),
-        tree = new CpuProfileVirtualTreeElement(_vm, _progress.profile,
-            queue: _r.queue, type: M.SampleProfileType.memory)
+        (tree = new CpuProfileVirtualTreeElement(null, _progress!.profile,
+                queue: _r.queue, type: M.SampleProfileType.memory))
+            .element,
       ]);
     }
     children = content;
   }
 
   Future _request({bool forceFetch: false}) async {
-    for (Isolate isolate in vm.isolates) {
-      await isolate.invokeRpc("_collectAllGarbage", {});
+    if (forceFetch) {
+      for (M.IsolateRef isolate in _vm.isolates) {
+        await isolate.collectAllGarbage();
+      }
     }
     _progress = null;
     _progressStream = _profiles.get(_vm, _tag, forceFetch: forceFetch);
     _r.dirty();
-    _progress = (await _progressStream.first).progress;
+    _progress = (await _progressStream!.first).progress;
     _r.dirty();
-    if (M.isSampleProcessRunning(_progress.status)) {
-      _progress = (await _progressStream.last).progress;
+    if (M.isSampleProcessRunning(_progress!.status)) {
+      _progress = (await _progressStream!.last).progress;
       _r.dirty();
     }
   }

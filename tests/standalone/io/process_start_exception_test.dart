@@ -4,9 +4,9 @@
 //
 // Process test program to errors during startup of the process.
 
-import "package:expect/expect.dart";
 import 'dart:async';
 import 'dart:io';
+import "package:expect/expect.dart";
 
 // ENOENT and ERROR_FILE_NOT_FOUND on Windows both have the same value.
 // Note: we are setting PATH to an empty string in tests below because on
@@ -24,9 +24,10 @@ testStartError() {
       environment: {"PATH": ""});
   processFuture
       .then((p) => Expect.fail('got process despite start error'))
-      .catchError((error) {
+      .catchError((error, stackTrace) {
     Expect.isTrue(error is ProcessException);
     Expect.equals(ENOENT, error.errorCode, error.toString());
+    Expect.notEquals(stackTrace.toString(), '');
   });
 }
 

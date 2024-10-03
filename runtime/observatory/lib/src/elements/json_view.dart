@@ -9,41 +9,33 @@ import 'dart:html';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/nav_bar.dart';
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/nav/notify.dart';
 import 'package:observatory/src/elements/nav/top_menu.dart';
-import 'package:observatory/src/elements/view_footer.dart';
 
-class JSONViewElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<JSONViewElement>('json-view',
-      dependencies: const [
-        NavTopMenuElement.tag,
-        NavNotifyElement.tag,
-        ViewFooterElement.tag
-      ]);
-
-  RenderingScheduler<JSONViewElement> _r;
+class JSONViewElement extends CustomElement implements Renderable {
+  late RenderingScheduler<JSONViewElement> _r;
 
   Stream<RenderedEvent<JSONViewElement>> get onRendered => _r.onRendered;
 
-  M.NotificationRepository _notifications;
-  Map _map;
+  late M.NotificationRepository _notifications;
+  late Map _map;
 
   M.NotificationRepository get notifications => _notifications;
   Map get map => _map;
 
   factory JSONViewElement(Map map, M.NotificationRepository notifications,
-      {RenderingQueue queue}) {
+      {RenderingQueue? queue}) {
     assert(notifications != null);
     assert(map != null);
-    JSONViewElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    JSONViewElement e = new JSONViewElement.created();
+    e._r = new RenderingScheduler<JSONViewElement>(e, queue: queue);
     e._notifications = notifications;
     e._map = map;
     return e;
   }
 
-  JSONViewElement.created() : super.created();
+  JSONViewElement.created() : super.created('json-view');
 
   @override
   attached() {
@@ -55,23 +47,21 @@ class JSONViewElement extends HtmlElement implements Renderable {
   detached() {
     super.detached();
     _r.disable(notify: true);
-    children = [];
+    children = <Element>[];
   }
 
   void render() {
-    children = [
-      navBar([
-        new NavTopMenuElement(queue: _r.queue),
-        new NavNotifyElement(_notifications, queue: _r.queue)
+    children = <Element>[
+      navBar(<Element>[
+        new NavTopMenuElement(queue: _r.queue).element,
+        new NavNotifyElement(_notifications, queue: _r.queue).element
       ]),
       new DivElement()
         ..classes = ['content-centered-big']
-        ..children = [
+        ..children = <Element>[
           new HeadingElement.h2()..text = 'Object',
           new HRElement(),
           new PreElement()..text = JSONPretty.stringify(_map),
-          new HRElement(),
-          new ViewFooterElement(queue: _r.queue)
         ]
     ];
   }

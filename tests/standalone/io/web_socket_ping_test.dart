@@ -7,14 +7,16 @@
 // VMOptions=--short_socket_write
 // VMOptions=--short_socket_read --short_socket_write
 
-library dart.io;
+library dart._http;
 
-import "package:expect/expect.dart";
-import "dart:async";
+import "dart:convert";
 import "dart:io";
 import "dart:math";
+import "dart:typed_data";
 
-part "../../../sdk/lib/io/crypto.dart";
+import "package:expect/expect.dart";
+
+part "../../../sdk/lib/_http/crypto.dart";
 
 const String webSocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -23,30 +25,32 @@ void testPing(int totalConnections) {
     int closed = 0;
     server.listen((request) {
       var response = request.response;
-      response.statusCode = HttpStatus.SWITCHING_PROTOCOLS;
-      response.headers.set(HttpHeaders.CONNECTION, "upgrade");
-      response.headers.set(HttpHeaders.UPGRADE, "websocket");
-      String key = request.headers.value("Sec-WebSocket-Key");
+      response.statusCode = HttpStatus.switchingProtocols;
+      response.headers.set(HttpHeaders.connectionHeader, "upgrade");
+      response.headers.set(HttpHeaders.upgradeHeader, "websocket");
+      String? key = request.headers.value("Sec-WebSocket-Key");
       _SHA1 sha1 = new _SHA1();
       sha1.add("$key$webSocketGUID".codeUnits);
-      String accept = _CryptoUtils.bytesToBase64(sha1.close());
+      String accept = base64Encode(sha1.close());
       response.headers.add("Sec-WebSocket-Accept", accept);
       response.headers.contentLength = 0;
       response.detachSocket().then((socket) {
-        socket.drain().then((_) {
-          socket.close();
-          closed++;
-          if (closed == totalConnections) {
-            server.close();
-          }
-        });
+        socket.destroy();
       });
     });
 
+    int closeCount = 0;
     for (int i = 0; i < totalConnections; i++) {
       WebSocket.connect('ws://localhost:${server.port}').then((webSocket) {
         webSocket.pingInterval = const Duration(milliseconds: 100);
-        webSocket.drain();
+        webSocket.listen((message) {
+          Expect.fail("unexpected message");
+        }, onDone: () {
+          closeCount++;
+          if (closeCount == totalConnections) {
+            server.close();
+          }
+        });
       });
     }
   });

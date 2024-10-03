@@ -4,7 +4,6 @@
 
 library test.delegate_class;
 
-@MirrorsUsed(targets: "test.delegate_class")
 import 'dart:mirrors';
 
 import 'package:expect/expect.dart';
@@ -16,7 +15,6 @@ class C {
   static get getter => 'g';
   static set setter(x) {
     field = x * 2;
-    return 'unobservable value';
   }
 
   static var field;
@@ -29,7 +27,7 @@ class Proxy {
 }
 
 main() {
-  var proxy = new Proxy(reflectClass(C));
+  dynamic proxy = new Proxy(reflectClass(C));
   var result;
 
   Expect.equals('X-Y-Z', proxy.method('X', 'Y', 'Z'));

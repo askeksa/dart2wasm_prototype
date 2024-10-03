@@ -6,7 +6,7 @@ import 'dart:html';
 import 'dart:async';
 import 'package:observatory/models.dart' as M;
 import 'package:observatory/src/elements/helpers/rendering_scheduler.dart';
-import 'package:observatory/src/elements/helpers/tag.dart';
+import 'package:observatory/src/elements/helpers/custom_element.dart';
 import 'package:observatory/src/elements/helpers/uris.dart';
 
 class EventDeleteEvent {
@@ -14,10 +14,8 @@ class EventDeleteEvent {
   EventDeleteEvent(this.event);
 }
 
-class NavNotifyEventElement extends HtmlElement implements Renderable {
-  static const tag = const Tag<NavNotifyEventElement>('nav-event');
-
-  RenderingScheduler _r;
+class NavNotifyEventElement extends CustomElement implements Renderable {
+  late RenderingScheduler<NavNotifyEventElement> _r;
 
   Stream<RenderedEvent<NavNotifyEventElement>> get onRendered => _r.onRendered;
 
@@ -25,19 +23,19 @@ class NavNotifyEventElement extends HtmlElement implements Renderable {
       new StreamController<EventDeleteEvent>.broadcast();
   Stream<EventDeleteEvent> get onDelete => _onDelete.stream;
 
-  M.Event _event;
+  late M.Event _event;
 
   M.Event get event => _event;
 
-  factory NavNotifyEventElement(M.Event event, {RenderingQueue queue}) {
+  factory NavNotifyEventElement(M.Event event, {RenderingQueue? queue}) {
     assert(event != null);
-    NavNotifyEventElement e = document.createElement(tag.name);
-    e._r = new RenderingScheduler(e, queue: queue);
+    NavNotifyEventElement e = new NavNotifyEventElement.created();
+    e._r = new RenderingScheduler<NavNotifyEventElement>(e, queue: queue);
     e._event = event;
     return e;
   }
 
-  NavNotifyEventElement.created() : super.created();
+  NavNotifyEventElement.created() : super.created('nav-event');
 
   @override
   void attached() {
@@ -48,12 +46,12 @@ class NavNotifyEventElement extends HtmlElement implements Renderable {
   @override
   void detached() {
     super.detached();
-    children = [];
+    children = <Element>[];
     _r.disable(notify: true);
   }
 
   void render() {
-    children = [];
+    children = <Element>[];
     List<Element> content;
     if (event is M.PauseStartEvent) {
       content = _managePauseStartEvent(event as M.PauseStartEvent);
@@ -76,9 +74,9 @@ class NavNotifyEventElement extends HtmlElement implements Renderable {
     } else {
       return;
     }
-    children = [
+    children = <Element>[
       new DivElement()
-        ..children = []
+        ..children = <Element>[]
         ..children.addAll(content)
         ..children.add(new ButtonElement()
           ..innerHtml = '&times;'
@@ -118,7 +116,7 @@ class NavNotifyEventElement extends HtmlElement implements Renderable {
       M.PauseBreakpointEvent event) {
     String message = ' is paused';
     if (event.breakpoint != null) {
-      message += ' at breakpoint ${event.breakpoint.number}';
+      message += ' at breakpoint ${event.breakpoint!.number}';
     }
     return [
       new SpanElement()..text = 'Isolate ',

@@ -4,9 +4,9 @@
 
 #include "platform/assert.h"
 #include "platform/text_buffer.h"
+#include "vm/dart_api_impl.h"
 #include "vm/json_stream.h"
 #include "vm/unit_test.h"
-#include "vm/dart_api_impl.h"
 
 namespace dart {
 
@@ -15,11 +15,10 @@ namespace dart {
 TEST_CASE(JSON_TextBuffer) {
   TextBuffer w(5);  // Small enough to make buffer grow at least once.
   w.Printf("{ \"%s\" : %d", "length", 175);
-  EXPECT_STREQ("{ \"length\" : 175", w.buf());
+  EXPECT_STREQ("{ \"length\" : 175", w.buffer());
   w.Printf(", \"%s\" : \"%s\" }", "command", "stopIt");
-  EXPECT_STREQ("{ \"length\" : 175, \"command\" : \"stopIt\" }", w.buf());
+  EXPECT_STREQ("{ \"length\" : 175, \"command\" : \"stopIt\" }", w.buffer());
 }
-
 
 TEST_CASE(JSON_JSONStream_Primitives) {
   {
@@ -62,7 +61,7 @@ TEST_CASE(JSON_JSONStream_Primitives) {
       JSONArray jsarr(&js);
       jsarr.AddValue(1.0);
     }
-    EXPECT_STREQ("[1.000000]", js.ToCString());
+    EXPECT_STREQ("[1.0]", js.ToCString());
   }
   {
     JSONStream js;
@@ -82,7 +81,6 @@ TEST_CASE(JSON_JSONStream_Primitives) {
   }
 }
 
-
 TEST_CASE(JSON_JSONStream_Array) {
   JSONStream js;
   {
@@ -92,7 +90,6 @@ TEST_CASE(JSON_JSONStream_Array) {
   }
   EXPECT_STREQ("[true,false]", js.ToCString());
 }
-
 
 TEST_CASE(JSON_JSONStream_Object) {
   JSONStream js;
@@ -114,7 +111,6 @@ TEST_CASE(JSON_JSONStream_NestedObject) {
   EXPECT_STREQ("{\"key\":{\"key1\":\"d\"}}", js.ToCString());
 }
 
-
 TEST_CASE(JSON_JSONStream_ObjectArray) {
   JSONStream js;
   {
@@ -130,7 +126,6 @@ TEST_CASE(JSON_JSONStream_ObjectArray) {
   }
   EXPECT_STREQ("[{\"key\":\"e\"},{\"yek\":\"f\"}]", js.ToCString());
 }
-
 
 TEST_CASE(JSON_JSONStream_ArrayArray) {
   JSONStream js;
@@ -148,7 +143,6 @@ TEST_CASE(JSON_JSONStream_ArrayArray) {
   EXPECT_STREQ("[[4],[false]]", js.ToCString());
 }
 
-
 TEST_CASE(JSON_JSONStream_Printf) {
   JSONStream js;
   {
@@ -157,7 +151,6 @@ TEST_CASE(JSON_JSONStream_Printf) {
   }
   EXPECT_STREQ("[\"2 hello\"]", js.ToCString());
 }
-
 
 TEST_CASE(JSON_JSONStream_ObjectPrintf) {
   JSONStream js;
@@ -168,8 +161,7 @@ TEST_CASE(JSON_JSONStream_ObjectPrintf) {
   EXPECT_STREQ("{\"key\":\"2 hello\"}", js.ToCString());
 }
 
-
-TEST_CASE(JSON_JSONStream_DartObject) {
+ISOLATE_UNIT_TEST_CASE(JSON_JSONStream_DartObject) {
   JSONStream js;
   {
     JSONArray jsarr(&js);
@@ -177,25 +169,32 @@ TEST_CASE(JSON_JSONStream_DartObject) {
     JSONObject jsobj(&jsarr);
     jsobj.AddProperty("object_key", Object::Handle(Object::null()));
   }
-  char buffer[1024];
-  ElideJSONSubstring("classes", js.ToCString(), buffer);
+  // WARNING: This MUST be big enough for the serialised JSON string.
+  const int kBufferSize = 2048;
+  char buffer[kBufferSize];
+  const char* json_str = js.ToCString();
+  ASSERT(strlen(json_str) < kBufferSize);
+  ElideJSONSubstring("classes", json_str, buffer);
+  ElideJSONSubstring("libraries", buffer, buffer);
+  ElideJSONSubstring("objects", buffer, buffer);
   EXPECT_STREQ(
-      "[{\"type\":\"@Instance\","
-      "\"_vmType\":\"null\","
-      "\"class\":{\"type\":\"@Class\",\"fixedId\":true,\"id\":\"\","
-      "\"name\":\"Null\"},"
-      "\"kind\":\"Null\","
-      "\"fixedId\":true,"
-      "\"id\":\"objects\\/null\","
-      "\"valueAsString\":\"null\"},"
-      "{\"object_key\":"
-      "{\"type\":\"@Instance\","
-      "\"_vmType\":\"null\","
-      "\"class\":{\"type\":\"@Class\",\"fixedId\":true,\"id\":\"\","
-      "\"name\":\"Null\"},"
-      "\"kind\":\"Null\","
-      "\"fixedId\":true,"
-      "\"id\":\"objects\\/null\","
+      "[{\"type\":\"@Instance\",\"_vmType\":\"null\",\"class\":{\"type\":\"@"
+      "Class\",\"fixedId\":true,\"id\":\"\",\"name\":\"Null\",\"location\":{"
+      "\"type\":\"SourceLocation\",\"script\":{\"type\":\"@Script\","
+      "\"fixedId\":true,\"id\":\"\",\"uri\":\"dart:core\\/null.dart\",\"_"
+      "kind\":\"kernel\"},\"tokenPos\":925,\"endTokenPos\":1165,\"line\":23,"
+      "\"column\":1},\"library\":{"
+      "\"type\":\"@Library\",\"fixedId\":true,\"id\":\"\",\"name\":\"dart."
+      "core\",\"uri\":\"dart:core\"}},\"kind\":\"Null\",\"fixedId\":true,"
+      "\"id\":\"\",\"valueAsString\":\"null\"},{\"object_key\":{\"type\":\"@"
+      "Instance\",\"_vmType\":\"null\",\"class\":{\"type\":\"@Class\","
+      "\"fixedId\":true,\"id\":\"\",\"name\":\"Null\",\"location\":{\"type\":"
+      "\"SourceLocation\",\"script\":{\"type\":\"@Script\",\"fixedId\":true,"
+      "\"id\":\"\",\"uri\":\"dart:core\\/null.dart\",\"_kind\":\"kernel\"},"
+      "\"tokenPos\":925,\"endTokenPos\":1165,\"line\":23,\"column\":1},"
+      "\"library\":{\"type\":\"@"
+      "Library\",\"fixedId\":true,\"id\":\"\",\"name\":\"dart.core\",\"uri\":"
+      "\"dart:core\"}},\"kind\":\"Null\",\"fixedId\":true,\"id\":\"\","
       "\"valueAsString\":\"null\"}}]",
       buffer);
 }
@@ -208,7 +207,6 @@ TEST_CASE(JSON_JSONStream_EscapedString) {
   }
   EXPECT_STREQ("[\"Hel\\\"\\\"lo\\r\\n\\t\"]", js.ToCString());
 }
-
 
 TEST_CASE(JSON_JSONStream_DartString) {
   const char* kScriptChars =
@@ -225,26 +223,37 @@ TEST_CASE(JSON_JSONStream_DartString) {
   EXPECT_VALID(lib);
 
   Dart_Handle result;
+  TransitionNativeToVM transition1(thread);
   String& obj = String::Handle();
 
-  {
-    result = Dart_GetField(lib, NewString("ascii"));
-    EXPECT_VALID(result);
+  auto do_test = [&](const char* field_name, const char* expected) {
+    {
+      TransitionVMToNative to_native(thread);
+      result = Dart_GetField(lib, NewString(field_name));
+      EXPECT_VALID(result);
+    }
+
     obj ^= Api::UnwrapHandle(result);
 
-    JSONStream js;
     {
-      JSONObject jsobj(&js);
-      EXPECT(!jsobj.AddPropertyStr("ascii", obj));
+      JSONStream js;
+      {
+        JSONObject jsobj(&js);
+        EXPECT(!jsobj.AddPropertyStr(field_name, obj));
+      }
+      EXPECT_STREQ(expected, js.ToCString());
     }
-    EXPECT_STREQ("{\"ascii\":\"Hello, World!\"}", js.ToCString());
+  };
+
+  {
+    TransitionVMToNative to_native(thread);
+    result = Dart_GetField(lib, NewString("ascii"));
+    EXPECT_VALID(result);
   }
 
-  {
-    result = Dart_GetField(lib, NewString("ascii"));
-    EXPECT_VALID(result);
-    obj ^= Api::UnwrapHandle(result);
+  obj ^= Api::UnwrapHandle(result);
 
+  {
     JSONStream js;
     {
       JSONObject jsobj(&js);
@@ -253,61 +262,12 @@ TEST_CASE(JSON_JSONStream_DartString) {
     EXPECT_STREQ("{\"subrange\":\"ello\"}", js.ToCString());
   }
 
-  {
-    result = Dart_GetField(lib, NewString("unicode"));
-    EXPECT_VALID(result);
-    obj ^= Api::UnwrapHandle(result);
-
-    JSONStream js;
-    {
-      JSONObject jsobj(&js);
-      EXPECT(!jsobj.AddPropertyStr("unicode", obj));
-    }
-    EXPECT_STREQ("{\"unicode\":\"Îñţérñåţîöñåļîžåţîờñ\"}", js.ToCString());
-  }
-
-  {
-    result = Dart_GetField(lib, NewString("surrogates"));
-    EXPECT_VALID(result);
-    obj ^= Api::UnwrapHandle(result);
-
-    JSONStream js;
-    {
-      JSONObject jsobj(&js);
-      EXPECT(!jsobj.AddPropertyStr("surrogates", obj));
-    }
-    EXPECT_STREQ("{\"surrogates\":\"𝄞𝄞𝄞𝄞𝄞\"}", js.ToCString());
-  }
-
-  {
-    result = Dart_GetField(lib, NewString("wrongEncoding"));
-    EXPECT_VALID(result);
-    obj ^= Api::UnwrapHandle(result);
-
-    JSONStream js;
-    {
-      JSONObject jsobj(&js);
-      EXPECT(!jsobj.AddPropertyStr("wrongEncoding", obj));
-    }
-    EXPECT_STREQ("{\"wrongEncoding\":\"𝄞\\uD834𝄞\"}", js.ToCString());
-  }
-
-
-  {
-    result = Dart_GetField(lib, NewString("nullInMiddle"));
-    EXPECT_VALID(result);
-    obj ^= Api::UnwrapHandle(result);
-
-    JSONStream js;
-    {
-      JSONObject jsobj(&js);
-      EXPECT(!jsobj.AddPropertyStr("nullInMiddle", obj));
-    }
-    EXPECT_STREQ("{\"nullInMiddle\":\"This has\\u0000 four words.\"}",
-                 js.ToCString());
-  }
+  do_test("ascii", "{\"ascii\":\"Hello, World!\"}");
+  do_test("unicode", "{\"unicode\":\"Îñţérñåţîöñåļîžåţîờñ\"}");
+  do_test("surrogates", "{\"surrogates\":\"𝄞𝄞𝄞𝄞𝄞\"}");
+  do_test("wrongEncoding", "{\"wrongEncoding\":\"𝄞\\uD834𝄞\"}");
+  do_test("nullInMiddle", "{\"nullInMiddle\":\"This has\\u0000 four words.\"}");
 }
-
 
 TEST_CASE(JSON_JSONStream_Params) {
   const char* param_keys[] = {"dog", "cat"};
@@ -322,30 +282,6 @@ TEST_CASE(JSON_JSONStream_Params) {
   EXPECT(js.HasParam("cat"));
   EXPECT(js.ParamIs("cat", "banana"));
   EXPECT(!js.ParamIs("dog", "banana"));
-}
-
-
-TEST_CASE(JSON_JSONStream_AppendJSONStreamConsumer) {
-  JSONStream js;
-
-  {
-    JSONObject obj(&js);
-    {
-      JSONArray arr(&obj, "test");
-      const char* test_data = "{a, b, c},";
-      AppendJSONStreamConsumer(Dart_StreamConsumer_kData, "",
-                               reinterpret_cast<const uint8_t*>(&test_data[0]),
-                               strlen(test_data), &js);
-      AppendJSONStreamConsumer(Dart_StreamConsumer_kData, "",
-                               reinterpret_cast<const uint8_t*>(&test_data[0]),
-                               strlen(test_data), &js);
-      AppendJSONStreamConsumer(Dart_StreamConsumer_kData, "",
-                               reinterpret_cast<const uint8_t*>(&test_data[0]),
-                               strlen(test_data) - 1, &js);
-    }
-  }
-
-  EXPECT_STREQ("{\"test\":[{a, b, c},{a, b, c},{a, b, c}]}", js.ToCString());
 }
 
 #endif  // !PRODUCT

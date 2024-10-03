@@ -13,17 +13,17 @@ abstract class _MinifiedFieldNamer implements Namer {
   // The inheritance scope based naming might not yield a name. For instance,
   // this could be because the field belongs to a mixin. In such a case this
   // will return `null` and a normal field name has to be used.
-  jsAst.Name _minifiedInstanceFieldPropertyName(FieldElement element) {
+  jsAst.Name _minifiedInstanceFieldPropertyName(FieldEntity element) {
     if (_nativeData.hasFixedBackendName(element)) {
-      return new StringBackedName(_nativeData.getFixedBackendName(element));
+      return StringBackedName(_nativeData.getFixedBackendName(element));
     }
 
     _FieldNamingScope names;
-    if (element is BoxFieldElement) {
-      names = new _FieldNamingScope.forBox(element.box, fieldRegistry);
+    if (element is JRecordField) {
+      names = _FieldNamingScope.forBox(element.box, fieldRegistry);
     } else {
-      ClassElement cls = element.enclosingClass;
-      names = new _FieldNamingScope.forClass(cls, _closedWorld, fieldRegistry);
+      ClassEntity cls = element.enclosingClass;
+      names = _FieldNamingScope.forClass(cls, _closedWorld, fieldRegistry);
     }
 
     if (names.containsField(element)) {
@@ -33,24 +33,21 @@ abstract class _MinifiedFieldNamer implements Namer {
   }
 }
 
-/**
- * Encapsulates the global state of field naming.
- *
- * The field naming registry allocates names to be used along a path in the
- * inheritance hierarchy of fields, starting with the object class. The actual
- * hierarchy is encoded using instances of [_FieldNamingScope].
- */
+/// Encapsulates the global state of field naming.
+///
+/// The field naming registry allocates names to be used along a path in the
+/// inheritance hierarchy of fields, starting with the object class. The actual
+/// hierarchy is encoded using instances of [_FieldNamingScope].
 class _FieldNamingRegistry {
   final Namer namer;
 
-  final Map<Entity, _FieldNamingScope> scopes =
-      new Map<Entity, _FieldNamingScope>();
+  final Map<Entity, _FieldNamingScope> scopes = {};
 
-  final Map<Entity, jsAst.Name> globalNames = new Map<Entity, jsAst.Name>();
+  final Map<Entity, jsAst.Name> globalNames = {};
 
   int globalCount = 0;
 
-  final List<jsAst.Name> nameStore = new List<jsAst.Name>();
+  final List<jsAst.Name> nameStore = [];
 
   _FieldNamingRegistry(this.namer);
 
@@ -72,7 +69,7 @@ class _FieldNamingRegistry {
       if (index < MinifyNamer._reservedNativeProperties.length &&
           MinifyNamer._reservedNativeProperties[index].length <= 2) {
         nameStore.add(
-            new StringBackedName(MinifyNamer._reservedNativeProperties[index]));
+            StringBackedName(MinifyNamer._reservedNativeProperties[index]));
       } else {
         nameStore.add(namer.getFreshName(namer.instanceScope, "field$index"));
       }
@@ -82,22 +79,20 @@ class _FieldNamingRegistry {
   }
 }
 
-/**
- * A [_FieldNamingScope] encodes a node in the inheritance tree of the current
- * class hierarchy. The root node typically is the node corresponding to the
- * `Object` class. It is used to assign a unique name to each field of a class.
- * Unique here means unique wrt. all fields along the path back to the root.
- * This is achieved at construction time via the [_fieldNameCounter] field that
- * counts the number of fields on the path to the root node that have been
- * encountered so far.
- *
- * Obviously, this only works if no fields are added to a parent node after its
- * children have added their first field.
- */
+/// A [_FieldNamingScope] encodes a node in the inheritance tree of the current
+/// class hierarchy. The root node typically is the node corresponding to the
+/// `Object` class. It is used to assign a unique name to each field of a class.
+/// Unique here means unique wrt. all fields along the path back to the root.
+/// This is achieved at construction time via the [_fieldNameCounter] field that
+/// counts the number of fields on the path to the root node that have been
+/// encountered so far.
+///
+/// Obviously, this only works if no fields are added to a parent node after its
+/// children have added their first field.
 class _FieldNamingScope {
   final _FieldNamingScope superScope;
   final Entity container;
-  final Map<Element, jsAst.Name> names = new Maplet<Element, jsAst.Name>();
+  final Map<Entity, jsAst.Name> names = Maplet();
   final _FieldNamingRegistry registry;
 
   /// Naming counter used for fields of ordinary classes.
@@ -116,28 +111,32 @@ class _FieldNamingScope {
   }
 
   factory _FieldNamingScope.forClass(
-      ClassElement cls, ClosedWorld world, _FieldNamingRegistry registry) {
+      ClassEntity cls, JClosedWorld world, _FieldNamingRegistry registry) {
     _FieldNamingScope result = registry.scopes[cls];
     if (result != null) return result;
 
     if (world.isUsedAsMixin(cls)) {
-      result = new _MixinFieldNamingScope.mixin(cls, registry);
+      result = _MixinFieldNamingScope.mixin(cls, registry);
     } else {
-      if (cls.superclass == null) {
-        result = new _FieldNamingScope.rootScope(cls, registry);
+      var superclass = world.elementEnvironment.getSuperClass(cls);
+      if (superclass == null) {
+        result = _FieldNamingScope.rootScope(cls, registry);
       } else {
         _FieldNamingScope superScope =
-            new _FieldNamingScope.forClass(cls.superclass, world, registry);
-        if (cls.isMixinApplication) {
-          result =
-              new _MixinFieldNamingScope.mixedIn(cls, superScope, registry);
+            _FieldNamingScope.forClass(superclass, world, registry);
+        if (world.elementEnvironment.isMixinApplication(cls)) {
+          result = _MixinFieldNamingScope.mixedIn(cls, superScope, registry);
         } else {
-          result = new _FieldNamingScope.inherit(cls, superScope, registry);
+          result = _FieldNamingScope.inherit(cls, superScope, registry);
         }
       }
     }
 
-    cls.forEachInstanceField((cls, field) => result.add(field));
+    world.elementEnvironment.forEachClassMember(cls,
+        (ClassEntity declarer, MemberEntity member) {
+      // TODO(sra): Don't add elided names.
+      if (member.isField && member.isInstanceMember) result.add(member);
+    });
 
     registry.scopes[cls] = result;
     return result;
@@ -145,7 +144,7 @@ class _FieldNamingScope {
 
   factory _FieldNamingScope.forBox(Local box, _FieldNamingRegistry registry) {
     return registry.scopes
-        .putIfAbsent(box, () => new _BoxFieldNamingScope(box, registry));
+        .putIfAbsent(box, () => _BoxFieldNamingScope(box, registry));
   }
 
   _FieldNamingScope.rootScope(this.container, this.registry)
@@ -156,9 +155,7 @@ class _FieldNamingScope {
     _fieldNameCounter = superScope.inheritanceBasedFieldNameCounter;
   }
 
-  /**
-   * Checks whether [name] is already used in the current scope chain.
-   */
+  /// Checks whether [name] is already used in the current scope chain.
   _isNameUnused(jsAst.Name name) {
     return !names.values.contains(name) &&
         ((superScope == null) || superScope._isNameUnused(name));
@@ -166,34 +163,34 @@ class _FieldNamingScope {
 
   jsAst.Name _nextName() => registry.getName(_localFieldNameCounter++);
 
-  jsAst.Name operator [](Element field) {
+  jsAst.Name operator [](Entity field) {
     jsAst.Name name = names[field];
     if (name == null && superScope != null) return superScope[field];
     return name;
   }
 
-  void add(Element field) {
+  void add(Entity field) {
     if (names.containsKey(field)) return;
 
     jsAst.Name value = _nextName();
-    assert(invariant(field, _isNameUnused(value)));
+    assert(_isNameUnused(value), failedAt(field));
     names[field] = value;
   }
 
-  bool containsField(Element field) => names.containsKey(field);
+  bool containsField(Entity field) => names.containsKey(field);
 }
 
-/**
- * Field names for mixins have two constraints: They need to be unique in the
- * hierarchy of each application of a mixin and they need to be the same for
- * all applications of a mixin. To achieve this, we use global naming for
- * mixins from the same name pool as fields and add a `$` at the end to ensure
- * they do not collide with normal field names. The `$` sign is typically used
- * as a separator between method names and argument counts and does not appear
- * in generated names themselves.
- */
+/// Field names for mixins have two constraints: They need to be unique in the
+/// hierarchy of each application of a mixin and they need to be the same for
+/// all applications of a mixin. To achieve this, we use global naming for
+/// mixins from the same name pool as fields and add a `$` at the end to ensure
+/// they do not collide with normal field names. The `$` sign is typically used
+/// as a separator between method names and argument counts and does not appear
+/// in generated names themselves.
 class _MixinFieldNamingScope extends _FieldNamingScope {
+  @override
   int get _localFieldNameCounter => registry.globalCount;
+  @override
   void set _localFieldNameCounter(int val) {
     registry.globalCount = val;
   }
@@ -201,25 +198,24 @@ class _MixinFieldNamingScope extends _FieldNamingScope {
   @override
   Map<Entity, jsAst.Name> get names => registry.globalNames;
 
-  _MixinFieldNamingScope.mixin(ClassElement cls, _FieldNamingRegistry registry)
+  _MixinFieldNamingScope.mixin(ClassEntity cls, _FieldNamingRegistry registry)
       : super.rootScope(cls, registry);
 
-  _MixinFieldNamingScope.mixedIn(MixinApplicationElement container,
+  _MixinFieldNamingScope.mixedIn(ClassEntity container,
       _FieldNamingScope superScope, _FieldNamingRegistry registry)
       : super.inherit(container, superScope, registry);
 
+  @override
   jsAst.Name _nextName() {
     jsAst.Name proposed = super._nextName();
-    return new CompoundName([proposed, Namer._literalDollar]);
+    return CompoundName([proposed, Namer._literalDollar]);
   }
 }
 
-/**
- * [BoxFieldElement] fields work differently in that they do not belong to an
- * actual class but an anonymous box associated to a [Local]. As there is no
- * inheritance chain, we do not need to compute fields a priori but can assign
- * names on the fly.
- */
+/// [BoxFieldElement] fields work differently in that they do not belong to an
+/// actual class but an anonymous box associated to a [Local]. As there is no
+/// inheritance chain, we do not need to compute fields a priori but can assign
+/// names on the fly.
 class _BoxFieldNamingScope extends _FieldNamingScope {
   _BoxFieldNamingScope(Local box, _FieldNamingRegistry registry)
       : super.rootScope(box, registry);
@@ -227,7 +223,8 @@ class _BoxFieldNamingScope extends _FieldNamingScope {
   @override
   bool containsField(_) => true;
 
-  jsAst.Name operator [](Element field) {
+  @override
+  jsAst.Name operator [](Entity field) {
     if (!names.containsKey(field)) add(field);
     return names[field];
   }

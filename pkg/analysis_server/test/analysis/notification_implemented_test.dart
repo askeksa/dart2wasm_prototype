@@ -1,20 +1,17 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2014, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import 'dart:async';
-
 import 'package:analysis_server/protocol/protocol.dart';
+import 'package:analysis_server/protocol/protocol_constants.dart';
 import 'package:analysis_server/protocol/protocol_generated.dart';
-import 'package:analysis_server/src/constants.dart';
-import 'package:analysis_server/src/services/index/index.dart';
 import 'package:analyzer_plugin/protocol/protocol_common.dart';
 import 'package:test/test.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import '../analysis_abstract.dart';
 
-main() {
+void main() {
   defineReflectiveSuite(() {
     defineReflectiveTests(AnalysisNotificationImplementedTest);
   });
@@ -22,27 +19,22 @@ main() {
 
 @reflectiveTest
 class AnalysisNotificationImplementedTest extends AbstractAnalysisTest {
-  List<ImplementedClass> implementedClasses;
-  List<ImplementedMember> implementedMembers;
+  List<ImplementedClass>? implementedClasses;
+  List<ImplementedMember>? implementedMembers;
 
-  @override
-  bool get enableNewAnalysisDriver => false;
-
-  /**
-   * Validates that there is an [ImplementedClass] at the offset of [search].
-   *
-   * If [length] is not specified explicitly, then length of an identifier
-   * from [search] is used.
-   */
+  /// Validates that there is an [ImplementedClass] at the offset of [search].
+  ///
+  /// If [length] is not specified explicitly, then length of an identifier
+  /// from [search] is used.
   void assertHasImplementedClass(String search, [int length = -1]) {
-    int offset = findOffset(search);
+    var offset = findOffset(search);
     if (length == -1) {
       length = findIdentifierLength(search);
     }
     if (implementedClasses == null) {
-      fail('No notification of impemented classes was received');
+      fail('No notification of implemented classes was received');
     }
-    for (ImplementedClass clazz in implementedClasses) {
+    for (var clazz in implementedClasses!) {
       if (clazz.offset == offset && clazz.length == length) {
         return;
       }
@@ -51,21 +43,19 @@ class AnalysisNotificationImplementedTest extends AbstractAnalysisTest {
         ' in $implementedClasses');
   }
 
-  /**
-   * Validates that there is an [ImplementedClass] at the offset of [search].
-   *
-   * If [length] is not specified explicitly, then length of an identifier
-   * from [search] is used.
-   */
+  /// Validates that there is an [ImplementedClass] at the offset of [search].
+  ///
+  /// If [length] is not specified explicitly, then length of an identifier
+  /// from [search] is used.
   void assertHasImplementedMember(String search, [int length = -1]) {
-    int offset = findOffset(search);
+    var offset = findOffset(search);
     if (length == -1) {
       length = findIdentifierLength(search);
     }
     if (implementedMembers == null) {
-      fail('No notification of impemented members was received');
+      fail('No notification of implemented members was received');
     }
-    for (ImplementedMember member in implementedMembers) {
+    for (var member in implementedMembers!) {
       if (member.offset == offset && member.length == length) {
         return;
       }
@@ -74,21 +64,19 @@ class AnalysisNotificationImplementedTest extends AbstractAnalysisTest {
         ' in $implementedMembers');
   }
 
-  /**
-   * Validates that there is no an [ImplementedClass] at the offset of [search].
-   *
-   * If [length] is not specified explicitly, then length of an identifier
-   * from [search] is used.
-   */
+  /// Validates that there is no [ImplementedMember] at the offset of [search].
+  ///
+  /// If [length] is not specified explicitly, then length of an identifier
+  /// from [search] is used.
   void assertNoImplementedMember(String search, [int length = -1]) {
-    int offset = findOffset(search);
+    var offset = findOffset(search);
     if (length == -1) {
       length = findIdentifierLength(search);
     }
     if (implementedMembers == null) {
-      fail('No notification of impemented members was received');
+      fail('No notification of implemented members was received');
     }
-    for (ImplementedMember member in implementedMembers) {
+    for (var member in implementedMembers!) {
       if (member.offset == offset) {
         fail('Unexpected implemented member at $offset'
             ' in $implementedMembers');
@@ -96,22 +84,16 @@ class AnalysisNotificationImplementedTest extends AbstractAnalysisTest {
     }
   }
 
-  @override
-  Index createIndex() {
-    return createMemoryIndex();
-  }
-
-  /**
-   * Subscribe for `IMPLEMENTED` and wait for the notification.
-   */
+  /// Subscribe for `IMPLEMENTED` and wait for the notification.
   Future prepareImplementedElements() {
     subscribeForImplemented();
     return waitForImplementedElements();
   }
 
+  @override
   void processNotification(Notification notification) {
-    if (notification.event == ANALYSIS_IMPLEMENTED) {
-      var params = new AnalysisImplementedParams.fromNotification(notification);
+    if (notification.event == ANALYSIS_NOTIFICATION_IMPLEMENTED) {
+      var params = AnalysisImplementedParams.fromNotification(notification);
       if (params.file == testFile) {
         implementedClasses = params.classes;
         implementedMembers = params.members;
@@ -119,16 +101,18 @@ class AnalysisNotificationImplementedTest extends AbstractAnalysisTest {
     }
   }
 
-  void setUp() {
+  @override
+  Future<void> setUp() async {
     super.setUp();
-    createProject();
+    await createProject();
   }
 
   void subscribeForImplemented() {
+    setPriorityFiles([testFile]);
     addAnalysisSubscription(AnalysisService.IMPLEMENTED, testFile);
   }
 
-  test_afterAnalysis() async {
+  Future<void> test_afterAnalysis() async {
     addTestFile('''
 class A {}
 class B extends A {}
@@ -138,7 +122,7 @@ class B extends A {}
     assertHasImplementedClass('A {');
   }
 
-  test_afterIncrementalResolution() async {
+  Future<void> test_afterIncrementalResolution() async {
     subscribeForImplemented();
     addTestFile('''
 class A {}
@@ -152,12 +136,12 @@ class B extends A {}
 class A  {}
 class B extends A {}
 ''';
-    server.updateContent('1', {testFile: new AddContentOverlay(testCode)});
+    server.updateContent('1', {testFile: AddContentOverlay(testCode)});
     await waitForImplementedElements();
     assertHasImplementedClass('A  {');
   }
 
-  test_class_extended() async {
+  Future<void> test_class_extended() async {
     addTestFile('''
 class A {}
 class B extends A {}
@@ -166,7 +150,7 @@ class B extends A {}
     assertHasImplementedClass('A {');
   }
 
-  test_class_implemented() async {
+  Future<void> test_class_implemented() async {
     addTestFile('''
 class A {}
 class B implements A {}
@@ -175,7 +159,22 @@ class B implements A {}
     assertHasImplementedClass('A {');
   }
 
-  test_class_mixed() async {
+  Future<void> test_class_inMixin() async {
+    addTestFile('''
+class A {} // ref
+class B {} // ref
+class C {} // ref
+class D {} // ref
+mixin M on A, B implements C, D {}
+''');
+    await prepareImplementedElements();
+    assertHasImplementedClass('A {} // ref');
+    assertHasImplementedClass('B {} // ref');
+    assertHasImplementedClass('C {} // ref');
+    assertHasImplementedClass('D {} // ref');
+  }
+
+  Future<void> test_class_mixed() async {
     addTestFile('''
 class A {}
 class B = Object with A;
@@ -184,7 +183,7 @@ class B = Object with A;
     assertHasImplementedClass('A {');
   }
 
-  test_field_withField() async {
+  Future<void> test_field_withField() async {
     addTestFile('''
 class A {
   int f; // A
@@ -197,7 +196,7 @@ class B extends A {
     assertHasImplementedMember('f; // A');
   }
 
-  test_field_withGetter() async {
+  Future<void> test_field_withGetter() async {
     addTestFile('''
 class A {
   int f; // A
@@ -210,7 +209,7 @@ class B extends A {
     assertHasImplementedMember('f; // A');
   }
 
-  test_field_withSetter() async {
+  Future<void> test_field_withSetter() async {
     addTestFile('''
 class A {
   int f; // A
@@ -223,7 +222,7 @@ class B extends A {
     assertHasImplementedMember('f; // A');
   }
 
-  test_getter_withField() async {
+  Future<void> test_getter_withField() async {
     addTestFile('''
 class A {
   get f => null; // A
@@ -236,7 +235,7 @@ class B extends A {
     assertHasImplementedMember('f => null; // A');
   }
 
-  test_getter_withGetter() async {
+  Future<void> test_getter_withGetter() async {
     addTestFile('''
 class A {
   get f => null; // A
@@ -249,7 +248,7 @@ class B extends A {
     assertHasImplementedMember('f => null; // A');
   }
 
-  test_method_withMethod() async {
+  Future<void> test_method_withMethod() async {
     addTestFile('''
 class A {
   m() {} // A
@@ -263,7 +262,7 @@ class B extends A {
     assertNoImplementedMember('m() {} // B');
   }
 
-  test_method_withMethod_indirectSubclass() async {
+  Future<void> test_method_withMethod_indirectSubclass() async {
     addTestFile('''
 class A {
   m() {} // A
@@ -278,10 +277,8 @@ class C extends A {
     assertHasImplementedMember('m() {} // A');
   }
 
-  test_method_withMethod_private_differentLib() async {
-    addFile(
-        '$testFolder/lib.dart',
-        r'''
+  Future<void> test_method_withMethod_private_differentLib() async {
+    newFile(join(testFolder, 'lib.dart'), content: r'''
 import 'test.dart';
 class B extends A {
   void _m() {}
@@ -296,7 +293,7 @@ class A {
     assertNoImplementedMember('_m() {} // A');
   }
 
-  test_method_withMethod_private_sameLibrary() async {
+  Future<void> test_method_withMethod_private_sameLibrary() async {
     addTestFile('''
 class A {
   _m() {} // A
@@ -310,7 +307,7 @@ class B extends A {
     assertNoImplementedMember('_m() {} // B');
   }
 
-  test_method_withMethod_wasAbstract() async {
+  Future<void> test_method_withMethod_wasAbstract() async {
     addTestFile('''
 abstract class A {
   m(); // A
@@ -323,7 +320,41 @@ class B extends A {
     assertHasImplementedMember('m(); // A');
   }
 
-  test_setter_withField() async {
+  Future<void> test_mixin_implemented() async {
+    addTestFile('''
+mixin M { // ref
+  void foo() {} // ref
+  void bar() {} // ref
+}
+
+class A implements M {
+  void foo() {}
+}
+''');
+    await prepareImplementedElements();
+    assertHasImplementedClass('M { // ref');
+    assertHasImplementedMember('foo() {} // ref');
+    assertNoImplementedMember('bar() {} // ref');
+  }
+
+  Future<void> test_mixin_mixed() async {
+    addTestFile('''
+mixin M { // ref
+  void foo() {} // ref
+  void bar() {} // ref
+}
+
+class A extends Object with M {
+  void foo() {}
+}
+''');
+    await prepareImplementedElements();
+    assertHasImplementedClass('M { // ref');
+    assertHasImplementedMember('foo() {} // ref');
+    assertNoImplementedMember('bar() {} // ref');
+  }
+
+  Future<void> test_setter_withField() async {
     addTestFile('''
 class A {
   set f(_) {} // A
@@ -336,7 +367,7 @@ class B extends A {
     assertHasImplementedMember('f(_) {} // A');
   }
 
-  test_setter_withSetter() async {
+  Future<void> test_setter_withSetter() async {
     addTestFile('''
 class A {
   set f(_) {} // A
@@ -349,7 +380,7 @@ class B extends A {
     assertHasImplementedMember('f(_) {} // A');
   }
 
-  test_static_field_instanceStatic() async {
+  Future<void> test_static_field_instanceStatic() async {
     addTestFile('''
 class A {
   int F = 0;
@@ -362,7 +393,7 @@ class B extends A {
     assertNoImplementedMember('F = 0');
   }
 
-  test_static_field_staticInstance() async {
+  Future<void> test_static_field_staticInstance() async {
     addTestFile('''
 class A {
   static int F = 0;
@@ -375,7 +406,7 @@ class B extends A {
     assertNoImplementedMember('F = 0');
   }
 
-  test_static_field_staticStatic() async {
+  Future<void> test_static_field_staticStatic() async {
     addTestFile('''
 class A {
   static int F = 0;
@@ -388,7 +419,7 @@ class B extends A {
     assertNoImplementedMember('F = 0');
   }
 
-  test_static_method_instanceStatic() async {
+  Future<void> test_static_method_instanceStatic() async {
     addTestFile('''
 class A {
   int m() => 0;
@@ -401,7 +432,7 @@ class B extends A {
     assertNoImplementedMember('m() => 0');
   }
 
-  test_static_method_staticInstance() async {
+  Future<void> test_static_method_staticInstance() async {
     addTestFile('''
 class A {
   static int m() => 0;
@@ -414,7 +445,7 @@ class B extends A {
     assertNoImplementedMember('m() => 0');
   }
 
-  test_static_method_staticStatic() async {
+  Future<void> test_static_method_staticStatic() async {
     addTestFile('''
 class A {
   static int m() => 0;
@@ -430,10 +461,10 @@ class B extends A {
   Future waitForImplementedElements() {
     Future waitForNotification(int times) {
       if (times == 0 || implementedClasses != null) {
-        return new Future.value();
+        return Future.value();
       }
-      return new Future.delayed(
-          new Duration(milliseconds: 1), () => waitForNotification(times - 1));
+      return Future.delayed(
+          Duration(milliseconds: 1), () => waitForNotification(times - 1));
     }
 
     return waitForNotification(30000);

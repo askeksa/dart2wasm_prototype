@@ -8,7 +8,6 @@
 
 library test.hot_get_field;
 
-@MirrorsUsed(targets: "test.hot_get_field")
 import 'dart:mirrors';
 import 'package:expect/expect.dart';
 
@@ -33,7 +32,7 @@ main() {
     'E',
     'F'
   ];
-  var symbols = new List();
+  var symbols = <dynamic>[];
   for (var high in digits) {
     for (var low in digits) {
       symbols.add(MirrorSystem.getSymbol("v$high$low"));

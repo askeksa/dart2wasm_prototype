@@ -1,17 +1,9 @@
 /*
- * Copyright (c) 2015, the Dart project authors.
+ * Copyright (c) 2019, the Dart project authors. Please see the AUTHORS file
+ * for details. All rights reserved. Use of this source code is governed by a
+ * BSD-style license that can be found in the LICENSE file.
  *
- * Licensed under the Eclipse Public License v1.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.eclipse.org/legal/epl-v10.html
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the License
- * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
- * or implied. See the License for the specific language governing permissions and limitations under
- * the License.
- *
- * This file has been automatically generated.  Please do not edit it manually.
+ * This file has been automatically generated. Please do not edit it manually.
  * To regenerate the file, use the script "pkg/analysis_server/tool/spec/generate_files".
  */
 package org.dartlang.analysis.server.protocol;
@@ -103,9 +95,15 @@ public class Element {
   private final String typeParameters;
 
   /**
+   * If the element is a type alias, this field is the aliased type. Otherwise this field will not be
+   * defined.
+   */
+  private final String aliasedType;
+
+  /**
    * Constructor for {@link Element}.
    */
-  public Element(String kind, String name, Location location, int flags, String parameters, String returnType, String typeParameters) {
+  public Element(String kind, String name, Location location, int flags, String parameters, String returnType, String typeParameters, String aliasedType) {
     this.kind = kind;
     this.name = name;
     this.location = location;
@@ -113,6 +111,7 @@ public class Element {
     this.parameters = parameters;
     this.returnType = returnType;
     this.typeParameters = typeParameters;
+    this.aliasedType = aliasedType;
   }
 
   @Override
@@ -126,7 +125,8 @@ public class Element {
         other.flags == flags &&
         ObjectUtilities.equals(other.parameters, parameters) &&
         ObjectUtilities.equals(other.returnType, returnType) &&
-        ObjectUtilities.equals(other.typeParameters, typeParameters);
+        ObjectUtilities.equals(other.typeParameters, typeParameters) &&
+        ObjectUtilities.equals(other.aliasedType, aliasedType);
     }
     return false;
   }
@@ -139,7 +139,8 @@ public class Element {
     String parameters = jsonObject.get("parameters") == null ? null : jsonObject.get("parameters").getAsString();
     String returnType = jsonObject.get("returnType") == null ? null : jsonObject.get("returnType").getAsString();
     String typeParameters = jsonObject.get("typeParameters") == null ? null : jsonObject.get("typeParameters").getAsString();
-    return new Element(kind, name, location, flags, parameters, returnType, typeParameters);
+    String aliasedType = jsonObject.get("aliasedType") == null ? null : jsonObject.get("aliasedType").getAsString();
+    return new Element(kind, name, location, flags, parameters, returnType, typeParameters, aliasedType);
   }
 
   public static List<Element> fromJsonArray(JsonArray jsonArray) {
@@ -152,6 +153,14 @@ public class Element {
       list.add(fromJson(iterator.next().getAsJsonObject()));
     }
     return list;
+  }
+
+  /**
+   * If the element is a type alias, this field is the aliased type. Otherwise this field will not be
+   * defined.
+   */
+  public String getAliasedType() {
+    return aliasedType;
   }
 
   /**
@@ -225,6 +234,7 @@ public class Element {
     builder.append(parameters);
     builder.append(returnType);
     builder.append(typeParameters);
+    builder.append(aliasedType);
     return builder.toHashCode();
   }
 
@@ -269,6 +279,9 @@ public class Element {
     if (typeParameters != null) {
       jsonObject.addProperty("typeParameters", typeParameters);
     }
+    if (aliasedType != null) {
+      jsonObject.addProperty("aliasedType", aliasedType);
+    }
     return jsonObject;
   }
 
@@ -289,7 +302,9 @@ public class Element {
     builder.append("returnType=");
     builder.append(returnType + ", ");
     builder.append("typeParameters=");
-    builder.append(typeParameters);
+    builder.append(typeParameters + ", ");
+    builder.append("aliasedType=");
+    builder.append(aliasedType);
     builder.append("]");
     return builder.toString();
   }

@@ -1,66 +1,62 @@
-// Copyright (c) 2017, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2017, the Dart project authors. Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:io';
 
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/dart/ast/token.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:analyzer/src/dart/element/element.dart';
-import 'package:analyzer/src/dart/element/type.dart';
 import 'package:analyzer/src/generated/source.dart';
-import 'package:analyzer/src/generated/utilities_dart.dart';
-import 'package:analyzer/src/summary/idl.dart';
+import 'package:analyzer/src/task/inference_error.dart';
 import 'package:test/test.dart';
 
-/**
- * Set this path to automatically replace expectations in invocations of
- * [checkElementText] with the new actual texts.
- */
-const String _testPath = null;
+import 'resolved_ast_printer.dart';
 
-/**
- * The list of replacements that update expectations.
- */
+/// Set this path to automatically replace expectations in invocations of
+/// [checkElementText] with the new actual texts.
+const String? _testPath = null;
+
+/// The list of replacements that update expectations.
 final List<_Replacement> _replacements = [];
 
-/**
- * The cached content of the file with the [_testPath].
- */
-String _testCode;
+/// The cached content of the file with the [_testPath].
+String? _testCode;
 
-/**
- * The cache line information for the [_testPath] file.
- */
-LineInfo _testCodeLines;
+/// The cache line information for the [_testPath] file.
+LineInfo? _testCodeLines;
 
 void applyCheckElementTextReplacements() {
   if (_testPath != null && _replacements.isNotEmpty) {
     _replacements.sort((a, b) => b.offset - a.offset);
-    String newCode = _testCode;
+    String newCode = _testCode!;
     _replacements.forEach((r) {
       newCode =
           newCode.substring(0, r.offset) + r.text + newCode.substring(r.end);
     });
-    new File(_testPath).writeAsStringSync(newCode);
+    File(_testPath!).writeAsStringSync(newCode);
   }
 }
 
-/**
- * Write the given [library] elements into the canonical text presentation
- * taking into account the specified 'withX' options. Then compare the
- * actual text with the given [expected] one.
- */
-void checkElementText(LibraryElement library, String expected,
-    {bool withOffsets: false,
-    bool withSyntheticAccessors: false,
-    bool withSyntheticFields: false}) {
-  var writer = new _ElementWriter(
-      withOffsets: withOffsets,
-      withSyntheticAccessors: withSyntheticAccessors,
-      withSyntheticFields: withSyntheticFields);
+/// Write the given [library] elements into the canonical text presentation
+/// taking into account the specified 'withX' options. Then compare the
+/// actual text with the given [expected] one.
+void checkElementText(
+  LibraryElement library,
+  String expected, {
+  bool withCodeRanges = false,
+  bool withDisplayName = false,
+  bool withExportScope = false,
+  bool withNonSynthetic = false,
+}) {
+  var writer = _ElementWriter(
+    selfUriStr: '${library.source.uri}',
+    withCodeRanges: withCodeRanges,
+    withDisplayName: withDisplayName,
+    withExportScope: withExportScope,
+    withNonSynthetic: withNonSynthetic,
+  );
   writer.writeLibraryElement(library);
 
   String actualText = writer.buffer.toString();
@@ -69,8 +65,8 @@ void checkElementText(LibraryElement library, String expected,
 
   if (_testPath != null && actualText != expected) {
     if (_testCode == null) {
-      _testCode = new File(_testPath).readAsStringSync();
-      _testCodeLines = new LineInfo.fromContent(_testCode);
+      _testCode = File(_testPath!).readAsStringSync();
+      _testCodeLines = LineInfo.fromContent(_testCode!);
     }
 
     try {
@@ -81,720 +77,148 @@ void checkElementText(LibraryElement library, String expected,
       // Assuming traceString contains "$_testPath:$invocationLine:$column",
       // figure out the value of invocationLine.
 
-      int testFilePathOffset = traceString.indexOf(_testPath);
+      int testFilePathOffset = traceString.indexOf(_testPath!);
       expect(testFilePathOffset, isNonNegative);
 
       // Sanity check: there must be ':' after the path.
-      expect(traceString[testFilePathOffset + _testPath.length], ':');
+      expect(traceString[testFilePathOffset + _testPath!.length], ':');
 
-      int lineOffset = testFilePathOffset + _testPath.length + ':'.length;
+      int lineOffset = testFilePathOffset + _testPath!.length + ':'.length;
       int invocationLine = int.parse(traceString.substring(
           lineOffset, traceString.indexOf(':', lineOffset)));
-      int invocationOffset = _testCodeLines.getOffsetOfLine(invocationLine - 1);
+      int invocationOffset =
+          _testCodeLines!.getOffsetOfLine(invocationLine - 1);
 
       const String rawStringPrefix = "r'''";
       int expectationOffset =
-          _testCode.indexOf(rawStringPrefix, invocationOffset);
+          _testCode!.indexOf(rawStringPrefix, invocationOffset);
 
       // Sanity check: there must be no other strings or blocks.
-      expect(_testCode.substring(invocationOffset, expectationOffset),
+      expect(_testCode!.substring(invocationOffset, expectationOffset),
           isNot(anyOf(contains("'"), contains('"'), contains('}'))));
 
       expectationOffset += rawStringPrefix.length;
-      int expectationEnd = _testCode.indexOf("'''", expectationOffset);
+      int expectationEnd = _testCode!.indexOf("'''", expectationOffset);
 
-      _replacements.add(new _Replacement(
-          expectationOffset, expectationEnd, '\n' + actualText));
+      _replacements.add(
+          _Replacement(expectationOffset, expectationEnd, '\n' + actualText));
     }
   }
 
   // Print the actual text to simplify copy/paste into the expectation.
-//  if (actualText != expected) {
-//    print('-------- Actual --------');
-//    print(actualText + '------------------------');
-//  }
+  // if (actualText != expected) {
+  //   print('-------- Actual --------');
+  //   print(actualText + '------------------------');
+  // }
 
   expect(actualText, expected);
 }
 
-/**
- * Writes the canonical text presentation of elements.
- */
+/// Writes the canonical text presentation of elements.
 class _ElementWriter {
-  final bool withOffsets;
-  final bool withConstElements;
-  final bool withSyntheticAccessors;
-  final bool withSyntheticFields;
-  final StringBuffer buffer = new StringBuffer();
+  final String? selfUriStr;
+  final bool withCodeRanges;
+  final bool withDisplayName;
+  final bool withExportScope;
+  final bool withNonSynthetic;
+  final StringBuffer buffer = StringBuffer();
 
-  _ElementWriter(
-      {this.withOffsets: false,
-      this.withConstElements: true,
-      this.withSyntheticAccessors,
-      this.withSyntheticFields: false});
+  String indent = '';
 
-  bool isDynamicType(DartType type) => type is DynamicTypeImpl;
-
-  bool isEnumField(Element e) {
-    Element enclosing = e.enclosingElement;
-    return enclosing is ClassElement && enclosing.isEnum;
-  }
-
-  void newLineIfNotEmpty() {
-    if (buffer.isNotEmpty) {
-      buffer.writeln();
-    }
-  }
-
-  void writeBodyModifiers(ExecutableElement e) {
-    if (e.isAsynchronous) {
-      expect(e.isSynchronous, isFalse);
-      buffer.write(' async');
-    }
-
-    if (e.isSynchronous && e.isGenerator) {
-      expect(e.isAsynchronous, isFalse);
-      buffer.write(' sync');
-    }
-
-    writeIf(e.isGenerator, '*');
-  }
-
-  void writeClassElement(ClassElement e) {
-    writeDocumentation(e);
-    writeMetadata(e, '', '\n');
-
-    writeIf(e.isAbstract, 'abstract ');
-
-    if (e.isEnum) {
-      buffer.write('enum ');
-    } else {
-      buffer.write('class ');
-    }
-
-    writeIf(e.isMixinApplication, 'alias ');
-
-    writeName(e);
-    writeTypeParameterElements(e.typeParameters);
-
-    if (e.supertype != null && e.supertype.displayName != 'Object' ||
-        e.mixins.isNotEmpty) {
-      buffer.write(' extends ');
-      writeType(e.supertype);
-    }
-
-    writeList(' with ', '', e.mixins, ', ', writeType);
-    writeList(' implements ', '', e.interfaces, ', ', writeType);
-
-    buffer.writeln(' {');
-
-    e.fields.forEach(writePropertyInducingElement);
-    e.accessors.forEach(writePropertyAccessorElement);
-
-    if (e.isEnum) {
-      expect(e.constructors, isEmpty);
-    } else {
-      expect(e.constructors, isNotEmpty);
-    }
-
-    if (e.constructors.length == 1 &&
-        e.constructors[0].isSynthetic &&
-        e.mixins.isEmpty) {
-      expect(e.constructors[0].parameters, isEmpty);
-    } else {
-      e.constructors.forEach(writeConstructorElement);
-    }
-
-    e.methods.forEach(writeMethodElement);
-    buffer.writeln('}');
-  }
-
-  void writeConstructorElement(ConstructorElement e) {
-    writeDocumentation(e, '  ');
-    writeMetadata(e, '  ', '\n');
-
-    buffer.write('  ');
-
-    writeIf(e.isSynthetic, 'synthetic ');
-    writeIf(e.isExternal, 'external ');
-    writeIf(e.isConst, 'const ');
-    writeIf(e.isFactory, 'factory ');
-
-    buffer.write(e.enclosingElement.name);
-    if (e.name.isNotEmpty) {
-      buffer.write('.');
-      writeName(e);
-    }
-
-    writeParameterElements(e.parameters);
-
-    {
-      ConstructorElement redirected = e.redirectedConstructor;
-      if (redirected != null) {
-        buffer.write(' = ');
-        buffer.write(redirected.returnType);
-        if (redirected.name.isNotEmpty) {
-          buffer.write('.');
-          buffer.write(redirected.name);
-        }
-      }
-    }
-
-    if (e is ConstructorElementImpl) {
-      if (e.constantInitializers != null) {
-        writeList(' : ', '', e.constantInitializers, ', ', writeExpression);
-      }
-    }
-
-    expect(e.isAsynchronous, isFalse);
-    expect(e.isGenerator, isFalse);
-
-    buffer.writeln(';');
-  }
-
-  void writeDocumentation(Element e, [String prefix = '']) {
-    if (e.documentationComment != null) {
-      buffer.write(prefix);
-      buffer.writeln(e.documentationComment);
-    }
-  }
-
-  void writeExportElement(ExportElement e) {
-    writeMetadata(e, '', '\n');
-    buffer.write('export ');
-    writeUri(e, e.exportedLibrary?.source);
-
-    e.combinators.forEach(writeNamespaceCombinator);
-
-    buffer.writeln(';');
-  }
-
-  void writeExpression(AstNode e) {
-    if (e is Annotation) {
-      buffer.write('@');
-      writeExpression(e.name);
-      if (e.constructorName != null) {
-        buffer.write('.');
-        writeExpression(e.constructorName);
-      }
-      if (e.arguments != null) {
-        writeList('(', ')', e.arguments.arguments, ', ', writeExpression,
-            includeEmpty: true);
-      }
-    } else if (e is AssertInitializer) {
-      buffer.write('assert(');
-      writeExpression(e.condition);
-      if (e.message != null) {
-        buffer.write(', ');
-        writeExpression(e.message);
-      }
-      buffer.write(')');
-    } else if (e is BinaryExpression) {
-      writeExpression(e.leftOperand);
-      buffer.write(' ');
-      buffer.write(e.operator.lexeme);
-      buffer.write(' ');
-      writeExpression(e.rightOperand);
-    } else if (e is BooleanLiteral) {
-      buffer.write(e.value);
-    } else if (e is ConditionalExpression) {
-      writeExpression(e.condition);
-      buffer.write(' ? ');
-      writeExpression(e.thenExpression);
-      buffer.write(' : ');
-      writeExpression(e.elseExpression);
-    } else if (e is ConstructorFieldInitializer) {
-      writeExpression(e.fieldName);
-      buffer.write(' = ');
-      writeExpression(e.expression);
-    } else if (e is ConstructorName) {
-      writeExpression(e.type);
-      if (e.name != null) {
-        buffer.write('.');
-        writeExpression(e.name);
-      }
-    } else if (e is DoubleLiteral) {
-      buffer.write(e.value);
-    } else if (e is InstanceCreationExpression) {
-      buffer.write(e.keyword.lexeme);
-      buffer.write(' ');
-      writeExpression(e.constructorName);
-      writeList('(', ')', e.argumentList.arguments, ', ', writeExpression,
-          includeEmpty: true);
-    } else if (e is IntegerLiteral) {
-      buffer.write(e.value);
-    } else if (e is InterpolationExpression) {
-      buffer.write(r'${');
-      writeExpression(e.expression);
-      buffer.write(r'}');
-    } else if (e is InterpolationString) {
-      buffer.write(e.value.replaceAll("'", r"\'"));
-    } else if (e is ListLiteral) {
-      if (e.constKeyword != null) {
-        buffer.write('const ');
-      }
-      if (e.typeArguments != null) {
-        writeList('<', '>', e.typeArguments.arguments, ', ', writeExpression);
-      }
-      writeList('[', ']', e.elements, ', ', writeExpression,
-          includeEmpty: true);
-    } else if (e is Label) {
-      writeExpression(e.label);
-      buffer.write(': ');
-    } else if (e is MapLiteral) {
-      if (e.constKeyword != null) {
-        buffer.write('const ');
-      }
-      if (e.typeArguments != null) {
-        writeList('<', '>', e.typeArguments.arguments, ', ', writeExpression);
-      }
-      writeList('{', '}', e.entries, ', ', writeExpression, includeEmpty: true);
-    } else if (e is MapLiteralEntry) {
-      writeExpression(e.key);
-      buffer.write(': ');
-      writeExpression(e.value);
-    } else if (e is NamedExpression) {
-      writeExpression(e.name);
-      buffer.write(e.expression);
-    } else if (e is NullLiteral) {
-      buffer.write('null');
-    } else if (e is PrefixExpression) {
-      buffer.write(e.operator.lexeme);
-      writeExpression(e.operand);
-    } else if (e is PrefixedIdentifier) {
-      writeExpression(e.prefix);
-      buffer.write('.');
-      writeExpression(e.identifier);
-    } else if (e is PropertyAccess) {
-      writeExpression(e.target);
-      buffer.write('.');
-      writeExpression(e.propertyName);
-    } else if (e is RedirectingConstructorInvocation) {
-      buffer.write('this');
-      if (e.constructorName != null) {
-        buffer.write('.');
-        writeExpression(e.constructorName);
-      }
-      writeList('(', ')', e.argumentList.arguments, ', ', writeExpression,
-          includeEmpty: true);
-    } else if (e is SimpleIdentifier) {
-      if (withConstElements) {
-        buffer.writeln();
-        buffer.write('  ' * 4);
-        buffer.write(e.name);
-        buffer.write('/*');
-        buffer.write('location: ');
-        buffer.write(_getElementLocationString(e.staticElement));
-        buffer.write('*/');
-      } else {
-        buffer.write(e.name);
-      }
-    } else if (e is SimpleStringLiteral) {
-      buffer.write("'");
-      buffer.write(e.value.replaceAll("'", r"\'"));
-      buffer.write("'");
-    } else if (e is StringInterpolation) {
-      buffer.write("'");
-      e.elements.forEach(writeExpression);
-      buffer.write("'");
-    } else if (e is SuperConstructorInvocation) {
-      buffer.write('super');
-      if (e.constructorName != null) {
-        buffer.write('.');
-        writeExpression(e.constructorName);
-      }
-      writeList('(', ')', e.argumentList.arguments, ', ', writeExpression,
-          includeEmpty: true);
-    } else if (e is SuperExpression) {
-      buffer.write('super');
-    } else if (e is SymbolLiteral) {
-      buffer.write('#');
-      writeList('', '', e.components, '.',
-          (Token token) => buffer.write(token.lexeme));
-    } else if (e is ThisExpression) {
-      buffer.write('this');
-    } else if (e is TypeName) {
-      writeExpression(e.name);
-      if (e.typeArguments != null) {
-        writeList('<', '>', e.typeArguments.arguments, ', ', writeExpression);
-      }
-    } else {
-      fail('Unsupported expression type: ${e.runtimeType}');
-    }
-  }
-
-  void writeFunctionElement(FunctionElement e) {
-    writeIf(e.isExternal, 'external ');
-
-    writeType2(e.returnType);
-
-    writeName(e);
-
-    writeTypeParameterElements(e.typeParameters);
-    writeParameterElements(e.parameters);
-
-    writeBodyModifiers(e);
-
-    buffer.writeln(' {}');
-  }
-
-  void writeFunctionTypeAliasElement(FunctionTypeAliasElement e) {
-    writeDocumentation(e);
-    writeMetadata(e, '', '\n');
-
-    if (e is GenericTypeAliasElement) {
-      buffer.write('typedef ');
-      writeName(e);
-      writeTypeParameterElements(e.typeParameters);
-
-      buffer.write(' = ');
-
-      writeType(e.function.returnType);
-      buffer.write(' Function');
-      writeTypeParameterElements(e.function.typeParameters);
-      writeParameterElements(e.function.parameters);
-    } else {
-      buffer.write('typedef ');
-      writeType2(e.returnType);
-
-      writeName(e);
-
-      writeTypeParameterElements(e.typeParameters);
-      writeParameterElements(e.parameters);
-    }
-
-    buffer.writeln(';');
-  }
-
-  void writeIf(bool flag, String str) {
-    if (flag) {
-      buffer.write(str);
-    }
-  }
-
-  void writeImportElement(ImportElement e) {
-    if (!e.isSynthetic) {
-      writeMetadata(e, '', '\n');
-      buffer.write('import ');
-      writeUri(e, e.importedLibrary?.source);
-
-      writeIf(e.isDeferred, ' deferred');
-
-      if (e.prefix != null) {
-        buffer.write(' as ');
-        writeName(e.prefix);
-        if (withOffsets) {
-          buffer.write('(${e.prefixOffset})');
-        }
-      }
-
-      e.combinators.forEach(writeNamespaceCombinator);
-
-      buffer.writeln(';');
-    }
-  }
+  _ElementWriter({
+    this.selfUriStr,
+    required this.withCodeRanges,
+    required this.withDisplayName,
+    required this.withExportScope,
+    required this.withNonSynthetic,
+  });
 
   void writeLibraryElement(LibraryElement e) {
-    if (e.displayName != '') {
-      writeMetadata(e, '', '\n');
-      buffer.write('library ');
-      writeName(e);
-      buffer.writeln(';');
-    }
-
-    e.imports.forEach(writeImportElement);
-    e.exports.forEach(writeExportElement);
-    e.parts.forEach(writePartElement);
-
-    e.units.forEach(writeUnitElement);
-  }
-
-  void writeList<T>(String open, String close, List<T> items, String separator,
-      writeItem(T item),
-      {bool includeEmpty: false}) {
-    if (!includeEmpty && items.isEmpty) {
-      return;
-    }
-    buffer.write(open);
-    bool first = true;
-    for (T item in items) {
-      if (!first) {
-        buffer.write(separator);
+    _writelnWithIndent('library');
+    _withIndent(() {
+      var name = e.name;
+      if (name.isNotEmpty) {
+        _writelnWithIndent('name: $name');
       }
-      writeItem(item);
-      first = false;
-    }
-    buffer.write(close);
-  }
 
-  void writeMetadata(Element e, String prefix, String separator) {
-    if (e.metadata.isNotEmpty) {
-      writeList(prefix, '', e.metadata, '$separator$prefix', (a) {
-        writeExpression((a as ElementAnnotationImpl).annotationAst);
+      var nameOffset = e.nameOffset;
+      if (nameOffset != -1) {
+        _writelnWithIndent('nameOffset: $nameOffset');
+      }
+
+      _writeDocumentation(e);
+      _writeMetadata(e);
+
+      var imports = e.imports.where((import) => !import.isSynthetic).toList();
+      _writeElements('imports', imports, _writeImportElement);
+
+      _writeElements('exports', e.exports, _writeExportElement);
+
+      _writelnWithIndent('definingUnit');
+      _withIndent(() {
+        _writeUnitElement(e.definingCompilationUnit);
       });
-      buffer.write(separator);
-    }
-  }
 
-  void writeMethodElement(MethodElement e) {
-    writeDocumentation(e, '  ');
-    writeMetadata(e, '  ', '\n');
+      _writeElements('parts', e.parts, (CompilationUnitElement e) {
+        _writelnWithIndent(e.uri!);
+        _withIndent(() {
+          _writeMetadata(e);
+          _writeUnitElement(e);
+        });
+      });
 
-    buffer.write('  ');
-
-    writeIf(e.isExternal, 'external ');
-    writeIf(e.isStatic, 'static ');
-
-    writeType2(e.returnType);
-
-    writeName(e);
-
-    writeTypeParameterElements(e.typeParameters);
-    writeParameterElements(e.parameters);
-
-    writeBodyModifiers(e);
-
-    if (e.isAbstract) {
-      buffer.writeln(';');
-    } else {
-      buffer.writeln(' {}');
-    }
-  }
-
-  void writeName(Element e) {
-    buffer.write(e.displayName);
-    if (withOffsets) {
-      buffer.write('@');
-      buffer.write(e.nameOffset);
-    }
-  }
-
-  void writeNamespaceCombinator(NamespaceCombinator e) {
-    if (e is ShowElementCombinator) {
-      buffer.write(' show ');
-      buffer.write(e.shownNames.join(', '));
-    } else if (e is HideElementCombinator) {
-      buffer.write(' hide ');
-      buffer.write(e.hiddenNames.join(', '));
-    }
-  }
-
-  void writeParameterElement(ParameterElement e) {
-    String defaultValueSeparator;
-    Expression defaultValue =
-        e is DefaultParameterElementImpl ? e.constantInitializer : null;
-    String closeString;
-    ParameterKind kind = e.parameterKind;
-    if (kind == ParameterKind.REQUIRED) {
-      closeString = '';
-    } else if (kind == ParameterKind.POSITIONAL) {
-      buffer.write('[');
-      defaultValueSeparator = ' = ';
-      closeString = ']';
-    } else if (kind == ParameterKind.NAMED) {
-      buffer.write('{');
-      defaultValueSeparator = ': ';
-      closeString = '}';
-    } else {
-      fail('Unknown parameter kind: $kind');
-    }
-
-    writeMetadata(e, '', ' ');
-
-    writeIf(e.isCovariant, 'covariant ');
-    writeIf(e.isFinal, 'final ');
-
-    writeType2(e.type);
-
-    if (e is FieldFormalParameterElement) {
-      buffer.write('this.');
-    }
-
-    writeName(e);
-
-    writeVariableTypeInferenceError(e);
-
-    if (defaultValue != null) {
-      buffer.write(defaultValueSeparator);
-      writeExpression(defaultValue);
-    }
-
-    buffer.write(closeString);
-  }
-
-  void writeParameterElements(List<ParameterElement> elements) {
-    writeList('(', ')', elements, ', ', writeParameterElement,
-        includeEmpty: true);
-  }
-
-  void writePartElement(CompilationUnitElement e) {
-    writeMetadata(e, '', '\n');
-    buffer.write('part ');
-    writeUri(e, e.source);
-    buffer.writeln(';');
-  }
-
-  void writePropertyAccessorElement(PropertyAccessorElement e) {
-    if (e.isSynthetic && !withSyntheticAccessors) {
-      return;
-    }
-
-    if (e.enclosingElement is ClassElement) {
-      writeDocumentation(e, '  ');
-      writeMetadata(e, '  ', '\n');
-
-      buffer.write('  ');
-
-      writeIf(e.isSynthetic, 'synthetic ');
-      writeIf(e.isStatic, 'static ');
-    } else {
-      writeDocumentation(e);
-      writeMetadata(e, '', '\n');
-      writeIf(e.isSynthetic, 'synthetic ');
-    }
-
-    writeIf(e.isExternal, 'external ');
-
-    writeType2(e.returnType);
-
-    if (e.isGetter) {
-      buffer.write('get ');
-    } else {
-      buffer.write('set ');
-    }
-
-    writeName(e);
-
-    if (e.isSetter || e.parameters.isNotEmpty) {
-      writeParameterElements(e.parameters);
-    }
-
-    expect(e.typeParameters, isEmpty);
-
-    expect(e.isSynchronous, isTrue);
-    expect(e.isAsynchronous, isFalse);
-    expect(e.isGenerator, isFalse);
-
-    if (e.isAbstract) {
-      buffer.writeln(';');
-    } else {
-      buffer.writeln(' {}');
-    }
-  }
-
-  void writePropertyInducingElement(PropertyInducingElement e) {
-    if (e.isSynthetic && !withSyntheticFields && !isEnumField(e)) {
-      return;
-    }
-
-    DartType type = e.type;
-    expect(type, isNotNull);
-
-    if (e.enclosingElement is ClassElement) {
-      writeDocumentation(e, '  ');
-      writeMetadata(e, '  ', '\n');
-
-      buffer.write('  ');
-
-      writeIf(e.isSynthetic, 'synthetic ');
-      writeIf(e.isStatic, 'static ');
-      writeIf(e is FieldElementImpl && e.isCovariant, 'covariant ');
-    } else {
-      writeDocumentation(e);
-      writeMetadata(e, '', '\n');
-    }
-
-    writeIf(e.isFinal, 'final ');
-    writeIf(e.isConst, 'const ');
-    writeType2(type);
-
-    writeName(e);
-
-    writeVariableTypeInferenceError(e);
-
-    if (e is ConstVariableElement) {
-      Expression initializer = (e as ConstVariableElement).constantInitializer;
-      if (initializer != null) {
-        buffer.write(' = ');
-        writeExpression(initializer);
+      if (withExportScope) {
+        _writelnWithIndent('exportScope');
+        _withIndent(() {
+          _writeExportScope(e);
+        });
       }
-    }
-
-    // TODO(scheglov) Paul: One of the things that was hardest to get right
-    // when resynthesizing the element model was the synthetic function for the
-    // initializer.  Can we write that out (along with its return type)?
-
-    buffer.writeln(';');
+    });
   }
 
-  void writeType(DartType type) {
-    if (type is InterfaceType) {
-      buffer.write(type.element.name);
-      if (type.element.typeParameters.isNotEmpty) {
-        writeList('<', '>', type.typeArguments, ', ', writeType);
-      }
+  void _assertNonSyntheticElementSelf(Element element) {
+    expect(element.isSynthetic, isFalse);
+    expect(element.nonSynthetic, same(element));
+  }
+
+  /// Assert that the [accessor] of the [property] is correctly linked to
+  /// the same enclosing element as the [property].
+  void _assertSyntheticAccessorEnclosing(
+      PropertyInducingElement property, PropertyAccessorElement accessor) {
+    if (accessor.isSynthetic) {
+      // Usually we have a non-synthetic property, and a synthetic accessor.
     } else {
-      buffer.write(type.displayName);
+      // But it is possible to have a non-synthetic setter.
+      // class A {
+      //   final int foo;
+      //   set foo(int newValue) {}
+      // }
+      expect(accessor.isSetter, isTrue);
+    }
+
+    expect(accessor.variable, same(property));
+
+    var propertyEnclosing = property.enclosingElement;
+    expect(accessor.enclosingElement, same(propertyEnclosing));
+
+    if (propertyEnclosing is CompilationUnitElement) {
+      expect(propertyEnclosing.accessors, contains(accessor));
+    } else if (propertyEnclosing is ClassElement) {
+      expect(propertyEnclosing.accessors, contains(accessor));
     }
   }
 
-  void writeType2(DartType type) {
-    writeType(type);
-    buffer.write(' ');
+  ResolvedAstPrinter _createAstPrinter() {
+    return ResolvedAstPrinter(
+      selfUriStr: selfUriStr,
+      sink: buffer,
+      indent: indent,
+      withOffsets: true,
+    );
   }
 
-  void writeTypeParameterElement(TypeParameterElement e) {
-    writeName(e);
-    if (e.bound != null) {
-      buffer.write(' extends ');
-      writeType(e.bound);
-    }
-  }
-
-  void writeTypeParameterElements(List<TypeParameterElement> elements) {
-    writeList('<', '>', elements, ', ', writeTypeParameterElement);
-  }
-
-  void writeUnitElement(CompilationUnitElement e) {
-    if (e.library.definingCompilationUnit != e) {
-      buffer.writeln('-' * 20);
-      buffer.writeln('unit: ${e.source?.shortName}');
-      buffer.writeln();
-    }
-    e.functionTypeAliases.forEach(writeFunctionTypeAliasElement);
-    e.enums.forEach(writeClassElement);
-    e.types.forEach(writeClassElement);
-    e.topLevelVariables.forEach(writePropertyInducingElement);
-    e.accessors.forEach(writePropertyAccessorElement);
-    e.functions.forEach(writeFunctionElement);
-  }
-
-  void writeUri(UriReferencedElement e, Source source) {
-    String uri = e.uri ?? source.uri.toString();
-    buffer.write('\'$uri\'');
-    if (withOffsets) {
-      buffer.write('(');
-      buffer.write('${e.uriOffset}, ');
-      buffer.write('${e.uriEnd})');
-      buffer.write(')');
-    }
-  }
-
-  void writeVariableTypeInferenceError(VariableElement e) {
-    if (e is VariableElementImpl) {
-      TopLevelInferenceError inferenceError = e.typeInferenceError;
-      if (inferenceError != null) {
-        String kindName = inferenceError.kind.toString();
-        if (kindName.startsWith('TopLevelInferenceErrorKind.')) {
-          kindName = kindName.substring('TopLevelInferenceErrorKind.'.length);
-        }
-        buffer.write('/*error: $kindName*/');
-      }
-    }
-  }
-
-  String _getElementLocationString(Element element) {
-    if (element == null) {
+  String _getElementLocationString(Element? element) {
+    if (element == null || element is MultiplyDefinedElement) {
       return 'null';
     }
 
@@ -805,9 +229,9 @@ class _ElementWriter {
       return uri;
     }
 
-    ElementLocation location = element.location;
+    var location = element.location!;
     List<String> components = location.components.toList();
-    if (components.length >= 1) {
+    if (components.isNotEmpty) {
       components[0] = onlyName(components[0]);
     }
     if (components.length >= 2) {
@@ -818,11 +242,708 @@ class _ElementWriter {
     }
     return components.join(';');
   }
+
+  String? _typeStr(DartType? type) {
+    return type?.getDisplayString(
+      withNullability: true,
+    );
+  }
+
+  void _withIndent(void Function() f) {
+    var savedIndent = indent;
+    indent = '$savedIndent  ';
+    f();
+    indent = savedIndent;
+  }
+
+  void _writeBodyModifiers(ExecutableElement e) {
+    if (e.isAsynchronous) {
+      expect(e.isSynchronous, isFalse);
+      buffer.write(' async');
+    }
+
+    if (e.isSynchronous && e.isGenerator) {
+      expect(e.isAsynchronous, isFalse);
+      buffer.write(' sync');
+    }
+
+    _writeIf(e.isGenerator, '*');
+  }
+
+  void _writeClassElement(ClassElement e) {
+    _writeIndentedLine(() {
+      _writeIf(e.isAbstract && !e.isMixin, 'abstract ');
+      _writeIf(!e.isSimplyBounded, 'notSimplyBounded ');
+
+      if (e.isEnum) {
+        buffer.write('enum ');
+      } else if (e.isMixin) {
+        buffer.write('mixin ');
+      } else {
+        buffer.write('class ');
+      }
+      _writeIf(e.isMixinApplication, 'alias ');
+
+      _writeName(e);
+    });
+
+    _withIndent(() {
+      _writeDocumentation(e);
+      _writeMetadata(e);
+      _writeCodeRange(e);
+      _writeTypeParameterElements(e.typeParameters);
+
+      var supertype = e.supertype;
+      if (supertype != null &&
+          (supertype.element.name != 'Object' || e.mixins.isNotEmpty)) {
+        _writeType(supertype, name: 'supertype');
+      }
+
+      if (e.isMixin) {
+        var superclassConstraints = e.superclassConstraints;
+        if (superclassConstraints.isEmpty) {
+          throw StateError('At least Object is expected.');
+        }
+        _writeElements<DartType>(
+          'superclassConstraints',
+          superclassConstraints,
+          _writeType,
+        );
+      }
+
+      _writeElements<DartType>('mixins', e.mixins, _writeType);
+      _writeElements<DartType>('interfaces', e.interfaces, _writeType);
+
+      _writeElements('fields', e.fields, _writePropertyInducingElement);
+
+      var constructors = e.constructors;
+      expect(constructors, isNotEmpty);
+      _writeElements('constructors', constructors, _writeConstructorElement);
+
+      _writeElements('accessors', e.accessors, _writePropertyAccessorElement);
+      _writeElements('methods', e.methods, _writeMethodElement);
+    });
+
+    _assertNonSyntheticElementSelf(e);
+  }
+
+  void _writeCodeRange(Element e) {
+    if (withCodeRanges && !e.isSynthetic) {
+      e as ElementImpl;
+      _writelnWithIndent('codeOffset: ${e.codeOffset}');
+      _writelnWithIndent('codeLength: ${e.codeLength}');
+    }
+  }
+
+  void _writeConstantInitializer(Element e) {
+    if (e is ConstVariableElement) {
+      var initializer = e.constantInitializer;
+      if (initializer != null) {
+        _writelnWithIndent('constantInitializer');
+        _withIndent(() {
+          _writeNode(initializer);
+        });
+      }
+    }
+  }
+
+  void _writeConstructorElement(ConstructorElement e) {
+    e as ConstructorElementImpl;
+
+    // Check that the reference exists, and filled with the element.
+    var reference = e.reference;
+    if (reference == null) {
+      fail('Every constructor must have a reference.');
+    } else {
+      var classReference = reference.parent!.parent!;
+      // We need this `if` for duplicate declarations.
+      // The reference might be filled by another declaration.
+      if (identical(classReference.element, e.enclosingElement)) {
+        expect(reference.element, same(e));
+      }
+    }
+
+    _writeIndentedLine(() {
+      _writeIf(e.isSynthetic, 'synthetic ');
+      _writeIf(e.isExternal, 'external ');
+      _writeIf(e.isConst, 'const ');
+      _writeIf(e.isFactory, 'factory ');
+      expect(e.isAbstract, isFalse);
+      _writeName(e);
+    });
+
+    _withIndent(() {
+      _writeDocumentation(e);
+      _writeMetadata(e);
+      _writeCodeRange(e);
+      _writeDisplayName(e);
+
+      var periodOffset = e.periodOffset;
+      var nameEnd = e.nameEnd;
+      if (periodOffset != null && nameEnd != null) {
+        _writelnWithIndent('periodOffset: $periodOffset');
+        _writelnWithIndent('nameEnd: $nameEnd');
+      }
+
+      _writeParameterElements(e.parameters);
+
+      _writeElements(
+        'constantInitializers',
+        e.constantInitializers,
+        _writeNode,
+      );
+
+      var superConstructor = e.superConstructor;
+      if (superConstructor != null) {
+        if (!superConstructor.enclosingElement.isDartCoreObject) {
+          _writeElementReference('superConstructor', superConstructor);
+        }
+      }
+
+      var redirectedConstructor = e.redirectedConstructor;
+      if (redirectedConstructor != null) {
+        _writeElementReference('redirectedConstructor', redirectedConstructor);
+      }
+
+      _writeNonSyntheticElement(e);
+    });
+
+    expect(e.isAsynchronous, isFalse);
+    expect(e.isGenerator, isFalse);
+
+    if (e.isSynthetic) {
+      expect(e.nameOffset, -1);
+      expect(e.nonSynthetic, same(e.enclosingElement));
+    } else {
+      expect(e.nameOffset, isPositive);
+    }
+  }
+
+  void _writeDisplayName(Element e) {
+    if (withDisplayName) {
+      _writelnWithIndent('displayName: ${e.displayName}');
+    }
+  }
+
+  void _writeDocumentation(Element element) {
+    var documentation = element.documentationComment;
+    if (documentation != null) {
+      var str = documentation;
+      str = str.replaceAll('\n', r'\n');
+      str = str.replaceAll('\r', r'\r');
+      _writelnWithIndent('documentationComment: $str');
+    }
+  }
+
+  void _writeElementReference(String name, Element element) {
+    var printer = _createAstPrinter();
+    printer.writeElement(name, element);
+  }
+
+  void _writeElements<T>(String name, List<T> elements, void Function(T) f) {
+    if (elements.isNotEmpty) {
+      _writelnWithIndent(name);
+      _withIndent(() {
+        for (var element in elements) {
+          f(element);
+        }
+      });
+    }
+  }
+
+  void _writeExportElement(ExportElement e) {
+    _writeIndentedLine(() {
+      _writeUri(e.exportedLibrary?.source);
+    });
+
+    _withIndent(() {
+      _writeMetadata(e);
+      _writeNamespaceCombinators(e.combinators);
+    });
+
+    _assertNonSyntheticElementSelf(e);
+  }
+
+  void _writeExportScope(LibraryElement e) {
+    var map = e.exportNamespace.definedNames;
+    var names = map.keys.toList()..sort();
+    for (var name in names) {
+      var element = map[name];
+      var elementLocationStr = _getElementLocationString(element);
+      _writelnWithIndent('$name: $elementLocationStr');
+    }
+  }
+
+  void _writeExtensionElement(ExtensionElement e) {
+    _writeIndentedLine(() {
+      _writeName(e);
+    });
+
+    _withIndent(() {
+      _writeDocumentation(e);
+      _writeMetadata(e);
+      _writeCodeRange(e);
+      _writeTypeParameterElements(e.typeParameters);
+      _writeType(e.extendedType, name: 'extendedType');
+    });
+
+    _withIndent(() {
+      _writeElements('fields', e.fields, _writePropertyInducingElement);
+      _writeElements('accessors', e.accessors, _writePropertyAccessorElement);
+      _writeElements('methods', e.methods, _writeMethodElement);
+    });
+
+    _assertNonSyntheticElementSelf(e);
+  }
+
+  void _writeFieldFormalParameterField(ParameterElement e) {
+    if (e is FieldFormalParameterElement) {
+      var field = e.field;
+      if (field != null) {
+        _writeElementReference('field', field);
+      } else {
+        _writelnWithIndent('field: <null>');
+      }
+    }
+  }
+
+  void _writeFunctionElement(FunctionElement e) {
+    expect(e.isStatic, isTrue);
+
+    _writeIndentedLine(() {
+      _writeIf(e.isExternal, 'external ');
+      _writeName(e);
+      _writeBodyModifiers(e);
+    });
+
+    _withIndent(() {
+      _writeDocumentation(e);
+      _writeMetadata(e);
+      _writeCodeRange(e);
+      _writeTypeParameterElements(e.typeParameters);
+      _writeParameterElements(e.parameters);
+      _writeType(e.returnType, name: 'returnType');
+    });
+
+    _assertNonSyntheticElementSelf(e);
+  }
+
+  void _writeIf(bool flag, String str) {
+    if (flag) {
+      buffer.write(str);
+    }
+  }
+
+  void _writeImportElement(ImportElement e) {
+    _writeIndentedLine(() {
+      _writeUri(e.importedLibrary?.source);
+      _writeIf(e.isDeferred, ' deferred');
+
+      var prefix = e.prefix;
+      if (prefix != null) {
+        buffer.write(' as ');
+        _writeName(prefix);
+      }
+    });
+
+    _withIndent(() {
+      _writeMetadata(e);
+      _writeNamespaceCombinators(e.combinators);
+    });
+
+    _assertNonSyntheticElementSelf(e);
+  }
+
+  void _writeIndentedLine(void Function() f) {
+    buffer.write(indent);
+    f();
+    buffer.writeln();
+  }
+
+  void _writelnWithIndent(String line) {
+    buffer.write(indent);
+    buffer.writeln(line);
+  }
+
+  void _writeMetadata(Element element) {
+    var annotations = element.metadata;
+    if (annotations.isNotEmpty) {
+      _writelnWithIndent('metadata');
+      _withIndent(() {
+        for (var annotation in annotations) {
+          annotation as ElementAnnotationImpl;
+          _writeNode(annotation.annotationAst);
+        }
+      });
+    }
+  }
+
+  void _writeMethodElement(MethodElement e) {
+    _writeIndentedLine(() {
+      _writeIf(e.isSynthetic, 'synthetic ');
+      _writeIf(e.isStatic, 'static ');
+      _writeIf(e.isAbstract, 'abstract ');
+      _writeIf(e.isExternal, 'external ');
+
+      _writeName(e);
+      _writeBodyModifiers(e);
+    });
+
+    _withIndent(() {
+      _writeDocumentation(e);
+      _writeMetadata(e);
+      _writeCodeRange(e);
+      _writeTypeInferenceError(e);
+
+      _writeTypeParameterElements(e.typeParameters);
+      _writeParameterElements(e.parameters);
+      _writeType(e.returnType, name: 'returnType');
+      _writeNonSyntheticElement(e);
+    });
+
+    if (e.isSynthetic && e.enclosingElement is EnumElementImpl) {
+      expect(e.name, 'toString');
+      expect(e.nonSynthetic, same(e.enclosingElement));
+    } else {
+      _assertNonSyntheticElementSelf(e);
+    }
+  }
+
+  void _writeName(Element e) {
+    // TODO(scheglov) Use 'name' everywhere.
+    var name = e is ConstructorElement ? e.name : e.displayName;
+    buffer.write(name);
+    buffer.write(name.isNotEmpty ? ' @' : '@');
+    buffer.write(e.nameOffset);
+  }
+
+  void _writeNamespaceCombinator(NamespaceCombinator e) {
+    _writeIndentedLine(() {
+      if (e is ShowElementCombinator) {
+        buffer.write('show: ');
+        buffer.write(e.shownNames.join(', '));
+      } else if (e is HideElementCombinator) {
+        buffer.write('hide: ');
+        buffer.write(e.hiddenNames.join(', '));
+      }
+    });
+  }
+
+  void _writeNamespaceCombinators(List<NamespaceCombinator> elements) {
+    _writeElements('combinators', elements, _writeNamespaceCombinator);
+  }
+
+  void _writeNode(AstNode node) {
+    buffer.write(indent);
+    node.accept(
+      _createAstPrinter(),
+    );
+  }
+
+  void _writeNonSyntheticElement(Element e) {
+    if (withNonSynthetic) {
+      _writeElementReference('nonSynthetic', e.nonSynthetic);
+    }
+  }
+
+  void _writeParameterElement(ParameterElement e) {
+    _writeIndentedLine(() {
+      if (e.isRequiredPositional) {
+        buffer.write('requiredPositional ');
+      } else if (e.isOptionalPositional) {
+        buffer.write('optionalPositional ');
+      } else if (e.isRequiredNamed) {
+        buffer.write('requiredNamed ');
+      } else if (e.isOptionalNamed) {
+        buffer.write('optionalNamed ');
+      }
+
+      _writeIf(e.isConst, 'const ');
+      _writeIf(e.isCovariant, 'covariant ');
+      _writeIf(e.isFinal, 'final ');
+
+      if (e is FieldFormalParameterElement) {
+        buffer.write('this.');
+      } else if (e is SuperFormalParameterElement) {
+        buffer.write('super.');
+      }
+
+      _writeName(e);
+    });
+
+    _withIndent(() {
+      _writeType(e.type, name: 'type');
+      _writeMetadata(e);
+      _writeCodeRange(e);
+      _writeTypeParameterElements(e.typeParameters);
+      _writeParameterElements(e.parameters);
+      _writeConstantInitializer(e);
+      _writeNonSyntheticElement(e);
+      _writeFieldFormalParameterField(e);
+      _writeSuperConstructorParameter(e);
+    });
+  }
+
+  void _writeParameterElements(List<ParameterElement> elements) {
+    _writeElements('parameters', elements, _writeParameterElement);
+  }
+
+  void _writePropertyAccessorElement(PropertyAccessorElement e) {
+    PropertyInducingElement variable = e.variable;
+    expect(variable, isNotNull);
+
+    var variableEnclosing = variable.enclosingElement;
+    if (variableEnclosing is CompilationUnitElement) {
+      expect(variableEnclosing.topLevelVariables, contains(variable));
+    } else if (variableEnclosing is ClassElement) {
+      expect(variableEnclosing.fields, contains(variable));
+    }
+
+    if (e.isGetter) {
+      expect(variable.getter, same(e));
+      if (variable.setter != null) {
+        expect(variable.setter!.variable, same(variable));
+      }
+    } else {
+      expect(variable.setter, same(e));
+      if (variable.getter != null) {
+        expect(variable.getter!.variable, same(variable));
+      }
+    }
+
+    if (e.isSynthetic) {
+      expect(e.nameOffset, -1);
+    } else {
+      expect(e.nameOffset, isPositive);
+      _assertNonSyntheticElementSelf(e);
+    }
+
+    _writeIndentedLine(() {
+      _writeIf(e.isSynthetic, 'synthetic ');
+      _writeIf(e.isStatic, 'static ');
+      _writeIf(e.isAbstract, 'abstract ');
+      _writeIf(e.isExternal, 'external ');
+
+      if (e.isGetter) {
+        buffer.write('get ');
+      } else {
+        buffer.write('set ');
+      }
+
+      _writeName(e);
+      _writeBodyModifiers(e);
+    });
+
+    _withIndent(() {
+      _writeDocumentation(e);
+      _writeMetadata(e);
+      _writeCodeRange(e);
+
+      expect(e.typeParameters, isEmpty);
+      _writeParameterElements(e.parameters);
+      _writeType(e.returnType, name: 'returnType');
+      _writeNonSyntheticElement(e);
+    });
+  }
+
+  void _writePropertyInducingElement(PropertyInducingElement e) {
+    DartType type = e.type;
+    expect(type, isNotNull);
+
+    if (e.isSynthetic) {
+      expect(e.nameOffset, -1);
+    } else {
+      expect(e.getter, isNotNull);
+      _assertSyntheticAccessorEnclosing(e, e.getter!);
+
+      if (e.setter != null) {
+        _assertSyntheticAccessorEnclosing(e, e.setter!);
+      }
+
+      expect(e.nameOffset, isPositive);
+      _assertNonSyntheticElementSelf(e);
+    }
+
+    _writeIndentedLine(() {
+      _writeIf(e.isSynthetic, 'synthetic ');
+      _writeIf(e.isStatic, 'static ');
+      _writeIf(e is FieldElementImpl && e.isAbstract, 'abstract ');
+      _writeIf(e is FieldElementImpl && e.isCovariant, 'covariant ');
+      _writeIf(e is FieldElementImpl && e.isExternal, 'external ');
+      _writeIf(e.isLate, 'late ');
+      _writeIf(e.isFinal, 'final ');
+      _writeIf(e.isConst, 'const ');
+      _writeIf(e is FieldElementImpl && e.isEnumConstant, 'enumConstant ');
+
+      _writeName(e);
+    });
+
+    _withIndent(() {
+      _writeDocumentation(e);
+      _writeMetadata(e);
+      _writeCodeRange(e);
+      _writeTypeInferenceError(e);
+      _writeType(e.type, name: 'type');
+      _writeConstantInitializer(e);
+      _writeNonSyntheticElement(e);
+    });
+  }
+
+  void _writeSuperConstructorParameter(ParameterElement e) {
+    if (e is SuperFormalParameterElement) {
+      var superParameter = e.superConstructorParameter;
+      if (superParameter != null) {
+        _writeElementReference('superConstructorParameter', superParameter);
+      } else {
+        _writelnWithIndent('superConstructorParameter: <null>');
+      }
+    }
+  }
+
+  void _writeType(DartType type, {String? name}) {
+    var typeStr = _typeStr(type);
+    if (name != null) {
+      _writelnWithIndent('$name: $typeStr');
+    } else {
+      _writelnWithIndent('$typeStr');
+    }
+
+    var alias = type.alias;
+    if (alias != null) {
+      _withIndent(() {
+        _createAstPrinter().writeElement('aliasElement', alias.element);
+
+        _writeElements<DartType>(
+          'aliasArguments',
+          alias.typeArguments,
+          _writeType,
+        );
+      });
+    }
+  }
+
+  void _writeTypeAliasElement(TypeAliasElement e) {
+    e as TypeAliasElementImpl;
+
+    _writeIndentedLine(() {
+      _writeIf(e.isFunctionTypeAliasBased, 'functionTypeAliasBased ');
+      _writeIf(!e.isSimplyBounded, 'notSimplyBounded ');
+      _writeName(e);
+    });
+
+    _withIndent(() {
+      _writeDocumentation(e);
+      _writeMetadata(e);
+      _writeCodeRange(e);
+      _writeTypeParameterElements(e.typeParameters);
+
+      var aliasedType = e.aliasedType;
+      _writeType(aliasedType, name: 'aliasedType');
+      // TODO(scheglov) https://github.com/dart-lang/sdk/issues/44629
+      // TODO(scheglov) Remove it when we stop providing it everywhere.
+      if (aliasedType is FunctionType) {
+        expect(aliasedType.element, isNull);
+      }
+
+      var aliasedElement = e.aliasedElement;
+      if (aliasedElement is GenericFunctionTypeElementImpl) {
+        _writelnWithIndent('aliasedElement: GenericFunctionTypeElement');
+        _withIndent(() {
+          _writeTypeParameterElements(aliasedElement.typeParameters);
+          _writeParameterElements(aliasedElement.parameters);
+          _writeType(aliasedElement.returnType, name: 'returnType');
+        });
+      }
+    });
+
+    _assertNonSyntheticElementSelf(e);
+  }
+
+  void _writeTypeInferenceError(Element e) {
+    TopLevelInferenceError? inferenceError;
+    if (e is MethodElementImpl) {
+      inferenceError = e.typeInferenceError;
+    } else if (e is PropertyInducingElementImpl) {
+      inferenceError = e.typeInferenceError;
+    }
+
+    if (inferenceError != null) {
+      String kindName = inferenceError.kind.toString();
+      if (kindName.startsWith('TopLevelInferenceErrorKind.')) {
+        kindName = kindName.substring('TopLevelInferenceErrorKind.'.length);
+      }
+      _writelnWithIndent('typeInferenceError: $kindName');
+    }
+  }
+
+  void _writeTypeParameterElement(TypeParameterElement e) {
+    e as TypeParameterElementImpl;
+
+    _writeIndentedLine(() {
+      buffer.write('${e.variance} ');
+      _writeName(e);
+    });
+
+    _withIndent(() {
+      _writeCodeRange(e);
+
+      var bound = e.bound;
+      if (bound != null) {
+        _writeType(bound, name: 'bound');
+      }
+
+      var defaultType = e.defaultType;
+      if (defaultType != null) {
+        _writeType(defaultType, name: 'defaultType');
+      }
+
+      _writeMetadata(e);
+    });
+
+    _assertNonSyntheticElementSelf(e);
+  }
+
+  void _writeTypeParameterElements(List<TypeParameterElement> elements) {
+    _writeElements('typeParameters', elements, _writeTypeParameterElement);
+  }
+
+  void _writeUnitElement(CompilationUnitElement e) {
+    _writeElements('classes', e.classes, _writeClassElement);
+    _writeElements('enums', e.enums, _writeClassElement);
+    _writeElements('extensions', e.extensions, _writeExtensionElement);
+    _writeElements('mixins', e.mixins, _writeClassElement);
+    _writeElements('typeAliases', e.typeAliases, _writeTypeAliasElement);
+    _writeElements(
+      'topLevelVariables',
+      e.topLevelVariables,
+      _writePropertyInducingElement,
+    );
+    _writeElements(
+      'accessors',
+      e.accessors,
+      _writePropertyAccessorElement,
+    );
+    _writeElements('functions', e.functions, _writeFunctionElement);
+  }
+
+  void _writeUri(Source? source) {
+    if (source != null) {
+      Uri uri = source.uri;
+      String uriStr = uri.toString();
+      if (uri.isScheme('file')) {
+        uriStr = uri.pathSegments.last;
+      }
+      buffer.write('$uriStr');
+    } else {
+      buffer.write('<unresolved>');
+    }
+  }
 }
 
 class _Replacement {
   final int offset;
   final int end;
   final String text;
+
   _Replacement(this.offset, this.end, this.text);
 }

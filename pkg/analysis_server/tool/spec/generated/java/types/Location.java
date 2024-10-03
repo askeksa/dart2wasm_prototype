@@ -1,17 +1,9 @@
 /*
- * Copyright (c) 2015, the Dart project authors.
+ * Copyright (c) 2019, the Dart project authors. Please see the AUTHORS file
+ * for details. All rights reserved. Use of this source code is governed by a
+ * BSD-style license that can be found in the LICENSE file.
  *
- * Licensed under the Eclipse Public License v1.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.eclipse.org/legal/epl-v10.html
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the License
- * is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
- * or implied. See the License for the specific language governing permissions and limitations under
- * the License.
- *
- * This file has been automatically generated.  Please do not edit it manually.
+ * This file has been automatically generated. Please do not edit it manually.
  * To regenerate the file, use the script "pkg/analysis_server/tool/spec/generate_files".
  */
 package org.dartlang.analysis.server.protocol;
@@ -69,14 +61,26 @@ public class Location {
   private final int startColumn;
 
   /**
+   * The one-based index of the line containing the character immediately following the range.
+   */
+  private final Integer endLine;
+
+  /**
+   * The one-based index of the column containing the character immediately following the range.
+   */
+  private final Integer endColumn;
+
+  /**
    * Constructor for {@link Location}.
    */
-  public Location(String file, int offset, int length, int startLine, int startColumn) {
+  public Location(String file, int offset, int length, int startLine, int startColumn, Integer endLine, Integer endColumn) {
     this.file = file;
     this.offset = offset;
     this.length = length;
     this.startLine = startLine;
     this.startColumn = startColumn;
+    this.endLine = endLine;
+    this.endColumn = endColumn;
   }
 
   @Override
@@ -88,7 +92,9 @@ public class Location {
         other.offset == offset &&
         other.length == length &&
         other.startLine == startLine &&
-        other.startColumn == startColumn;
+        other.startColumn == startColumn &&
+        ObjectUtilities.equals(other.endLine, endLine) &&
+        ObjectUtilities.equals(other.endColumn, endColumn);
     }
     return false;
   }
@@ -99,7 +105,9 @@ public class Location {
     int length = jsonObject.get("length").getAsInt();
     int startLine = jsonObject.get("startLine").getAsInt();
     int startColumn = jsonObject.get("startColumn").getAsInt();
-    return new Location(file, offset, length, startLine, startColumn);
+    Integer endLine = jsonObject.get("endLine") == null ? null : jsonObject.get("endLine").getAsInt();
+    Integer endColumn = jsonObject.get("endColumn") == null ? null : jsonObject.get("endColumn").getAsInt();
+    return new Location(file, offset, length, startLine, startColumn, endLine, endColumn);
   }
 
   public static List<Location> fromJsonArray(JsonArray jsonArray) {
@@ -112,6 +120,20 @@ public class Location {
       list.add(fromJson(iterator.next().getAsJsonObject()));
     }
     return list;
+  }
+
+  /**
+   * The one-based index of the column containing the character immediately following the range.
+   */
+  public Integer getEndColumn() {
+    return endColumn;
+  }
+
+  /**
+   * The one-based index of the line containing the character immediately following the range.
+   */
+  public Integer getEndLine() {
+    return endLine;
   }
 
   /**
@@ -157,6 +179,8 @@ public class Location {
     builder.append(length);
     builder.append(startLine);
     builder.append(startColumn);
+    builder.append(endLine);
+    builder.append(endColumn);
     return builder.toHashCode();
   }
 
@@ -167,6 +191,12 @@ public class Location {
     jsonObject.addProperty("length", length);
     jsonObject.addProperty("startLine", startLine);
     jsonObject.addProperty("startColumn", startColumn);
+    if (endLine != null) {
+      jsonObject.addProperty("endLine", endLine);
+    }
+    if (endColumn != null) {
+      jsonObject.addProperty("endColumn", endColumn);
+    }
     return jsonObject;
   }
 
@@ -183,7 +213,11 @@ public class Location {
     builder.append("startLine=");
     builder.append(startLine + ", ");
     builder.append("startColumn=");
-    builder.append(startColumn);
+    builder.append(startColumn + ", ");
+    builder.append("endLine=");
+    builder.append(endLine + ", ");
+    builder.append("endColumn=");
+    builder.append(endColumn);
     builder.append("]");
     return builder.toString();
   }
